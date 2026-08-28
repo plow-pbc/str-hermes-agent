@@ -1,0 +1,11 @@
+# Allowlist, because the build context is the whole repo and the repo holds
+# verbatim guest conversations. `_raw/` carries names, phone numbers and
+# arrival dates; `.e2e-vault/` is a full copy of the same after a test run.
+# Both are gitignored, which keeps them out of history but not out of a build
+# context — every `docker compose build` would otherwise hand the daemon the
+# lot, and any later `COPY .` would bake it into a layer.
+#
+# The Dockerfile copies exactly one file. Deny everything, then name it.
+*
+!Dockerfile
+!docker/cont-init.d/03-link-wiki-skills.sh

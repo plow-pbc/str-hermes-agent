@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# Drive wiki-ingest to completion over the whole raw cache.
+#
+# A single `hermes chat` turn self-bounds: the bootstrap consumed 14 of 235
+# conversations, reported success, and stopped. Nothing looped. So this loops,
+# and — the part that matters — asserts coverage from the manifest between
+# rounds instead of trusting the turn's own account of what it did.
+#
+#   ./bin/ingest-all <vault>
+set -uo pipefail
+
+# The runtime vault, not a relative path into the checkout — there is no vault
+# there anymore. An operator run with no argument should reach the real one.
+VAULT="${1:-$HOME/hermes-vault}"
+# Conversations per agent turn. Small enough that one turn finishes, large
+# enough that a full corpus does not need hundreds of rounds.
+BATCH=10
+
+
+# One completion seam, two callers. `bin/nightly.sh` runs INSIDE the container
+# (no docker socket, and $VAULT is already a container path); an operator runs
+# this from the host. Previously nightly skipped this script entirely and did a
+# single `hermes chat` turn — the exact shape the header above documents as
+# self-bounding at 14 of 235 conversations. So detect the context instead of
+# leaving the loop host-only and letting production quietly under-ingest.
+# Keyed on the bind mount compose.yml guarantees, not on `command -v hermes`:
+# installing the Hermes CLI on the host would otherwise silently flip an
+# operator run into container mode and hand the agent a host-relative vault
+# path. Absent marker => host => docker, which is the safe direction.
+if [ -d /opt/data/repo ]; then
+  CVAULT="$VAULT"
+  turn() { hermes chat -q "$1"; }
+else
+  # A host run brings its own vault in, at the one container path a vault ever
+  # has. Only `vault/` is mounted now, not the checkout around it (see
+  # compose.yml), so a container path derived from the host one no longer holds
+  # for anything but production. Mounting the caller's vault at the canonical
+  # target instead covers both, and — because a `-v` at compose's own target
+  # replaces that mount rather than joining it — a run on some other vault
+  # cannot see production at all. The manifest's absolute keys are unchanged.
+  VAULT_ABS="$(cd "$VAULT" && pwd -P)" \
+    || { echo "ingest-all: no vault at $VAULT" >&2; exit 1; }
+  CVAULT="/opt/data/repo/vault"
+  # --entrypoint bash, and therefore --user, for the reason test-wiki documents
+  # at length: without it the image's own entrypoint boots s6, s6 boots a
+  # gateway, and this throwaway container joins the live agent's chat alongside
+  # it — answering guests twice and, on exit, posting a shutdown notice into the
+  # owners' channel. That shape ran here for months; agent-mgr now refuses
+  # `compose run` that omits the flag, which is what surfaced it.
+  #
+  # Overriding the entrypoint also skips cont-init, and one of those scripts is
+  # what links the wiki skills this turn needs — so it is run explicitly, and
+  # fatally: a turn without them ingests nothing and looks like an empty round.
+  #
+  # --user is the other half of skipping s6, which would otherwise have remapped
+  # the hermes user and chowned the data. Without it this runs as root and
+  # leaves root-owned files in a vault the gateway must be able to rewrite.
+  #
+  # The prompt travels as an environment variable rather than inside -c, so a
+  # conversation containing a quote cannot end the shell string early.
+  turn() {
+    agent-mgr compose str run --rm --no-deps -T \
+      -v "$VAULT_ABS:$CVAULT" --user "$(id -u):$(id -g)" -e INGEST_PROMPT="$1" \
+      --entrypoint bash hermes \
+      -c '/etc/cont-init.d/03-link-wiki-skills.sh >&2 || exit 1; exec hermes chat -q "$INGEST_PROMPT"'
+  }
+fi
+
+# Conversations in scope, and which the manifest already records.
+remaining() {
+  python3 - "$VAULT" <<'PY'
+import hashlib, json, pathlib, sys
+vault = pathlib.Path(sys.argv[1])
+raw_dir = vault / "_raw/hostex"
+# glob on a missing directory returns empty without raising, so a wrong --vault
+# or a fetch that wrote nowhere would print nothing — which the caller reads as
+# "no work left" and exits 0 having ingested nothing. Silence and completion
+# must not be the same signal.
+if not raw_dir.is_dir():
+    sys.exit(f"ingest-all: no raw cache at {raw_dir}")
+# wiki-ingest moves a conversation here once it has pages. Counting it keeps the
+# coverage assertion meaningful: scanning only the un-archived directory means
+# that after a successful round the scope is empty by construction, so the loop
+# would report "manifest covers everything in scope" whether or not it did.
+# Every staged conversation, wherever it now sits. wiki-ingest archives a file
+# once it has pages, and it does not use one location: a single run left ten in
+# `_raw/_archived/hostex/` and twenty in `_raw/hostex/_archived/`. Globbing the
+# two paths this used to name found the first and missed the second, so those
+# twenty were outside the scope entirely — and a conversation the scope cannot
+# see is one the coverage assertion silently passes, which is the exact hole
+# the assertion exists to close. Walking `_raw/` needs no list of the layouts
+# the skill might choose.
+raw = sorted((vault / "_raw").rglob("*.md"))
+mf = vault / ".manifest.json"
+# Keyed by the recorded digest, not just basename. hostex-raw rewrites a
+# raw file in place when new messages arrive — same basename, new hash — so a
+# basename-only check marked it done forever and every guest reply after the
+# first ingest was silently dropped. That fails in the quietest possible way:
+# the run reports success, the pages just stop tracking live conversations.
+#
+# Manifest keys are container paths; matching on basename is what keeps the
+# manifest portable across checkouts.
+#
+# Every hash recorded under a basename, not the last one written. One
+# conversation holds several manifest entries — wiki-ingest records the copy it
+# archives under the archived path, and a later refetch records the live copy
+# under its own — so a basename maps to more than one entry, with different
+# hashes. Collapsing them into a single value made that arbitrary: the entry
+# latest in the file won, which was the stale archived one, while the file side
+# below deliberately picks the live copy. The two never matched, so the
+# conversation was queued forever — each round ingested it, recorded it, and
+# changed nothing the query could see, until the stall guard aborted the run
+# and the night lost its digest — twice, 2026-08-23 and -24. Asking whether
+# this copy's hash is among the recorded ones needs no rule for which wins.
+#
+# Direct index, no fallbacks. `obsidian-wiki` is pinned in the Dockerfile, and
+# the two fallbacks this replaces each calcified a silent failure: a missing
+# `sources` key read as an empty manifest and re-ingested the whole corpus,
+# appending every fact a second time; a missing `content_hash` marked that
+# conversation complete forever and dropped every later reply. A KeyError is
+# loud, names the key, and stops the run before either happens.
+done = {}
+if mf.exists():
+    manifest = json.loads(mf.read_text())
+    for k, v in manifest["sources"].items():
+        done.setdefault(pathlib.Path(k).name, set()).add(v["content_hash"])
+
+
+def current_hash(path):
+    """sha256 over the file's bytes — what wiki-ingest records in the manifest.
+
+    The raw file's own digest is called `payload_hash` and is deliberately not
+    this. They were both `content_hash` once, which cost this loop three
+    separate failures — comparing the two, comparing one while the agent wrote
+    the other, then re-queueing settled conversations. Distinct names make the
+    fourth variation unavailable, so this reads one value and compares it.
+    """
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# Prefer the un-archived copy when a name is in both: same conversation, and
+# feeding it twice in one batch inflates the scope and wastes a turn on it.
+# Live copy first, then the most recently written. hostex-raw refreshes a
+# conversation into `_raw/hostex/` and leaves whatever was archived where it
+# was, so the same name routinely exists twice — and wiki-ingest archives into
+# either of two layouts, so both copies can end up archived with different
+# bytes. Choosing by sort order then picks by path spelling, which is to say
+# arbitrarily, and feeding the stale one re-derives facts the newer copy has
+# already superseded.
+def freshness(path):
+    return ("_archived" not in path.parts, path.stat().st_mtime)
+
+
+by_name = {}
+for f in raw:
+    if f.name not in by_name or freshness(f) > freshness(by_name[f.name]):
+        by_name[f.name] = f
+
+# Paths relative to the vault, not basenames. The feed loop turns each entry
+# into a path for the agent, and an archived-but-unrecorded conversation — the
+# exact under-recording this script exists to catch — would otherwise be fed
+# `_raw/hostex/<id>.md`, which is not where it is. The turn processes nothing,
+# the stall guard fires, and the message misdiagnoses the cause.
+todo = [
+    str(f.relative_to(vault))
+    for name, f in sorted(by_name.items())
+    if current_hash(f) not in done.get(name, ())
+]
+print("\n".join(todo))
+PY
+}
+
+# `pages_produced` written from the pages, not from the turn's account of what
+# it wrote. The field was LLM-authored under one prompt sentence, and three
+# consecutive commits fixed it by hand (#94). Deriving makes it definitionally
+# equal to the citations, so the vault's equality assertion can no longer fail
+# for a bookkeeping reason — only for the one that matters, a page citing a
+# conversation the manifest never recorded.
+#
+# Once, on the way out. Nothing in remaining() reads this field, so deriving
+# between rounds would change nothing the scope query can see; running it after
+# the loop covers the zero-round exit too, which is the state every manifest
+# this ships to is already in.
+#
+# It also disarms a record wiki-ingest mints on its own. Its skill archives
+# under a numeric suffix when the name is taken, so a conversation whose guest
+# replies after it was archived once lands as `<id>-1.md` — a basename that is
+# not a conversation id, fed as if it were a new one, carrying the live
+# record's pages. No page can cite that stem, so derivation empties it.
+derive_pages_produced() {
+  python3 - "$VAULT" <<'PY'
+import json, os, pathlib, re, sys
+
+vault = pathlib.Path(sys.argv[1])
+manifest = vault / ".manifest.json"
+if not manifest.exists():
+    sys.exit(f"ingest-all: no manifest at {manifest}")
+
+# The conversation id out of a citation URL, matched with no YAML shape around
+# it: the extraction contract copies the raw file's `sources:` verbatim and that
+# file writes it flow-style, which a block-sequence pattern would miss entirely.
+# `[\w-]+` stops the id capturing a trailing `]` or comma.
+CITED = re.compile(r"hostex\.io/app/conversations/([\w-]+)")
+
+# Both categories the extraction contract writes. Scoping this to `operations/`
+# once left `people/key-people.md` unexamined with the suite green.
+pages = sorted((vault / "operations").glob("*.md")) + sorted(
+    (vault / "people").glob("*.md")
+)
+
+produced: dict[str, list[str]] = {}
+for page in pages:
+    # Frontmatter only. A URL in the body is the append-instead-of-insert defect
+    # the contract already forbids, and counting it here would record the
+    # malformed page as sound provenance.
+    parts = page.read_text().split("---", 2)
+    if len(parts) < 3:
+        sys.exit(f"ingest-all: {page.name} has no frontmatter to read sources from")
+    for conversation in CITED.findall(parts[1]):
+        produced.setdefault(conversation, []).append(f"{page.parent.name}/{page.name}")
+
+# Direct index, no fallback: a missing `sources` key is the schema moving, and
+# reading it as an empty manifest is how the whole corpus once re-ingested.
+data = json.loads(manifest.read_text())
+for key, entry in data["sources"].items():
+    entry["pages_produced"] = sorted(produced.get(pathlib.Path(key).stem, []))
+
+# indent=2 with a trailing newline is what wiki-ingest writes, so a run that
+# derives no change leaves the file byte-identical.
+#
+# Through a temp file and a rename, the way bin/hostex-poll.py saves its cursor.
+# This is the pipeline's whole memory of what it has already distilled: truncate
+# it and the next run raises reading it, and the repair is re-ingesting 238
+# conversations into pages that already hold their facts. A fixed tmp name is
+# safe for the reason it is safe there — the nightly never runs two at once.
+tmp = manifest.with_name(manifest.name + ".tmp")
+tmp.write_text(json.dumps(data, indent=2) + "\n")
+os.replace(tmp, manifest)
+PY
+}
+
+# Fail closed. remaining() is a python heredoc, and a crash in it — unreadable
+# manifest, malformed JSON — printed nothing, which the caller below reads as
+# "no work left" and exits 0 having ingested nothing. Silence and completion
+# must not be the same signal on the query the whole loop is built on.
+# Assigns to $SCOPE rather than printing it: `exit` inside a command
+# substitution only leaves the subshell, so a `$(scope_or_die)` form would have
+# reinstated the same fail-open it exists to remove.
+SCOPE=""
+refresh_scope() {
+  if ! SCOPE="$(remaining)"; then
+    echo "ingest-all: FATAL — cannot determine what remains (see the error above)." >&2
+    exit 1
+  fi
+}
+
+refresh_scope
+TOTAL_SCOPE=$(printf '%s\n' "$SCOPE" | grep -c .)
+echo "ingest-all: $TOTAL_SCOPE conversation(s) not yet in the manifest"
+
+# Bounded on rounds as well as stalls. The stall guard catches "stuck" — two
+# consecutive rounds recording nothing — but not "grinding": an agent that
+# records one file per round resets `stalls` every time, so a 235-conversation
+# backlog could drive 235 sequential turns inside a cron job that has no
+# timeout of its own. Generous enough that a healthy run never reaches it.
+MAX_ROUNDS=$(( (TOTAL_SCOPE / BATCH) * 2 + 5 ))
+
+round=0
+stalls=0
+while :; do
+  refresh_scope
+  # Straight from $SCOPE, which refresh_scope just set. It used to round-trip
+  # through /tmp/ingest-todo.txt, and that write was the one unchecked
+  # operation in a script that otherwise fails closed on every query: `set -e`
+  # is off, so a failed redirect — wrong uid, full disk, a root-owned file from
+  # an earlier run — left the PREVIOUS run's list in place and `before` counted
+  # that. Observed: "65 conversation(s) not yet in the manifest" immediately
+  # followed by "round 1/17 — 75 remaining", the loop then feeding a batch
+  # chosen from stale data while the round accounting looked healthy.
+  #
+  # printf '%s\n', not '%s': `read` discards a final line with no newline
+  # after it, so the last conversation of every batch was silently dropped —
+  # and a round with exactly one left fed nothing, stalled, and aborted the run.
+  before=$(printf '%s\n' "$SCOPE" | grep -c .)
+  [ "$before" -eq 0 ] && { echo "ingest-all: manifest covers everything in scope"; break; }
+
+  round=$((round + 1))
+  if [ "$round" -gt "$MAX_ROUNDS" ]; then
+    echo "ingest-all: FATAL — $MAX_ROUNDS rounds for $TOTAL_SCOPE conversation(s) and $before still remain. The turn is recording far less per round than the batch size; stopping rather than running all night." >&2
+    exit 1
+  fi
+  echo "ingest-all: round $round/$MAX_ROUNDS — $before remaining, feeding $BATCH"
+
+  files=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    files+="$f, "
+  done < <(printf '%s\n' "$SCOPE" | head -n "$BATCH")
+
+  turn "Use the wiki-ingest skill on the vault at ${CVAULT}. Process exactly these files and no others: ${files%, }. Any of these you have ingested before is a conversation whose guest has since replied — update that existing page rather than creating a second one. Follow ${CVAULT}/AGENTS.md including its worked examples and calibration note. Record every file you process in the manifest, including ones that yield no page." \
+    > "/tmp/ingest-round-$round.log" 2>&1
+  rc=$?
+  # A failed turn stops the run. Acknowledging it and looping meant a retry
+  # could rewrite a page the manifest never recorded — an unmanifested partial
+  # that the next round then re-ingests, appending its facts twice.
+  if [ "$rc" -ne 0 ]; then
+    echo "ingest-all: FATAL — the agent turn failed (rc=$rc) in round $round; see /tmp/ingest-round-$round.log. The vault may hold a page this round wrote but did not record in the manifest — inspect $VAULT/operations/*.md and $VAULT/people/*.md against $VAULT/.manifest.json before re-running, or the next run re-ingests it and appends its facts twice." >&2
+    exit 1
+  fi
+
+  refresh_scope
+  after=$(printf '%s\n' "$SCOPE" | grep -c .)
+  echo "ingest-all: round $round done — $after remaining, $(ls "$VAULT"/operations/*.md 2>/dev/null | wc -l | tr -d ' ') pages"
+
+  # A round that advances nothing is the failure mode this script exists to
+  # catch: without it, the loop would spin forever reporting success.
+  if [ "$after" -eq "$before" ]; then
+    stalls=$((stalls + 1))
+    echo "ingest-all: WARNING round $round recorded no new sources (stall $stalls/2) — see /tmp/ingest-round-$round.log"
+    [ "$stalls" -ge 2 ] && {
+      echo "ingest-all: FATAL — two consecutive rounds made no progress with $after conversations left." >&2
+      exit 1
+    }
+  else
+    stalls=0
+  fi
+done
+
+if ! derive_pages_produced; then
+  echo "ingest-all: FATAL — could not derive pages_produced (see the error above); the manifest is as the last turn left it." >&2
+  exit 1
+fi
+
+echo "ingest-all: $(ls "$VAULT"/operations/*.md 2>/dev/null | wc -l | tr -d ' ') pages across $round round(s)"

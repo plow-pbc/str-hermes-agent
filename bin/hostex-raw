@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""Fetch Hostex conversations into a vault's _raw/hostex/ staging directory.
+
+Pure fetch, no LLM. Distillation into wiki pages is obsidian-wiki's job; this
+only stages source documents with the frontmatter its ingest path reads.
+
+Uses the Hostex REST API rather than the MCP tools because this runs from a
+shell script, not an agent turn.
+
+**No progress state.** The cache is the cursor: every raw file records the
+`last_message_at` it was built from, and a conversation is re-fetched when the
+listing disagrees with it. Reads consult the whole `_raw/` tree, since
+wiki-ingest archives a conversation once it has pages and does not settle on one
+layout; writes always land in `_raw/hostex/`, so a conversation that has changed
+is queued for re-ingestion.
+
+There is no watermark to advance past a conversation the run never read, so a
+run that fails, is interrupted, or declines to write is free — the next run
+recomputes what is missing from the files on disk.
+
+Two independent change signals, deliberately: `last_message_at` gates the
+network call, `payload_hash` gates re-ingestion. A stamp that moves without the
+body changing is fetched and then discarded — nothing is written, because the
+file's bytes are themselves an input to ingest's already-processed check, and a
+rewrite that changes nothing but the stamp would still re-queue the
+conversation for an ingest turn. The cost is that such a conversation is
+re-fetched every run until a real message arrives.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+BASE = "https://api.hostex.io/v3"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse 30x instead of following it.
+
+    urllib replays request headers to the redirect target, so a redirect off
+    api.hostex.io would hand HOSTEX_TOKEN to whatever it points at. Verified
+    against a local server that 302s elsewhere: as an ordinary header the token
+    arrived at the second origin.
+
+    Stripping the header instead also stops the leak, but it lets the redirect
+    proceed and fail authentication somewhere else. Taken from
+    `bin/hostex-poll.py`, which got here first — one answer to this, not two.
+    These scripts want a shared Hostex client, but that touches a script about to
+    be scheduled in production, so not here.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, f"refusing redirect to {newurl}", headers, fp
+        )
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+PAGE = 100
+# Hostex asks for a one-second pause every 60 requests to stay clear of its bot
+# detection. Only the first run over an empty cache gets near that; steady state
+# is a handful of calls.
+PACE_EVERY = 60
+
+
+def read_token() -> str:
+    """Resolve the token from whichever env file exists here.
+
+    Two contexts, unlike `bin/hostex-poll.py`, which indexes `HERMES_HOME`
+    directly because cron only ever runs it in-container. This one is also
+    documented as a host command, where that variable is unset — so the home
+    fallback stays and the literal `/opt/data/.env` goes: the image sets
+    HERMES_HOME to exactly that, so the literal was only reachable in a
+    container that had lost it, which is the "silently resolving somewhere the
+    enable script does not look" case the poller's docstring rejects.
+    """
+    candidates = [
+        Path(os.environ["HERMES_HOME"]) / ".env" if os.environ.get("HERMES_HOME") else None,
+        Path.home() / ".hermes" / ".env",
+    ]
+    for env in candidates:
+        if env and env.exists():
+            for line in env.read_text().splitlines():
+                if line.startswith("HOSTEX_TOKEN="):
+                    return line.split("=", 1)[1].strip()
+    sys.exit("HOSTEX_TOKEN not found in $HERMES_HOME/.env or ~/.hermes/.env")
+
+
+def api_get(path: str, tok: str, **params: object) -> dict:
+    url = f"{BASE}{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    # Hostex 403s the default Python-urllib User-Agent; curl with the same
+    # token succeeds. Send an explicit one.
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Hostex-Access-Token": tok,
+            "User-Agent": "hostex-raw/1.0",
+            "Accept": "application/json",
+        },
+    )
+    # No retry loop. A transient failure aborts the run loudly and costs
+    # nothing: there is no progress to lose, so the next run resumes exactly
+    # where this one stopped.
+    with _OPENER.open(req, timeout=30) as resp:
+        return json.loads(resp.read().decode())
+
+
+def slugify(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+
+
+def list_conversations(tok: str) -> list[dict]:
+    """Page through every conversation, deduplicating by id.
+
+    The whole corpus, every run — `GET /conversations` takes only `offset` and
+    `limit`, so there is no server-side time filter to ask for. At four pages
+    for this corpus that is the cheap half of the run; the detail calls below
+    are where cost actually lives.
+
+    Ordering is *almost* newest-first and must not be relied on. Measured
+    2026-07-30 over 366 conversations: 363 sort strictly descending and the
+    final three do not (stamps 2023-11-29, 2024-11-12, 2025-08-17, in that
+    order). The anomaly is deterministic across repeated sweeps and has no
+    visible cause — all three lack `property_title`, but so do 128 conversations
+    that sort correctly, and the three are field-for-field identical to 117 of
+    them. So stopping early at the first already-cached conversation would drop
+    them silently and permanently. Read every page.
+
+    Deduplicating by id keeps mid-pagination drift harmless: the list mutates
+    while we page, and a guest replying pushes their conversation to page 1,
+    shifting everything behind it down a slot.
+    """
+    seen: dict[str, dict] = {}
+    offset = 0
+    while True:
+        batch = api_get("/conversations", tok, offset=offset, limit=PAGE)["data"]["conversations"]
+        for conv in batch:
+            prior = seen.get(conv["id"])
+            if prior is None or conv["last_message_at"] > prior["last_message_at"]:
+                seen[conv["id"]] = conv
+        if len(batch) < PAGE:
+            return list(seen.values())
+        offset += PAGE
+
+
+def render(conv: dict, messages: list[dict]) -> tuple[str, str]:
+    # Indexed, then defaulted — the same split the listing draws for
+    # `property_title`. An absent key is the field renamed and raises: a
+    # fallback there writes "unknown" and a blank timestamp into the staged
+    # body, settles the stamp and hash on top of it, and every later run reads
+    # the degraded file as processed.
+    #
+    # The default is for a present-but-falsy value. Not measured for these two
+    # fields — unlike the 131-of-366 empty `property_title` — but `content`
+    # arrives empty (2 of 235 photo-only openers), so a falsy message field is
+    # not hypothetical, and rendering one as `**None**` would settle just the
+    # same. A corpus-wide null would still settle as `**unknown** ()` and exit 0;
+    # that is the residual hole here, unchanged by indexing.
+    body = "\n\n".join(
+        f"**{m['sender_role'] or 'unknown'}** ({m['created_at'] or ''}):\n"
+        f"{(m['content'] or '').strip()}"
+        for m in messages
+    )
+    digest = "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+    cid = conv["id"]
+    front = (
+        "---\n"
+        "capture_source: hostex\n"
+        f'conversation_id: "{cid}"\n'
+        f"property: {slugify(conv['property_title'])}\n"
+        f"last_message_at: {conv['last_message_at']}\n"
+        f"payload_hash: {digest}\n"
+        f"sources: [https://hostex.io/app/conversations/{cid}]\n"
+        "---\n\n"
+        f"# Conversation {cid} — {conv['property_title']}\n\n"
+    )
+    return front + body + "\n", digest
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Rename is atomic, so an existing file is always a complete one.
+
+    Resumability depends on this: a truncated file from a mid-write crash would
+    otherwise 'exist', carry a stamp, and never be re-fetched.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
+def field(text: str, key: str) -> str | None:
+    """Read one frontmatter value out of a cached raw file's text."""
+    prefix = f"{key}: "
+    for line in text.splitlines()[1:]:
+        if line == "---":
+            break
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip()
+    return None
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--vault", required=True, type=Path)
+    args = ap.parse_args()
+
+    raw_dir = args.vault / "_raw" / "hostex"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    # wiki-ingest moves a conversation out of raw_dir once it has been distilled
+    # into pages, and it does not settle on one layout — a single run produced
+    # both `_raw/_archived/hostex/` and `_raw/hostex/_archived/`. Reading only
+    # raw_dir makes every already-ingested conversation look uncached, so the
+    # whole corpus is re-fetched nightly and written back beside its archived
+    # copy. Found by running the real ingest in the container: nothing here
+    # archives anything, so no amount of stubbing the API would have shown it.
+    raw_root = args.vault / "_raw"
+    # One walk into a name -> path index, not a search per conversation. Beyond
+    # the cost: a glob built from `conv["id"]` treats the API's value as a
+    # pattern, so an id containing `*` or `[` matches files that are not it —
+    # the id is checked for path separators, not for glob metacharacters. An
+    # exact dict lookup cannot match the wrong file however strange the id.
+    archived = {}
+    for found in sorted(raw_root.rglob("*.md")):
+        archived.setdefault(found.name, found)
+
+    tok = read_token()
+    conversations = list_conversations(tok)
+
+    fetched = changed = unchanged = attributed = 0
+    # Fetched conversations that came back blank AND had a cache entry. Every
+    # cached file carries text by construction, so these demonstrably LOST text
+    # — the thing that cannot happen naturally.
+    blank_cached: list[str] = []
+    skipped: list[str] = []
+    unsafe: list[str] = []
+    kept: list[str] = []
+
+    for conv in conversations:
+        # The id becomes a filename, and it arrives from the API. Every one of
+        # the 235 in this corpus is an opaque [A-Za-z0-9_-] token, so this has
+        # never fired — but `../../x` would write outside the vault entirely,
+        # and a write that escapes the vault is the one thing
+        # .knightwatch/review-priority.md still blocks a merge on. Refusing is
+        # not a fallback: the conversation is reported and skipped, exactly like
+        # one with no property.
+        if "/" in conv["id"] or conv["id"] in ("", ".", ".."):
+            unsafe.append(conv["id"])
+            continue
+        # Indexed, not `.get`: an absent key is the field being renamed and
+        # should raise, while a present-but-empty one is the steady state below.
+        if not conv["property_title"]:
+            # Skip, don't exit. Refusing to write an unattributed file is right
+            # — the extractor would have to guess the property from prose — but
+            # 131 of 366 conversations have no property, so this is the steady
+            # state, not an error. Reported on stderr, never fatal.
+            skipped.append(conv["id"])
+            continue
+        attributed += 1
+
+        target = raw_dir / f"{conv['id']}.md"
+        # Read from wherever it currently lives, write always to raw_dir: a
+        # conversation whose guest has replied needs re-ingesting, and ingest
+        # only picks up what is in the un-archived directory.
+        cached_at = target if target.exists() else archived.get(f"{conv['id']}.md", target)
+        cached = cached_at.read_text(errors="ignore") if cached_at.exists() else ""
+        # `payload_hash` present, not just the stamp matching. A file written
+        # before that field was renamed still says `content_hash`, and the
+        # stamp check returns before anything is rendered — so it would keep
+        # the old name until a guest happened to reply.
+        #
+        # That matters because the manifest holds its own `content_hash`, a
+        # digest of the whole file, and the ingest agent has written entries by
+        # hand by copying the raw file's line instead: 29 of 234 live entries.
+        # Those never match a whole-file digest, so those conversations
+        # re-ingest every night forever. Renaming the field is what stops the
+        # agent reaching for the wrong line, and it only helps once the file
+        # actually carries the new name. One extra fetch each, once.
+        if (
+            cached
+            and field(cached, "last_message_at") == conv["last_message_at"]
+            and field(cached, "payload_hash") is not None
+        ):
+            unchanged += 1
+            continue
+
+        if fetched and fetched % PACE_EVERY == 0:
+            time.sleep(1)
+        # Direct index, not .get with a fallback — a fallback turns a renamed
+        # field into an ordinary empty response, indistinguishable from a quiet
+        # night, which is how this script once wrote 235 files of nothing.
+        # `lost_text` needs a cached file to compare against, so over an empty
+        # cache these direct indexes — here and on `content` below — are the only
+        # alarm for a break in the detail response. (`lost_attribution` needs no
+        # cache, but it only sees the listing.)
+        messages = api_get(f"/conversations/{conv['id']}", tok)["data"]["messages"]
+        fetched += 1
+
+        # A conversation with no message text is never written — not as a new
+        # file, not over an existing one. Nothing is lost by declining: with no
+        # file, or with the old file's stamp untouched, the next run sees a
+        # mismatch and tries again, so a blank conversation costs a detail call
+        # every run until a guest types — and one whose first message carries no
+        # text (2 of 235 began that way) arrives once a guest says something.
+        if not any(m["content"] and m["content"].strip() for m in messages):
+            kept.append(conv["id"])
+            if cached:
+                blank_cached.append(conv["id"])
+            continue
+
+        text, digest = render(conv, messages)
+        if field(cached, "payload_hash") == digest:
+            # The stamp moved, the payload did not, so do not rewrite the file.
+            # ingest-all's already-processed check reads a whole-file digest —
+            # which it must, because the manifest has two writers and one of them
+            # records exactly that — so a rewrite carrying nothing but a new stamp
+            # would re-queue an unchanged conversation for an ingest turn that can
+            # append its facts to the page a second time.
+            #
+            # Not writing costs a detail call every run until a real message
+            # arrives, since the cached stamp stays behind the listing. One HTTP
+            # request against one agent turn and a duplicated fact in the wiki:
+            # not close.
+            continue
+        changed += 1
+        write_atomic(target, text)
+
+    # Nothing textless is ever written, so this decides only whether to shout,
+    # and it asks WHICH conversations went blank rather than how many. Counting
+    # cannot work: a blank conversation is never written, so it never settles
+    # and is re-fetched every run until a guest types. Those accumulate, so any
+    # threshold is eventually met by nothing but stuck blanks on a quiet night
+    # — taking the chain down nightly, which is what counting was added to
+    # avoid.
+    #
+    # Both terms are needed. A cached conversation coming back blank is the
+    # impossible part — text is how it got written, and text does not leave a
+    # conversation. But one doing so beside a fetch that DID carry text is a
+    # blip on that conversation, not a broken response shape, and going fatal
+    # there takes the chain down for something the next run retries by itself.
+    # So: every conversation fetched came back textless, and at least one of
+    # them had text cached. (Every required field is indexed, so a rename raises
+    # where it is first read rather than reaching here. The one hole is a corpus
+    # of message-less conversations: nothing indexes a message field at all.)
+    lost_text = bool(blank_cached) and len(kept) == fetched
+    # The mirror break, when `property_title` moves and every conversation is
+    # skipped. Sweeping the whole corpus rather than a window is what lets this
+    # go unbounded: 366 conversations and none attributable is a schema break,
+    # not a quiet night.
+    #
+    # Two filters suppress `attributed`, so the exit reports both counts rather
+    # than naming one field. Keying it on `skipped` alone would leave a corpus
+    # that failed entirely on ids exiting 0 with nothing staged, which is the
+    # same silent total failure this guard exists to make loud.
+    lost_attribution = bool(conversations) and attributed == 0
+
+    print(
+        f"hostex-raw: {len(conversations)} conversations, {fetched} fetched, "
+        f"{changed} changed, {unchanged} unchanged, {len(kept)} kept"
+    )
+    if kept:
+        print(
+            f"hostex-raw: declined to write {len(kept)} conversation(s) that "
+            "carried no message text; they are re-fetched next run",
+            file=sys.stderr,
+        )
+    if unsafe:
+        print(
+            f"hostex-raw: REFUSED {len(unsafe)} conversation(s) whose id is not "
+            "a safe filename: " + ", ".join(repr(u) for u in unsafe[:10]),
+            file=sys.stderr,
+        )
+    if skipped:
+        print(
+            f"hostex-raw: SKIPPED {len(skipped)} conversation(s) with no property: "
+            + ", ".join(skipped[:10])
+            + (" …" if len(skipped) > 10 else ""),
+            file=sys.stderr,
+        )
+    # Name the field that moved. The two breaks have different causes and
+    # different fixes, and a message pointing at the wrong one sends the
+    # operator to the wrong place at 3am.
+    if lost_text:
+        sys.exit(
+            f"hostex-raw: FATAL — {len(blank_cached)} conversation(s) came back "
+            "with no message text but had text cached already: "
+            + ", ".join(repr(cid) for cid in blank_cached[:10])
+            + (" …" if len(blank_cached) > 10 else "")
+            + ". Text does not leave a conversation, so the response shape "
+            "changed underneath this: `content` is empty, or the text moved to "
+            "a field this does not read. Nothing was written and no cached text "
+            "was touched, so fixing the field and re-running recovers everything."
+        )
+    if lost_attribution:
+        sys.exit(
+            f"hostex-raw: FATAL — none of {len(conversations)} conversations "
+            f"could be staged: {len(skipped)} carried no `property_title`, "
+            f"{len(unsafe)} had an id that is not a safe filename. Over a full "
+            "corpus sweep that cannot mean a quiet night; read the counts to see "
+            "which field(s) moved. Nothing was written. Fix and re-run."
+        )
+
+
+if __name__ == "__main__":
+    main()

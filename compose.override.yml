@@ -1,0 +1,34 @@
+# What the rentals agent adds to agent-mgr's template. Everything else -- the
+# service, the home mount, the UID/GID guards, the absent ports -- comes from
+# there, and changing any of it belongs in agent-mgr rather than here.
+#
+# Paths come through variables set in agent.env, never `./`: Compose resolves a
+# relative path in an override against the BASE file's directory, which is
+# agent-mgr's checkout, not this repo's.
+services:
+  hermes:
+    build: ${STR_REPO:?the deploy clone this agent builds from}
+    image: ${AGENT_IMAGE:?}
+    # Required by agent-mgr: lib/resolve-guard refuses a service that builds its
+    # image unless pull_policy is `never` or `build`, because the default and
+    # `missing` both PULL when the local tag is absent -- measured upstream with
+    # a marker Dockerfile, not assumed -- and a pulled image would run with this
+    # agent's mounted credentials. `never` rather than `build`: this tag names
+    # only what the build above produces, so no registry copy should ever win.
+    pull_policy: never
+    volumes:
+      # The runtime vault -- a plain directory outside the checkout, and never a
+      # git repository. Read-write because ingest rewrites pages in place and
+      # hostex-raw stages fetched conversations here.
+      - ${STR_VAULT:?}:/opt/data/repo/vault
+      # Hermes cron refuses to run a script outside $HERMES_HOME/scripts, so
+      # bin/ is mounted there rather than copied -- this repo stays the source of
+      # truth for what the scheduler executes.
+      - ${STR_REPO}/bin:/opt/data/scripts:ro
+      # Seam smart-lock MCP server, mounted rather than baked in so the pinned
+      # upstream image stays swappable. Hermes launches it over stdio.
+      - ${STR_REPO}/mcp-seam:/opt/data/mcp-seam:ro
+      # The persona half of the SOUL the nightly rebuilds. A directory rather
+      # than the file, so a deploy fast-forward that replaces the inode does not
+      # leave the container reading the old one.
+      - ${STR_REPO}/runtime:/opt/data/repo/runtime:ro

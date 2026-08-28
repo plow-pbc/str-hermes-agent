@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Rewrite each property hub's `## Operations` list from the pages that exist.
+
+The hub is the only way an agent that starts from a property reaches that
+property's operational facts. The generator writes `operations/` and
+`index.md`; the hub's list was hand-authored in `runtime/vault-seed/` and
+installed over the runtime vault on every deploy — so a page a nightly created
+was reachable from the index and invisible from its own hub, and the
+2026-08-24 deploy reverted a hub that had been corrected in place. Deriving the
+list removes the drift instead of detecting it (#78).
+
+Only the list is generated. Everything a human wrote above `## Operations`, and
+any section after it, is copied through untouched.
+
+    build-hubs <vault>
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+from pathlib import Path
+
+# The heading that opens the generated region. Content is replaced from here to
+# the next `## ` heading, or to end of file.
+OPERATIONS = "## Operations"
+TITLE = re.compile(r"^title: (.+)$", re.M)
+
+
+def title_from(text: str, page: Path) -> str:
+    """The page's own `title:`, which is what the bullet must agree with.
+
+    A page with no title is one the OKF validator already rejects, so a label
+    invented here would hide that behind a hub that reads fine.
+    """
+    match = TITLE.search(text)
+    if not match:
+        sys.exit(f"build-hubs: {page.name} has no `title:` to label its link with")
+    return match.group(1).strip()
+
+
+def title_of(page: Path) -> str:
+    return title_from(page.read_text(), page)
+
+
+def label(page_title: str, hub_title: str, page: Path) -> str:
+    """The page title with the property stripped.
+
+    Every bullet in one hub would otherwise open with the same three words. A
+    page whose title does not carry its hub's is the vault disagreeing with
+    itself about what the property is called; guessing a label there
+    writes a hub that looks correct and is not.
+
+    The whole title plus a space, not a bare prefix. Titles are model-authored
+    and `Cedar Cabinet parking` is a plausible way for one to spell
+    `Cedar Cabin` — it satisfies a prefix test and renders as `Et parking`,
+    which is the silently-wrong hub this refusal exists to prevent. Requiring
+    the separator also catches a title that IS the hub's, leaving no label at
+    all behind a bullet with nothing to click.
+    """
+    prefix = hub_title + " "
+    rest = page_title[len(prefix) :].strip() if page_title.startswith(prefix) else ""
+    if not rest:
+        sys.exit(
+            f"build-hubs: {page.name} is titled {page_title!r}, which does not "
+            f"leave a label after its hub's title {hub_title!r} and a space"
+        )
+    return rest[:1].upper() + rest[1:]
+
+
+def open_hub(dfd: int, hub: Path) -> int:
+    """Open the hub for writing, refusing to follow a link out of the vault.
+
+    The deploy runs this on the HOST, as the operator, over a directory the
+    agent writes — and the gateway stays up during a restore, so a
+    terminal-enabled turn can swap a hub for a relative symlink between the
+    read above and this open. `properties/x.md -> ../.ssh/authorized_keys`
+    resolves to nothing inside the container and to the operator's own
+    authorized_keys on the host, and following it locks them out. The same
+    crossing `build-soul` refuses on its index read and
+    `restore-runtime-config.sh` refuses with `--remove-destination`.
+
+    O_NOFOLLOW rather than an `is_symlink()` check because the probe is a race:
+    checking and then opening are two steps with the agent running between
+    them. Opening IS the check, and past it the descriptor names the inode, so
+    a later swap reaches nothing. The same holds one level up: `dfd` is
+    `properties/` opened once with O_DIRECTORY|O_NOFOLLOW, and every hub is
+    opened by basename relative to it, so swapping the directory itself for a
+    link after that open reaches nothing either.
+
+    No O_TRUNC — the caller truncates once every hub is open. Truncating here
+    would put the refusal back inside the write loop, where an exit leaves some
+    hubs rebuilt and the rest linking nothing.
+    """
+    try:
+        return os.open(hub.name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=dfd)
+    except OSError as e:
+        sys.exit(f"build-hubs: refusing to write {hub.name}: {e.strerror}")
+
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        sys.exit("usage: build-hubs <vault>")
+    vault = Path(sys.argv[1])
+    properties = vault / "properties"
+    operations = vault / "operations"
+    # glob on a missing directory returns empty without raising, so a wrong
+    # vault path would rewrite every hub with an empty list, or silently do
+    # nothing at all, and exit 0 either way — the drift this script exists to
+    # remove, arriving by its own hand. Refused at the open, like build-soul.
+    # properties/ is opened once, as a directory and never through a link, and
+    # held for the whole run: every hub read and write below is relative to
+    # that descriptor, so the directory the agent can swap is not the one
+    # being written (see open_hub).
+    # operations/ is only read, so a check suffices: a swapped directory could
+    # feed a host file's `title:` into a hub bullet, not write anywhere.
+    if operations.is_symlink() or not operations.is_dir():
+        sys.exit(f"build-hubs: no real operations/ under {vault}")
+    try:
+        dfd = os.open(properties, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as e:
+        sys.exit(f"build-hubs: no real properties/ under {vault}: {e.strerror}")
+
+    # Every hub derived before any is written. A title the generator cannot
+    # label is a hard exit, and the deploy caller runs under `set -e` — so
+    # failing part-way through would leave the running agent with some hubs
+    # rewritten and the rest linking nothing at all.
+    rewritten = {}
+    for hub in sorted(properties / n for n in os.listdir(dfd) if n.endswith(".md")):
+        with os.fdopen(os.open(hub.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)) as f:
+            text = f.read()
+        head, sep, tail = text.partition(OPERATIONS + "\n")
+        if not sep:
+            sys.exit(f"build-hubs: {hub.name} has no `{OPERATIONS}` section to fill")
+        # Anything after the generated region is a later section and is kept.
+        # Matched on the heading marker rather than a sentinel comment: the hubs
+        # are read by a human and by the agent, and an HTML comment fence would
+        # be a second thing to keep in step with this script.
+        nxt = re.search(r"^## ", tail, re.M)
+        rest = tail[nxt.start() :] if nxt else ""
+
+        hub_title = title_from(text, hub)
+        pages = sorted(operations.glob(f"{hub.stem}-*.md"))
+        bullets = "".join(
+            f"- [{label(title_of(p), hub_title, p)}](../operations/{p.name})\n"
+            for p in pages
+        )
+        rewritten[hub] = (f"{head}{OPERATIONS}\n\n{bullets}{rest}", len(pages))
+
+    # Every hub open before any is truncated, for the reason it is derived
+    # before any is written: a refusal part-way leaves some rebuilt and the
+    # rest linking nothing.
+    fds = {hub: open_hub(dfd, hub) for hub in rewritten}
+    os.close(dfd)
+
+    for hub, (text, count) in rewritten.items():
+        # In place, not a temp file and rename: this keeps the mode the vault's
+        # own pages carry, and the one production page that arrived by another
+        # route is the only 0600 file in the corpus.
+        with os.fdopen(fds[hub], "w") as out:
+            os.ftruncate(out.fileno(), 0)
+            out.write(text)
+        print(f"build-hubs: {hub.name} {count} operations")
+
+
+if __name__ == "__main__":
+    main()

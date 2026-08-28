@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Compose the injected SOUL.md from the tracked persona and the vault index.
+#
+# SOUL.md is auto-injected into every agent turn (see `hermes --help`:
+# "Skip auto-injection of AGENTS.md, SOUL.md"), which makes it the one seam
+# where fact-awareness is guaranteed once rather than per-path — the poller
+# prompt, the cron prompts and interactive chat all inherit it.
+#
+# The index rather than the pages: the whole vault is ~61k tokens and the index
+# ~1.7k. The index says what exists; the turn that is already running opens the
+# page it needs, which is a better retrieval decision than any made in advance.
+#
+# All three paths are arguments rather than derived, because the two callers
+# live on different filesystems: scripts/restore-runtime-config.sh runs on the
+# host at deploy time, bin/nightly.sh runs inside the container after the
+# vault ingest. Deriving the persona from the vault's location assumes the two
+# callers share a layout, and they don't — see each caller for its own path.
+#
+#   build-soul <vault> <persona> <out>
+set -euo pipefail
+
+# The SOUL carries the operator's whole index. The deploy path creates it 0600
+# under the restore script's umask; the scheduler's default is 022, so without
+# this the nightly rename would quietly widen it to world-readable.
+umask 077
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: build-soul <vault> <persona> <out>" >&2
+  exit 2
+fi
+
+VAULT="$1"
+PERSONA="$2"
+OUT="$3"
+# Passed, not derived. The two callers do not share a filesystem layout: the
+# scheduler's vault is a bind mount at /opt/data/repo/vault and the host's is
+# ~/hermes-vault, outside the checkout entirely. Deriving the persona from
+# either one gets the other wrong, which is how this broke before — and
+# nightly.sh note-and-continues past a failed rebuild, so the symptom is a
+# silently stale injected index rather than a failure.
+INDEX="$VAULT/index.md"
+
+# Fail rather than emit a partial SOUL. A SOUL missing its index is an agent
+# that believes it has no memory and says so confidently — the quietest
+# failure this repo can ship, because nothing downstream reads as broken.
+[ -f "$PERSONA" ] || { echo "build-soul: no persona at $PERSONA" >&2; exit 1; }
+[ -f "$INDEX" ] || { echo "build-soul: no index at $INDEX" >&2; exit 1; }
+# The index comes from the agent's own writable vault, and this script's output
+# is injected into every turn — so a symlink here reads a host file straight
+# into the agent's context. `index.md -> ../.ssh/id_ed25519` resolves to nothing
+# inside the container and to the operator's private key on the host, which the
+# deploy then publishes to ~/.hermes/SOUL.md.
+#
+# Refused at the open, not by a test before it. `[ -L ]` then `cat` is two
+# steps with the agent writing between them: a loop alternating the index
+# between a real file and a link wins that race on roughly every other deploy,
+# and the losing half only produces a refusal the operator may not read. Opening
+# with O_NOFOLLOW makes the check and the read the same operation.
+read_index() {
+  python3 -c 'import os, sys, shutil
+try:
+    fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW)
+except OSError as e:
+    sys.exit(f"build-soul: refusing to read {sys.argv[1]}: {e.strerror}")
+shutil.copyfileobj(os.fdopen(fd, "rb"), sys.stdout.buffer)' "$1"
+}
+
+# Write-then-rename, so an interrupted build never leaves a truncated file for
+# the gateway to inject on its next turn.
+#
+# mktemp rather than a fixed $OUT.tmp: the two callers write the same target —
+# the host restore and the in-container nightly both land on ~/.hermes/SOUL.md
+# — so a deploy run during the nightly would have had both interleaving into
+# one temp file, and the rename would then publish the mixture to every
+# subsequent turn. The rename stays atomic, so a reader never sees a partial
+# file either way; this is about two writers, not about readers.
+TMP="$(mktemp "$OUT.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+{
+  cat "$PERSONA"
+  printf '\n'
+  read_index "$INDEX"
+} > "$TMP"
+mv "$TMP" "$OUT"

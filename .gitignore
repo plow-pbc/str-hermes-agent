@@ -1,0 +1,41 @@
+__pycache__/
+*.pyc
+.superpowers/
+docs/superpowers/
+
+# Secrets and runtime state — never committed. The repo carries declarative
+# configuration only; see runtime/ for the sanitized, restorable form.
+.env
+.env.*
+!.env.example
+# The vault seed's `.env` is not a credential file — it is how the obsidian-wiki
+# tools resolve vault path, categories and page limits, and the deploy installs
+# it into the runtime vault. Named `.env` by that convention, so the rule above
+# shadows it; committed deliberately. Secrets live in ~/.hermes/.env.
+!runtime/vault-seed/.env
+*.token
+*.secret
+auth.json
+auth.lock
+*.db
+*.db-*
+logs/
+sessions/
+request_dump_*.json
+runtime-state/
+.hermes/
+channel_directory.json
+
+# Wiki vault: raw Hostex conversations are staging only, never committed —
+# they are verbatim guest messages, and regenerable from the API besides.
+# Any path, not just ./vault: `--vault` accepts a location, so an in-repo vault
+# elsewhere would otherwise be tracked. runtime/vault-seed/.env points OBSIDIAN_RAW_DIR
+# here (installed to vault/.env in the runtime vault at deploy time).
+**/_raw/
+
+# Scratch vault the on-demand end-to-end run creates. It holds a full copy of
+# the verbatim conversations, so it is ignored for the same reason _raw/ is.
+.e2e-vault/
+
+# knightwatch materializes declared review siblings here during a review.
+.siblings/

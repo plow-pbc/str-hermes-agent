@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Promote the nightly's output to the vault's remote.
+#
+# Runs on the HOST, not in the container. bin/nightly.sh compiles the corpus and
+# commits nothing -- it cannot: ~/hermes-vault.git is not mounted into the
+# container and the gateway holds no git credential. So the promote is a
+# host-side step, scheduled after the nightly window.
+#
+# Without it the corpus is the product of a nightly chain that leaves its only
+# copy on one disk. Measured 2026-08-26: 18 pages rewritten and 6 new ones since
+# the 2026-08-04 commit -- 22 days of compiled guest knowledge, unpushed.
+#
+#   scripts/promote-vault [vault-worktree]
+#
+# ONE definition of "the night's content", and this is the whole design: what
+# leaves this machine is exactly what `push` publishes, so that is the only
+# thing the script computes -- the commits the remote does not have, plus the
+# index that becomes the next one. Four earlier rounds each reconciled a
+# different pair of separate definitions -- a quiet gate against the worktree, a
+# quiet gate against the remote, a scan against the index, a scan against the
+# final tree -- and every one of them let content reach the remote that the
+# credential scan had not seen. The class only closes by not having two.
+#
+# Idempotent and quiet: a night whose content already matches the remote exits 0
+# saying so. That subsumes a stranded local commit, a populated index, and a
+# previous night whose push failed, without a branch for any of them.
+set -euo pipefail
+
+vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
+git_dir="$vault.git"
+
+[ -d "$vault" ]   || { echo "promote-vault: no vault at $vault" >&2; exit 1; }
+[ -d "$git_dir" ] || { echo "promote-vault: no git dir at $git_dir" >&2; exit 1; }
+
+# The invariant the restore hook already enforces from the other side. History
+# lives OUTSIDE the worktree because an ingest turn once ran
+# `git restore --source=HEAD` over pages it judged missing -- reachable history,
+# unreachable git. A .git appearing inside means something re-attached it, and
+# promoting from that state would be promoting from whatever it did.
+[ -e "$vault/.git" ] && { echo "promote-vault: $vault/.git exists -- the vault must not be a git repo; its history lives at $git_dir" >&2; exit 1; }
+
+v() { git --git-dir="$git_dir" --work-tree="$vault" "$@"; }
+
+# Before `add -A`, because after it there are no untracked paths left to check.
+# A new file under a directory git already tracks is what a nightly produces. A
+# new TOP-LEVEL path is not: it is a human decision, or a tool writing somewhere
+# nobody expected, and staging it blind is how an unrelated tree lands in a repo.
+# .gitignore already excludes the two non-corpus entries (/AGENTS.md, /.env);
+# the property hubs are corpus now that the seed ships none, so anything
+# reaching here is genuinely new.
+#
+# NUL-framed: git applies core.quotePath, so a path holding any non-ASCII byte
+# prints as "op\303\251rations/x.md" -- and the pages are LLM-authored from
+# guest threads, so an accented property name is an ordinary night.
+while IFS= read -r -d '' path; do
+    [ -n "$path" ] || continue
+    top="${path%%/*}"
+    v ls-files --error-unmatch -- "$top" >/dev/null 2>&1 \
+        || { echo "promote-vault: refusing -- untracked top-level path '$top' is not something the nightly writes. Add it by hand if it belongs." >&2; exit 1; }
+done < <(v ls-files --others --exclude-standard -z)
+
+# The remote's own tree, which is the only thing that makes "already promoted"
+# answerable. An unreachable remote fails the run here rather than letting it
+# print a green "nothing to promote" -- silence must not mean success for the
+# one script standing between this corpus and a single disk.
+v fetch -q origin main
+
+# Staged before the scan so untracked files are inside the diff, which is what
+# lets one expression cover worktree, index and untracked alike. A refusal below
+# leaves the index populated; that is recovered by the next run, and the objects
+# it wrote are unreferenced until a commit exists.
+v add -A
+
+# Everything this run would send. A TREE diff cannot be it: `push` publishes
+# history, so a credential introduced in one commit and taken back out in the
+# next is absent from every tree and present in what leaves the machine. So the
+# unsent commits go in as PATCHES, and the index -- not the worktree -- as the
+# commit this run is about to make, which also means a concurrent nightly
+# writing into the worktree cannot change the bytes after they were scanned.
+#
+# `--cc` because `log -p` prints NO patch at all for a commit with two parents,
+# so content that exists only in a merge resolution -- which is where a hand
+# `git pull` after a non-ff rejection puts it -- would be published unscanned.
+# Measured: without it the secret appears zero times in the scan, with it once,
+# and ordinary commits are unaffected.
+scan="$(mktemp)"
+trap 'rm -f "$scan"' EXIT
+#
+# --text, because git calls a file binary on a NUL byte in its first 8000 and
+# then emits "Binary files ... differ" and no content at all. _raw/hostex/*.md
+# is written from guest-authored text, so a \u0000 in a message body decodes to
+# a real NUL -- which would let a guest make the page holding their own text
+# invisible to the scan below.
+{ v log -p --cc --no-color --text FETCH_HEAD..HEAD
+  v diff --cached --no-color --text HEAD; } > "$scan"
+
+if [ ! -s "$scan" ]; then
+    echo "promote-vault: nothing to promote"
+    exit 0
+fi
+
+# Door codes, keypad codes and guest names are the POINT of this corpus and are
+# expected. An API credential is not: the pages are LLM-authored from raw
+# conversations, and a token pasted into a Hostex thread would otherwise be
+# compiled into a page and pushed. Refuse rather than redact -- a redaction this
+# script invented would be a silent edit to the corpus.
+# -a as well as --text, and the two are not the same fix: --text puts the content
+# in the diff, -a makes grep look at it. Measured on this host -- GNU grep 3.11
+# matches a NUL-bearing line without -a, the ugrep first on the interactive PATH
+# returns no match at all, and cron resolves a different PATH than a shell. A
+# secret scan whose verdict depends on which grep won the PATH is not one.
+if grep -aqEi 'sk-[A-Za-z0-9_-]{16}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|xox[abpr]-[A-Za-z0-9-]{10}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]{20,}\.' "$scan"; then
+    echo "promote-vault: refusing -- what looks like an API credential is in tonight's output. Inspect it by hand; nothing was committed." >&2
+    exit 1
+fi
+rm -f "$scan"
+trap - EXIT
+
+# The diff above is non-empty, but the index may already match HEAD -- a local
+# commit the remote never received. Committing then would fail with "nothing to
+# commit"; the push is what that night is missing.
+if ! v diff --cached --quiet HEAD; then
+    v commit -q -m "nightly ingest $(date -u +%Y-%m-%d)"
+fi
+v push -q origin HEAD:main
+printf 'promote-vault: pushed %s (%s files)\n' \
+    "$(v rev-parse --short HEAD)" "$(v show --stat --format= HEAD | grep -c '|')"

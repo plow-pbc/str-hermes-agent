@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# This agent's veto on stopping or replacing its container.
+#
+# Declared as AGENT_PRE_TRANSITION in agent.env and invoked BY agent-mgr before
+# every transition -- `up`, `down`, `restart`, `restore`, and a `compose`
+# passthrough whose subcommand transitions. Pasted into exactly one documented
+# sequence -- the README's manual-nightly recovery, which is an `exec` and so
+# fires no hook; it guards a second concurrent ingest there, not a transition.
+# It lived as a hand-copied `pgrep` in five places, three
+# review rounds corrected one copy while the others asserted the opposite
+# placement, and the text scanner written to catch that could not see a table
+# cell, a justfile recipe, or an imperative in prose. There is nothing left to
+# restate.
+#
+# Why: a transition that lands between a page write and its manifest entry
+# leaves the vault holding a page nothing recorded -- the next run re-ingests it
+# and appends its facts a second time, and nothing reports it.
+#
+# Uses `docker` directly on the container agent-mgr resolved, not `agent-mgr
+# compose`: the tool that runs this is the one that would be called back into.
+set -uo pipefail
+
+container="${AGENT_CONTAINER:?run me through agent-mgr, which exports the container it resolved}"
+
+# Not-running is a pass, established first rather than inferred from a failing
+# exec: a fresh host has no container, and "it is not up" and "the check could
+# not run" are the same non-zero status from exec, with only one safe to
+# proceed on.
+running=$(docker ps -q --filter "name=^${container}$" --filter status=running) || {
+    echo "FATAL: could not ask docker whether ${container} is running -- treat as unsafe" >&2
+    exit 1
+}
+[ -n "$running" ] || exit 0
+
+# Discriminated by status, not truthiness. Reporting "clear" for every non-zero
+# -- pgrep's 2/3 on a bad pattern, exec's 126/127 on a missing binary -- would
+# green-light every transition silently and permanently.
+#
+# The bracket keeps pgrep from matching its own command line.
+out=$(docker exec "$container" pgrep -f '[n]ightly.sh' 2>&1); status=$?
+case "$status" in
+    0) echo "a nightly is mid-ingest -- wait for it to finish" >&2; exit 1 ;;
+    1) exit 0 ;;
+    *) printf '%s\n' "$out" >&2
+       echo "FATAL: the nightly check could not run (exit $status) -- treat as unsafe" >&2
+       exit 1 ;;
+esac
