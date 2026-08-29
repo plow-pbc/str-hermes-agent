@@ -204,7 +204,7 @@ def test_tracked_config_pins_the_model_route_uses_env_secrets_and_enables_plow()
     """
     config = (ROOT / "runtime/config.yaml").read_text()
     assert "provider: openai-codex" in config
-    assert "default: gpt-5.5" in config
+    assert "default: gpt-5.6-sol" in config
     assert "base_url:" not in config
     assert "Authorization: Bearer ${HOSTEX_TOKEN}" in config
     assert "- search_conversations" in config   # only appears under include:
