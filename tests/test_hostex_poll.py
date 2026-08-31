@@ -10,7 +10,6 @@ import os
 import pathlib
 import re
 import subprocess
-import urllib.error
 
 import pytest
 
@@ -426,49 +425,6 @@ def test_unusable_detail_leaves_the_guest_pending(monkeypatch, primed_cursor,
     assert json.loads(primed_cursor.read_text()) == {"a": PRIMED}
 
 
-def test_a_redirect_is_refused_and_the_token_is_not_replayed(monkeypatch):
-    """Driven through api_get rather than the handler directly, because the
-    regression that matters is the wiring — a bare urlopen must fail this."""
-    import http.server
-    import socketserver
-    import threading
-
-    received = {}
-    ports = {}
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path.startswith("/v3/"):
-                self.send_response(302)
-                self.send_header("Location", f"http://127.0.0.1:{ports['elsewhere']}/taken")
-                self.end_headers()
-                return
-            # 500, not 200: a followed redirect must both record the header
-            # and raise, so `received` is what separates refusal from replay.
-            received["token"] = self.headers.get("Hostex-Access-Token")
-            self.send_response(500)
-            self.end_headers()
-
-        def log_message(self, *args):
-            pass
-
-    hostex = socketserver.TCPServer(("127.0.0.1", 0), Handler)
-    elsewhere = socketserver.TCPServer(("127.0.0.1", 0), Handler)
-    ports["elsewhere"] = elsewhere.server_address[1]
-    for server in (hostex, elsewhere):
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        monkeypatch.setattr(poll, "BASE", f"http://127.0.0.1:{hostex.server_address[1]}/v3")
-        with pytest.raises(urllib.error.HTTPError) as excinfo:
-            poll.api_get("/conversations", "SECRET")
-        assert received == {}   # first, so a regression fails with the leak
-        assert "refusing redirect" in str(excinfo.value)
-    finally:
-        for server in (hostex, elsewhere):
-            server.shutdown()
-            server.server_close()
-
-
 def test_the_owners_reply_survives_the_quiet_tick_after_it(monkeypatch, primed_cursor):
     """Guest asks, an owner answers, guest follows up — three ticks, and the middle
     one announces nothing. Their answer must still reach the prompt on the third,
@@ -631,7 +587,9 @@ def test_enabling_gates_and_primes_before_creating_the_job(
     assert (run.returncode == 0) is ok
     assert calls == expected
     if says:
-        assert says in run.stdout
+        # stdout + stderr: the shared owners-chat-uid resolver reports on
+        # stderr so its stdout stays the bare uid.
+        assert says in run.stdout + run.stderr
     # Table-wide and both directions, so no single-message edit can pass: the
     # run claims a priming exactly when one was recorded. Per-row clauses pin
     # which branch spoke; this pins that neither branch lies.

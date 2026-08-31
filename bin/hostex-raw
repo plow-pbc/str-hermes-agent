@@ -35,36 +35,11 @@ import os
 import re
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
-BASE = "https://api.hostex.io/v3"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hostex_api
 
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse 30x instead of following it.
-
-    urllib replays request headers to the redirect target, so a redirect off
-    api.hostex.io would hand HOSTEX_TOKEN to whatever it points at. Verified
-    against a local server that 302s elsewhere: as an ordinary header the token
-    arrived at the second origin.
-
-    Stripping the header instead also stops the leak, but it lets the redirect
-    proceed and fail authentication somewhere else. Taken from
-    `bin/hostex-poll.py`, which got here first — one answer to this, not two.
-    These scripts want a shared Hostex client, but that touches a script about to
-    be scheduled in production, so not here.
-    """
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(
-            req.full_url, code, f"refusing redirect to {newurl}", headers, fp
-        )
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
 PAGE = 100
 # Hostex asks for a one-second pause every 60 requests to stay clear of its bot
 # detection. Only the first run over an empty cache gets near that; steady state
@@ -96,24 +71,12 @@ def read_token() -> str:
 
 
 def api_get(path: str, tok: str, **params: object) -> dict:
-    url = f"{BASE}{path}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    # Hostex 403s the default Python-urllib User-Agent; curl with the same
-    # token succeeds. Send an explicit one.
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Hostex-Access-Token": tok,
-            "User-Agent": "hostex-raw/1.0",
-            "Accept": "application/json",
-        },
-    )
-    # No retry loop. A transient failure aborts the run loudly and costs
-    # nothing: there is no progress to lose, so the next run resumes exactly
-    # where this one stopped.
-    with _OPENER.open(req, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+    """One Hostex GET; transport and redirect policy live in hostex_api.
+
+    No retry loop. A transient failure aborts the run loudly and costs
+    nothing: there is no progress to lose, so the next run resumes exactly
+    where this one stopped."""
+    return hostex_api.get(path, tok, "hostex-raw/1.0", **params)
 
 
 def slugify(title: str) -> str:
