@@ -73,9 +73,9 @@ def test_the_descriptor_is_the_whole_contract_with_agent_mgr():
       config lives under runtime/, and without naming it this repo kept a second
       installer that hardcoded the path and the home.
     - AGENT_RESTORE_HOOK is what makes one command the whole deploy.
-    - AGENT_LIVE makes agent-mgr ask before any container transition. A
-      transition kills a mid-flight nightly ingest (duplicated facts, nothing
-      reporting it) and drops group subscriptions until the next reconcile.
+    - AGENT_LIVE makes agent-mgr ask before any container transition — the
+      ask-first gate beside AGENT_PRE_TRANSITION's hard veto; agent.env says
+      why.
     """
     settings = descriptor()
     expected = {
