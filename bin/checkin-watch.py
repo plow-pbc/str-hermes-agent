@@ -103,7 +103,7 @@ def verdict(events: list[dict], code_ids: set[str]) -> tuple[str, dict | None]:
             return "started", event
     if unlocks:
         # Sort by occurred_at to get the most recent unlock regardless of API order
-        most_recent = max(unlocks, key=lambda e: e.get("occurred_at", ""))
+        most_recent = max(unlocks, key=lambda e: e["occurred_at"])
         return "activity", most_recent
     return "none", None
 

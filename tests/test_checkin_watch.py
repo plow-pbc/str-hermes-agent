@@ -115,7 +115,7 @@ def test_prompt_carries_verdict_and_confirmation_instruction():
     assert "Do not message any guest" in out
 
 
-UTC_NOON_PT = datetime.datetime(2026, 9, 1, 3, 0, tzinfo=datetime.timezone.utc)  # 2026-08-31T20:00 PT
+UTC_NOON_PT = datetime.datetime(2026, 8, 31, 19, 0, tzinfo=datetime.timezone.utc)
 
 
 def fake_apis(monkeypatch, *, checkins, checkouts=(), events=(), online=True,
