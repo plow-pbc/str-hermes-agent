@@ -76,29 +76,17 @@ def test_checkin_time_prefers_reservation_arrival():
 def test_checkin_time_falls_back_to_default(r):
     assert watch.checkin_time(r, prop()) == (16, 0)
 
-def test_load_ops_refuses_missing_field():
-    with pytest.raises(SystemExit, match="seam_device_id"):
-        watch.load_ops_text(OPS.replace('seam_device_id = "dev-1"\n', ""))
-
-def test_load_ops_refuses_bad_default_time():
-    with pytest.raises(SystemExit, match="default_checkin_time"):
-        watch.load_ops_text(OPS.replace("16:00", "4pm"))
-
-def test_load_ops_refuses_empty_access_code_ids():
-    with pytest.raises(SystemExit, match="cleaner_access_code_ids"):
-        watch.load_ops_text(OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = []'))
-
-def test_load_ops_refuses_string_access_code_ids():
-    with pytest.raises(SystemExit, match="cleaner_access_code_ids"):
-        watch.load_ops_text(OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = "code-1"'))
-
-def test_load_ops_refuses_bad_toml():
-    with pytest.raises(SystemExit, match="ops.toml"):
-        watch.load_ops_text("this is not valid toml {{{")
-
-def test_load_ops_refuses_missing_properties_section():
-    with pytest.raises(SystemExit, match="properties"):
-        watch.load_ops_text("[other]\nkey = 'value'")
+@pytest.mark.parametrize("bad_ops_text,expected_match", [
+    (OPS.replace('seam_device_id = "dev-1"\n', ""), "seam_device_id"),
+    (OPS.replace("16:00", "4pm"), "default_checkin_time"),
+    (OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = []'), "cleaner_access_code_ids"),
+    (OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = "code-1"'), "cleaner_access_code_ids"),
+    ("this is not valid toml {{{", "ops.toml"),
+    ("[other]\nkey = 'value'", "properties"),
+])
+def test_load_ops_refuses_invalid_input(bad_ops_text, expected_match):
+    with pytest.raises(SystemExit, match=expected_match):
+        watch.load_ops_text(bad_ops_text)
 
 def test_prompt_carries_verdict_and_confirmation_instruction():
     block = watch.render_block(
