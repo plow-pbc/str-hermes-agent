@@ -75,7 +75,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/lint/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the vault holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is composed from the operator persona plus the vault index and injected into every turn (#56), so a turn opens the page it needs rather than answering from the summary |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. No draft ids or expiry yet (#29) |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 
@@ -126,9 +126,19 @@ two; #46 records why the allowlist never was.
 
 ## Decisions already made
 
-- **Approval is per-message and explicit.** No auto-send for "easy" questions,
-  no confidence threshold. The first version of that idea is where the loop
-  stops being trustworthy.
+- **Every guest message is owner-visible before it sends; low-risk drafts get
+  a veto window instead of blocking on approval.** This supersedes the
+  original "per-message and explicit, no auto-send, no confidence threshold"
+  decision (2026-08-31). Basis: a month of live corrections showed every
+  owner edit targeted expectation-setting content, never commitment-free
+  wording, and the vault already defines the verified-fact class (an unmarked
+  bullet may be repeated to a guest verbatim). A draft whose facts are all
+  verbatim unmarked-bullet quotes (or that has no facts) and that makes no
+  commitment is announced to the owners' group — source bullets quoted — and
+  sends after 30 minutes unless an owner objects. Everything else, and any
+  doubt, still requires explicit approval. Nothing ever sends silently, and
+  there is still no confidence threshold — the veto class is a bright-line
+  checklist, not a score.
 - **Drafts are addressable.** Several can be outstanding at once, so a reply
   has to say *which* draft it approves.
 - **Hostex is reached over its hosted MCP server** for anything the *agent*
