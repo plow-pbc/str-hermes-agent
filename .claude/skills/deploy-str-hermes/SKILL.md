@@ -162,6 +162,8 @@ An empty log means nothing new — say so rather than reporting a deploy.
   # agent.env still declared it and every test stayed green.
   agent-mgr resolve str | grep -q '^AGENT_PRE_TRANSITION=' \
     || { echo "FATAL: the installed agent-mgr does not implement AGENT_PRE_TRANSITION — the nightly guard would NOT run. Update ~/services/agent-mgr."; exit 1; }
+  agent-mgr resolve str | grep -q '^AGENT_LIVE=' \
+    || { echo "FATAL: the installed agent-mgr does not implement AGENT_LIVE — transitions would not ask first. Update ~/services/agent-mgr."; exit 1; }
   # This repo declares AGENT_DEPLOY_HOOK, but nothing here can see whether
   # agent-mgr honoured it. Unhonoured, config.yaml still
   # lands, step 4 still recreates the container, and the gateway comes up
