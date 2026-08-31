@@ -34,8 +34,10 @@ The loop, end to end:
 3. It drafts a reply — grounded in the operations wiki and in what the cleaner
    and handyman have been saying in their group threads.
 4. It texts the draft to the **STR Owners** group over iMessage.
-5. Any owner approves, edits, or declines.
-6. **Only on approval does anything reach the guest.**
+5. Any owner approves, edits, or declines — a commitment-free draft grounded
+   verbatim in the vault instead announces a 30-minute veto window.
+6. **Nothing reaches the guest silently: an approval, or a veto window the
+   owners let pass, is what sends.**
 
 Two capabilities sit beside that loop and feed it:
 
@@ -46,8 +48,11 @@ Two capabilities sit beside that loop and feed it:
 - **Door control.** Ad-hoc lock/unlock over Seam, so "let the cleaner in" is a
   text rather than a drive.
 
-**The rule the whole design turns on: the agent never speaks to a guest without
-an owner's approval.** Most things here are negotiable; that one is not. It is what
+**The rule the whole design turns on: the agent never speaks to a guest with
+wording the owners have not seen.** Explicit approval is the default; the one
+exception is the 30-minute veto window (§ Decisions already made), where the
+owners see the exact wording and its sources before anything sends. Most
+things here are negotiable; that one is not. It is what
 makes it tolerable for untrusted guest text to reach a runtime holding a Hostex
 token and the ability to open doors.
 
@@ -121,8 +126,8 @@ context; nothing carries it across.
 and issue #7 for what changes when guest mail starts being handled unattended.
 **That trigger has fired** — the cron job exists (§ Inbound guest messages), so
 guest text already reaches an agent turn with no human in the loop, and that
-turn can message a guest. The approval instruction is what stands between the
-two; #46 records why the allowlist never was.
+turn can message a guest. SOUL.md's two-tier instruction is what stands
+between the two; #46 records why the allowlist never was.
 
 ## Decisions already made
 
@@ -806,9 +811,11 @@ This makes guest mail **unattended**, which the roadmap names as the trigger
 for revisiting #7.
 
 The agent holds `send_message`, and what keeps it from answering a guest on its
-own is the approval instruction in the cron prompt (`bin/hostex-poll.py`):
-nothing goes to the guest until an owner approves the wording, and what they
-approved is what gets sent. Every member of the owners' group is an owner, so
+own is the two-tier instruction owned by `runtime/SOUL.md` and referenced from
+the cron prompt (`bin/hostex-poll.py`): nothing goes to the guest with wording
+the owners have not seen — explicit approval by default, the announced veto
+window as the one exception — and what they approved (or let pass) is what
+gets sent. Every member of the owners' group is an owner, so
 any of them can approve. That is an instruction, not a gate — a deliberate
 choice at one operator, made because the alternative was not the gate it
 looked like.

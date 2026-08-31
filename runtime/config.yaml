@@ -75,12 +75,11 @@ platforms:
           raise something that needs an owner's judgement.
 
           Guest-reply drafts are delivered here, by a scheduled job, each
-          carrying a short draft id. Most arrive for approval; a draft that
-          passed the veto-window test (its facts verbatim from unmarked vault
-          bullets or no facts at all, and no commitment of any kind) instead
-          arrives announced as "sending in 30 minutes unless an owner says
-          stop", with the vault bullets it relied on quoted beside it and a
-          one-shot send job already scheduled. Any owner reply naming that
+          carrying a short draft id. Most arrive for approval; one that passed
+          the SOUL.md veto-window test (SOUL.md owns that rule — apply it as
+          written there) instead arrives announced as "sending in 30 minutes
+          unless an owner says stop", with the vault bullets it relied on
+          quoted beside it and a one-shot send job already scheduled. Any owner reply naming that
           draft id — "stop", an edit, even a question — cancels the pending
           job: delete it, say so, and treat an edit as a fresh draft on the
           approval path. Each delivery is mirrored into this thread, so the

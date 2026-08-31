@@ -329,8 +329,11 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     # matches on. Producer half; the consumer half lives in
     # test_runtime_config.py::test_the_draft_reaches_the_session_that_approves_it.
     assert "a short draft id on its own line" in flowed
-    assert "verbatim from an unmarked vault bullet" in flowed
-    assert "commits the owners to nothing" in flowed
+    # Eligibility lives in SOUL.md alone — this prompt may only reference it,
+    # never restate it, or the two copies drift (the contract-drift finding on
+    # PR #3). The eligibility clauses themselves are pinned on SOUL.md in
+    # test_runtime_config.py.
+    assert "two-tier guest-send rule in SOUL.md" in flowed
     assert "sending in 30 minutes unless an owner says stop" in flowed
     assert "any draft you are unsure about" in flowed
 
