@@ -328,7 +328,7 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     # closed, and the announcement wording the group prompt's cancel rule
     # matches on. Producer half; the consumer half lives in
     # test_runtime_config.py::test_the_draft_reaches_the_session_that_approves_it.
-    assert "give it a short draft id" in flowed
+    assert "a short draft id on its own line" in flowed
     assert "verbatim from an unmarked vault bullet" in flowed
     assert "commits the owners to nothing" in flowed
     assert "sending in 30 minutes unless an owner says stop" in flowed
