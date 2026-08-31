@@ -5,7 +5,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # From the descriptor, via agent-mgr, rather than a second spelling of a path
 # agent.env already owns. Three copies used to be coupled by an exact-literal
 # test; now there is one owner and the fence is unnecessary.
-vault="${STR_VAULT:?agent-mgr did not export STR_VAULT -- run me through 'agent-mgr restore str'}"
+vault="${STR_VAULT:?agent-mgr did not export STR_VAULT -- run me through 'agent-mgr deploy str'}"
 
 # The corpus is not created here, and not synthesized. It arrives by cloning the
 # data repo. An empty vault would bring the agent up with the schema and no
@@ -47,12 +47,12 @@ fi
 # nothing at all, and asking agent-mgr is a side effect however small.
 # Run BY agent-mgr, which exports the home it resolved -- so this asks for it
 # rather than assuming it, and without a second resolve. Not a standalone
-# entry point: `agent-mgr restore str` is, and it sequences this after the
+# entry point: `agent-mgr deploy str` is, and it sequences this after the
 # config and plugin installs.
 hermes_home="${AGENT_HOME:-}"
 [ -n "$hermes_home" ] || {
   echo "restore: run me through agent-mgr, which owns the deploy:" >&2
-  echo "  agent-mgr restore str" >&2
+  echo "  agent-mgr deploy str" >&2
   exit 1
 }
 

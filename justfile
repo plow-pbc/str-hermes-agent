@@ -4,7 +4,7 @@
 # bring-up, the pins and the contract tests for every agent on this host:
 #
 #   agent-mgr up str          agent-mgr logs str
-#   agent-mgr agent str "..." agent-mgr restore str
+#   agent-mgr agent str "..." agent-mgr deploy str
 #
 # `agent-mgr agent` replaced this repo's `just agent`, which used
 # `docker compose run`. The image's s6 entrypoint starts a gateway whatever
