@@ -587,7 +587,9 @@ def test_enabling_gates_and_primes_before_creating_the_job(
     assert (run.returncode == 0) is ok
     assert calls == expected
     if says:
-        assert says in run.stdout
+        # stdout + stderr: the shared owners-chat-uid resolver reports on
+        # stderr so its stdout stays the bare uid.
+        assert says in run.stdout + run.stderr
     # Table-wide and both directions, so no single-message edit can pass: the
     # run claims a priming exactly when one was recorded. Per-row clauses pin
     # which branch spoke; this pins that neither branch lies.

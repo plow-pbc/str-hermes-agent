@@ -38,20 +38,9 @@ esac
 # missing one after priming would retire every waiting guest to create nothing.
 #
 # Drafts go to the owners' group, not a private chat: every member of that
-# group is an owner, and any of them can approve. The group is named rather
-# than pinned by id — PLOW_CHAT_APPROVAL_GROUP holds the display name from
-# PLOW_CHAT_GROUP_UIDS, so the id lives in exactly one place and re-creating
-# the group means relabelling there and recreating this job, which bakes the
-# resolved id (README, reactivation).
-group_name=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_APPROVAL_GROUP=//p' '$state/.env' | tail -n1")
-[ -n "$group_name" ] || { echo "PLOW_CHAT_APPROVAL_GROUP not in the dotenv - name the owners' group that approves guest replies"; exit 1; }
-
-chat_uid=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_GROUP_UIDS=//p' '$state/.env' | tail -n1" \
-  | tr ',' '\n' | awk -F= -v want="$group_name" '
-      { uid=$1; name=substr($0, index($0, "=") + 1)
-        gsub(/^[ \t]+|[ \t]+$/, "", uid); gsub(/^[ \t]+|[ \t]+$/, "", name)
-        if (name == want) print uid }')
-[ -n "$chat_uid" ] || { echo "PLOW_CHAT_APPROVAL_GROUP names no group in PLOW_CHAT_GROUP_UIDS"; exit 1; }
+# group is an owner, and any of them can approve. scripts/owners-chat-uid owns
+# the resolution and why the group is named rather than pinned by id.
+chat_uid=$("$(dirname "$0")/owners-chat-uid" "$state")
 
 # Prime only a cold cursor. The job's opening tick would otherwise cold-start
 # and adopt whatever arrived in between, so a guest writing in that window

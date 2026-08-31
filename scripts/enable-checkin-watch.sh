@@ -20,17 +20,9 @@ case "$existing" in
     echo "checkin-watch already exists - remove it first"; exit 1 ;;
 esac
 
-# Deliver to the owners' group; resolution copied from enable-hostex-inbound.sh
-# (PLOW_CHAT_APPROVAL_GROUP names the display name, PLOW_CHAT_GROUP_UIDS maps
-# it to the uid the job bakes in - recreate the job if the group is recreated).
-group_name=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_APPROVAL_GROUP=//p' '$state/.env' | tail -n1")
-[ -n "$group_name" ] || { echo "PLOW_CHAT_APPROVAL_GROUP not in the dotenv"; exit 1; }
-chat_uid=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_GROUP_UIDS=//p' '$state/.env' | tail -n1" \
-  | tr ',' '\n' | awk -F= -v want="$group_name" '
-      { uid=$1; name=substr($0, index($0, "=") + 1)
-        gsub(/^[ \t]+|[ \t]+$/, "", uid); gsub(/^[ \t]+|[ \t]+$/, "", name)
-        if (name == want) print uid }')
-[ -n "$chat_uid" ] || { echo "PLOW_CHAT_APPROVAL_GROUP names no group in PLOW_CHAT_GROUP_UIDS"; exit 1; }
+# Deliver to the owners' group — scripts/owners-chat-uid owns the resolution
+# and why the group is named rather than pinned by id.
+chat_uid=$("$(dirname "$0")/owners-chat-uid" "$state")
 
 # 0 12 * * * is noon in the container's TZ (agent.env pins America/Los_Angeles)
 # - 3 hours before the earliest standard check-in. The cron-expression form is

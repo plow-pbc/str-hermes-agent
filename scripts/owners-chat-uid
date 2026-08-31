@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Resolve the owners' approval group to its chat uid, from the container dotenv.
+# Prints the uid on stdout; exits non-zero with the reason on stderr.
+#
+# The group is named rather than pinned by id — PLOW_CHAT_APPROVAL_GROUP holds
+# the display name from PLOW_CHAT_GROUP_UIDS, so the id lives in exactly one
+# place and re-creating the group means relabelling there and recreating any
+# job that baked the resolved id (README, reactivation). Shared by both job
+# enablers; $1 is the container's HERMES_HOME.
+set -euo pipefail
+
+state=$1
+group_name=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_APPROVAL_GROUP=//p' '$state/.env' | tail -n1")
+[ -n "$group_name" ] || { echo "PLOW_CHAT_APPROVAL_GROUP not in the dotenv - name the owners' group that approves guest replies" >&2; exit 1; }
+
+chat_uid=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_GROUP_UIDS=//p' '$state/.env' | tail -n1" \
+  | tr ',' '\n' | awk -F= -v want="$group_name" '
+      { uid=$1; name=substr($0, index($0, "=") + 1)
+        gsub(/^[ \t]+|[ \t]+$/, "", uid); gsub(/^[ \t]+|[ \t]+$/, "", name)
+        if (name == want) print uid }')
+[ -n "$chat_uid" ] || { echo "PLOW_CHAT_APPROVAL_GROUP names no group in PLOW_CHAT_GROUP_UIDS" >&2; exit 1; }
+
+printf '%s\n' "$chat_uid"
