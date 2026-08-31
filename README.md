@@ -78,6 +78,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. No draft ids or expiry yet (#29) |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
+| Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
 
 ## Roadmap
 
@@ -1075,6 +1076,86 @@ Its preconditions are not restated here. `nightly.sh` and `ingest-all` both
 abort with a message naming the vault path and what to do about it, and a
 paragraph re-describing those drifts out of sync the moment either changes.
 #71 tracks making the chain bound itself rather than relying on this note.
+
+## Pre-check-in cleaner status
+
+`bin/checkin-watch.py` runs once a day and reports, per property with a guest
+arriving, whether the cleaner has actually turned it over — from the door's
+own event feed, not a guess. Design reasoning:
+[`docs/superpowers/specs/2026-08-31-checkin-watch-design.md`](docs/superpowers/specs/2026-08-31-checkin-watch-design.md).
+
+Three verdicts, computed from Seam's unlock events since 8 AM local:
+
+- **STARTED** — the cleaner's own access code unlocked the door. No action.
+- **DOOR ACTIVITY (unattributed)** — some other unlock happened (a same-day
+  checkout can trigger this too), but not the cleaner's code. Reported, not
+  acted on.
+- **NOT STARTED** — no unlock at all. The agent turn sends a confirmation ask
+  in that property's cleaners thread, addressed to the cleaner by name.
+
+A lock that will not answer reports **LOCK OFFLINE** rather than a guess — the
+smart-lock skill's own rule: never infer past a dead sensor. A Hostex or Seam
+failure for one property reports **CHECK FAILED** for that property alone; the
+other properties' verdicts still go out.
+
+**No guest is ever messaged** — the only sends are the owners' group summary
+and, on NOT STARTED, the cleaners thread. That is why this sits outside the
+approval rule (§ Decisions already made): the rule gates what reaches a guest,
+and nothing here can.
+
+### `ops.toml`
+
+The durable model — which properties, which lock, which cleaner, which
+thread — is a hand-authored `ops.toml` at the top of the private vault:
+`~/hermes-vault/ops.toml`, mounted into the container at
+`/opt/data/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
+YAML: the image ships no PyYAML and `tomllib` is stdlib.
+
+```toml
+# ~/hermes-vault/ops.toml — hand-authored. Real values live here only.
+[[properties]]
+hostex_property_id = 12345           # join key for reservations
+title = "Example Property"            # how messages name it
+timezone = "America/Los_Angeles"      # IANA; check-in math happens in this
+default_checkin_time = "16:00"        # fallback when the reservation has none
+seam_device_id = "abc-123"            # the front-door lock
+cleaner_name = "Jane"                 # how the agent addresses them
+cleaner_access_code_ids = ["code-uuid-1"]  # Seam ids that count as "cleaner"
+cleaners_thread = "Cleaners"          # display name in PLOW_CHAT_GROUP_UIDS
+```
+
+The first commit of `ops.toml` into `sams-str-vault` is by hand, same as any
+new file there — after that, `scripts/promote-vault` carries edits to it like
+any other corpus page; its untracked-top-level refusal only catches paths that
+have never been committed.
+
+### Enabling it
+
+Prerequisites: the cleaners iMessage group exists, someone has said something
+in it (the vouch — § Plow group chats), and it is labelled in
+`PLOW_CHAT_GROUP_UIDS` under the same name `ops.toml`'s `cleaners_thread`
+gives it. `ops.toml` is written. Then, on the deployed checkout:
+
+```sh
+./scripts/enable-checkin-watch.sh
+```
+
+It refuses without `HERMES_HOME`, without an `ops.toml` in the vault, and if a
+`checkin-watch` job already exists. Read the job back:
+
+```sh
+agent-mgr compose str exec -T hermes hermes cron list
+```
+
+Schedule is `0 12 * * *` — noon in the container's timezone (`agent.env` pins
+`America/Los_Angeles`), three hours ahead of the earliest standard check-in.
+
+**Trade-off: an approved early check-in does not move the noon check.** The
+schedule is fixed at enable time; a guest who checks in earlier than
+`default_checkin_time` (or an owner who approves an early-arrival request) gets
+no earlier cleaner check. The upgrade path, when that starts mattering, is the
+`hostex-inbound` poller's pattern — event-driven off Hostex rather than a fixed
+cron time.
 
 ## Seam (smart locks)
 
