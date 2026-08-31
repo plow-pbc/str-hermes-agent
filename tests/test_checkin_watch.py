@@ -64,21 +64,20 @@ def test_verdict_activity_most_recent_when_out_of_order():
     )
     assert kind == "activity" and ev["occurred_at"] == "2026-08-31T17:15:00.000Z"
 
-def test_checkin_time_prefers_reservation_arrival():
-    r = {"check_in_details": {"arrival_at": {"hour": 15, "minute": 30}}}
-    assert watch.checkin_time(r, prop()) == (15, 30)
-
-@pytest.mark.parametrize("r", [
-    {},                                        # no details at all
-    {"check_in_details": {}},                  # details, no arrival
-    {"check_in_details": {"arrival_at": None}} # explicit null (the doc's shape)
+@pytest.mark.parametrize(("r", "expected"), [
+    ({"check_in_details": {"arrival_at": {"hour": 15, "minute": 30}}}, (15, 30)),
+    ({}, (16, 0)),                                        # no details at all
+    ({"check_in_details": {}}, (16, 0)),                  # details, no arrival
+    ({"check_in_details": {"arrival_at": None}}, (16, 0)) # explicit null (the doc's shape)
 ])
-def test_checkin_time_falls_back_to_default(r):
-    assert watch.checkin_time(r, prop()) == (16, 0)
+def test_checkin_time(r, expected):
+    assert watch.checkin_time(r, prop()) == expected
 
 @pytest.mark.parametrize("bad_ops_text,expected_match", [
     (OPS.replace('seam_device_id = "dev-1"\n', ""), "seam_device_id"),
     (OPS.replace("16:00", "4pm"), "default_checkin_time"),
+    (OPS.replace("16:00", "16:99"), "out of range"),
+    (OPS.replace("16:00", "24:00"), "out of range"),
     (OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = []'), "cleaner_access_code_ids"),
     (OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = "code-1"'), "cleaner_access_code_ids"),
     ("this is not valid toml {{{", "ops.toml"),
@@ -86,6 +85,8 @@ def test_checkin_time_falls_back_to_default(r):
 ], ids=[
     "missing_seam_device_id",
     "bad_default_checkin_time",
+    "minute_out_of_range",
+    "hour_out_of_range",
     "empty_access_code_ids",
     "string_access_code_ids",
     "bad_toml",

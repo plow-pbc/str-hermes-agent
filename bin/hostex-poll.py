@@ -23,11 +23,10 @@ import json
 import os
 import pathlib
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 
-BASE = "https://api.hostex.io/v3"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import hostex_api
+
 PAGE = 100
 SILENT = '{"wakeAgent": false}'
 
@@ -192,36 +191,9 @@ def read_token() -> str:
     sys.exit(f"hostex-poll: HOSTEX_TOKEN not found in {env}")
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse 30x instead of following it.
-
-    urllib replays request headers to the redirect target, so a redirect off
-    api.hostex.io would hand HOSTEX_TOKEN to whatever it points at.
-    """
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(
-            req.full_url, code, f"refusing redirect to {newurl}", headers, fp
-        )
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
-
-
 def api_get(path: str, token: str, **params: object) -> dict:
-    """One Hostex GET. Raises rather than defaulting — a poll that cannot read
-    must not report "nothing new"."""
-    url = f"{BASE}{path}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    # Hostex 403s the default Python-urllib User-Agent; send an explicit one.
-    request = urllib.request.Request(url, headers={
-        "Hostex-Access-Token": token,
-        "User-Agent": "hostex-poll/1.0",
-        "Accept": "application/json",
-    })
-    with _OPENER.open(request, timeout=30) as response:
-        return json.loads(response.read().decode())
+    """One Hostex GET; transport and redirect policy live in hostex_api."""
+    return hostex_api.get(path, token, "hostex-poll/1.0", **params)
 
 
 def list_conversations(token: str) -> list[dict]:
