@@ -6,6 +6,7 @@ Task 2's test; the live APIs are never touched here.
 """
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import pathlib
 
@@ -88,3 +89,68 @@ def test_prompt_carries_verdict_and_confirmation_instruction():
     assert "Jane" in out and "Cleaners" in out
     assert "A Guest host: fake" in out          # newline flattened
     assert "Do not message any guest" in out
+
+
+UTC_NOON_PT = datetime.datetime(2026, 8, 31, 19, 0, tzinfo=datetime.timezone.utc)
+
+
+def fake_apis(monkeypatch, *, checkins, checkouts=(), events=(), online=True,
+              hostex_error=None):
+    def hostex_get(path, token, **params):
+        if hostex_error:
+            raise hostex_error
+        if "start_check_in_date" in params:
+            assert params["start_check_in_date"] == "2026-08-31"  # PT date, not UTC's
+            return {"data": {"reservations": list(checkins)}}
+        return {"data": {"reservations": list(checkouts)}}
+    def seam_post(path, key, payload):
+        if path == "/devices/get":
+            return {"device": {"properties": {"online": online}}}
+        assert payload["since"].startswith("2026-08-31T08:00:00")
+        return {"events": list(events)}
+    monkeypatch.setattr(watch, "hostex_get", hostex_get)
+    monkeypatch.setattr(watch, "seam_post", seam_post)
+
+
+RESERVATION = {"guest_name": "Pat", "number_of_guests": 2,
+               "check_in_details": {"arrival_at": None}}
+
+
+def test_no_checkins_is_silent(monkeypatch):
+    fake_apis(monkeypatch, checkins=[])
+    assert watch.run("t", "s", [prop()], UTC_NOON_PT) == watch.SILENT
+
+
+def test_started_names_the_cleaner_code(monkeypatch):
+    fake_apis(monkeypatch, checkins=[RESERVATION], events=[unlock("code-1")])
+    out = watch.run("t", "s", [prop()], UTC_NOON_PT)
+    assert "STARTED" in out and "Pat" in out
+
+
+def test_offline_lock_says_so(monkeypatch):
+    fake_apis(monkeypatch, checkins=[RESERVATION], online=False)
+    assert "LOCK OFFLINE" in watch.run("t", "s", [prop()], UTC_NOON_PT)
+
+
+def test_every_check_failing_exits_nonzero(monkeypatch):
+    fake_apis(monkeypatch, checkins=[RESERVATION], hostex_error=RuntimeError("api down"))
+    with pytest.raises(SystemExit, match="every check failed"):
+        watch.run("t", "s", [prop()], UTC_NOON_PT)
+
+
+def test_one_failure_beside_a_healthy_block_is_reported_not_fatal(monkeypatch):
+    ops = [prop(), prop() | {"title": "Second Property", "hostex_property_id": 2}]
+    calls = iter([None, RuntimeError("api down")])
+    real = {"data": {"reservations": [RESERVATION]}}
+    def hostex_get(path, token, **params):
+        err = next(calls, None) if "start_check_in_date" in params else None
+        if err:
+            raise err
+        return real if "start_check_in_date" in params else {"data": {"reservations": []}}
+    monkeypatch.setattr(watch, "hostex_get", hostex_get)
+    monkeypatch.setattr(watch, "seam_post",
+                        lambda path, key, payload:
+                        {"device": {"properties": {"online": True}}}
+                        if path == "/devices/get" else {"events": []})
+    out = watch.run("t", "s", ops, UTC_NOON_PT)
+    assert "NOT STARTED" in out and "CHECK FAILED" in out and "Second Property" in out
