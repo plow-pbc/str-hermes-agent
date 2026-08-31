@@ -83,6 +83,13 @@ def test_checkin_time_falls_back_to_default(r):
     (OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = "code-1"'), "cleaner_access_code_ids"),
     ("this is not valid toml {{{", "ops.toml"),
     ("[other]\nkey = 'value'", "properties"),
+], ids=[
+    "missing_seam_device_id",
+    "bad_default_checkin_time",
+    "empty_access_code_ids",
+    "string_access_code_ids",
+    "bad_toml",
+    "missing_properties_section",
 ])
 def test_load_ops_refuses_invalid_input(bad_ops_text, expected_match):
     with pytest.raises(SystemExit, match=expected_match):
