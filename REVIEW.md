@@ -154,11 +154,14 @@ This is a posture on *hardening*, not a blanket security amnesty:
    surface, so widening it lands here.
 
    `send_message` is the settled exception, not an instance of this. The
-   operator granted it deliberately so an approved reply can reach the guest;
-   the boundary is the approval instruction in `bin/hostex-poll.py`, and it is
-   a prompt instruction on purpose. Proposing a structural gate in its place —
-   a draft store, an approval token, a `pre_tool_call` hook — is out of scope
-   here and belongs to `#29`. The allowlist was never the security boundary it
+   operator granted it deliberately so a reply can reach the guest; the
+   boundary is the two-tier guest-send instruction owned by `runtime/SOUL.md`
+   (explicit approval by default; an announced 30-minute owner veto window for
+   commitment-free, vault-verbatim drafts) and referenced from
+   `bin/hostex-poll.py`, and it is a prompt instruction on purpose. Proposing
+   a structural gate in its place — a draft store, an approval token, a
+   `pre_tool_call` hook — is out of scope here and belongs to `#29` (public
+   tracker: #5). The allowlist was never the security boundary it
    was documented as: the agent holds `terminal` and can read `HOSTEX_TOKEN`
    directly (`#46`).
 3. A change that **creates a new path for `HOSTEX_TOKEN` or vault contents to

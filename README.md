@@ -34,8 +34,10 @@ The loop, end to end:
 3. It drafts a reply — grounded in the operations wiki and in what the cleaner
    and handyman have been saying in their group threads.
 4. It texts the draft to the **STR Owners** group over iMessage.
-5. Any owner approves, edits, or declines.
-6. **Only on approval does anything reach the guest.**
+5. Any owner approves, edits, or declines — a commitment-free draft grounded
+   verbatim in the vault instead announces a 30-minute veto window.
+6. **Nothing reaches the guest silently: an approval, or a veto window the
+   owners let pass, is what sends.**
 
 Two capabilities sit beside that loop and feed it:
 
@@ -46,8 +48,11 @@ Two capabilities sit beside that loop and feed it:
 - **Door control.** Ad-hoc lock/unlock over Seam, so "let the cleaner in" is a
   text rather than a drive.
 
-**The rule the whole design turns on: the agent never speaks to a guest without
-an owner's approval.** Most things here are negotiable; that one is not. It is what
+**The rule the whole design turns on: the agent never speaks to a guest with
+wording the owners have not seen.** Explicit approval is the default; the one
+exception is the 30-minute veto window (§ Decisions already made), where the
+owners see the exact wording and its sources before anything sends. Most
+things here are negotiable; that one is not. It is what
 makes it tolerable for untrusted guest text to reach a runtime holding a Hostex
 token and the ability to open doors.
 
@@ -75,7 +80,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/lint/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the vault holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is composed from the operator persona plus the vault index and injected into every turn (#56), so a turn opens the page it needs rather than answering from the summary |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. No draft ids or expiry yet (#29) |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
@@ -107,10 +112,10 @@ That is deliberate at one operator — see § Inbound guest messages → What th
 changes about the trust boundary for the reasoning, which turns on the fact
 that the obvious structural alternative was not a boundary either (#46).
 
-Still thin, and worth fixing when it bites rather than before: several
-conversations can be outstanding at once, and nothing addresses a draft by
-id, so "yes, send it" relies on the conversation being unambiguous. A draft
-store with ids, expiry, and send-once semantics is designed in #29.
+Still thin, and worth fixing when it bites rather than before: every delivery
+now carries a draft id, so "yes, send it" and "stop" can name their target,
+but ids live only in the prompt contract — a draft store with expiry and
+send-once semantics is designed in #29 and remains unbuilt.
 
 **4. Group awareness.** Feed the cleaner and handyman threads into the same
 memory the drafter reads, so operational reality — a broken appliance, a late
@@ -122,14 +127,24 @@ context; nothing carries it across.
 and issue #7 for what changes when guest mail starts being handled unattended.
 **That trigger has fired** — the cron job exists (§ Inbound guest messages), so
 guest text already reaches an agent turn with no human in the loop, and that
-turn can message a guest. The approval instruction is what stands between the
-two; #46 records why the allowlist never was.
+turn can message a guest. SOUL.md's two-tier instruction is what stands
+between the two; #46 records why the allowlist never was.
 
 ## Decisions already made
 
-- **Approval is per-message and explicit.** No auto-send for "easy" questions,
-  no confidence threshold. The first version of that idea is where the loop
-  stops being trustworthy.
+- **Every guest message is owner-visible before it sends; low-risk drafts get
+  a veto window instead of blocking on approval.** This supersedes the
+  original "per-message and explicit, no auto-send, no confidence threshold"
+  decision (2026-08-31). Basis: a month of live corrections showed every
+  owner edit targeted expectation-setting content, never commitment-free
+  wording, and the vault already defines the verified-fact class (an unmarked
+  bullet may be repeated to a guest verbatim). A draft whose facts are all
+  verbatim unmarked-bullet quotes (or that has no facts) and that makes no
+  commitment is announced to the owners' group — source bullets quoted — and
+  sends after 30 minutes unless an owner objects. Everything else, and any
+  doubt, still requires explicit approval. Nothing ever sends silently, and
+  there is still no confidence threshold — the veto class is a bright-line
+  checklist, not a score.
 - **Drafts are addressable.** Several can be outstanding at once, so a reply
   has to say *which* draft it approves.
 - **Hostex is reached over its hosted MCP server** for anything the *agent*
@@ -797,16 +812,18 @@ This makes guest mail **unattended**, which the roadmap names as the trigger
 for revisiting #7.
 
 The agent holds `send_message`, and what keeps it from answering a guest on its
-own is the approval instruction in the cron prompt (`bin/hostex-poll.py`):
-nothing goes to the guest until an owner approves the wording, and what they
-approved is what gets sent. Every member of the owners' group is an owner, so
+own is the two-tier instruction owned by `runtime/SOUL.md` and referenced from
+the cron prompt (`bin/hostex-poll.py`): nothing goes to the guest with wording
+the owners have not seen — explicit approval by default, the announced veto
+window as the one exception — and what they approved (or let pass) is what
+gets sent. Every member of the owners' group is an owner, so
 any of them can approve. That is an instruction, not a gate — a deliberate
 choice at one operator, made because the alternative was not the gate it
 looked like.
 
-Two owners can approve the same draft, and nothing addresses a draft by id
-yet, so the only thing between a second approval and a duplicate guest message
-is the agent knowing it already sent. That is the same ambiguity #29 was
+Two owners can approve the same draft, and while every delivery now carries a
+draft id, nothing enforces send-once, so the only thing between a second
+approval and a duplicate guest message is the agent knowing it already sent. That is the same ambiguity #29 was
 already designed to close; a second approver widens it rather than creating
 it.
 
