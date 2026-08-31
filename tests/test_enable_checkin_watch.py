@@ -23,18 +23,18 @@ EXISTING_JOB = f"  Name:      {NAME}"
 # Same shape as the wiki-nightly and hostex-inbound fakes: record the argv the
 # gateway would receive rather than re-implementing the scheduler, NUL-
 # delimited so an argument carrying a space cannot compare equal to two
-# arguments. The dotenv reads are served inline (group name "Owners", uid
-# mapping "cht_x=Owners") rather than from a real file, since the fake
-# intercepts the whole `agent-mgr ... exec ... sh -c '...'` argv before any
-# shell inside a container would see it.
+# arguments. The dotenv reads are served from $GROUP_NAME/$UID_MAP rather
+# than a real file, since the fake intercepts the whole
+# `agent-mgr ... exec ... sh -c '...'` argv before any shell inside a
+# container would see it.
 FAKE_AGENT_MGR = """#!/usr/bin/env bash
 case "$*" in
   *'printf %s "$HERMES_HOME"'*) printf '%s' "$STATE" ;;
   *"test -f"*)      exit ${OPS_TOML_EXIT:-0} ;;
   *"cron list"*)    [ -s "$JOBS" ] && cat "$JOBS"
                     exit ${PRE_LIST_OK:-0} ;;
-  *"PLOW_CHAT_APPROVAL_GROUP="*) echo "Owners" ;;
-  *"PLOW_CHAT_GROUP_UIDS="*)     echo "cht_x=Owners" ;;
+  *"PLOW_CHAT_APPROVAL_GROUP="*) printf '%s\\n' "$GROUP_NAME" ;;
+  *"PLOW_CHAT_GROUP_UIDS="*)     printf '%s\\n' "$UID_MAP" ;;
   *"cron create"*)  echo cron >> "$CALLS"
                     printf '%s\\0' "$@" > "$CRON_ARGV"
                     prev=
@@ -48,7 +48,9 @@ exit 0
 """
 
 
-def enable(tmp_path, *, ops_present=True, jobs_seed="", create_ok=0):
+def enable(tmp_path, *, ops_present=True, jobs_seed="", create_ok=0,
+           state="/opt/data/hermes-home", group_name="Owners",
+           uid_map="cht_x=Owners"):
     calls, jobs, argv = tmp_path / "calls", tmp_path / "jobs", tmp_path / "argv"
     jobs.write_text(jobs_seed)
     # agent-mgr, not docker: the enable scripts reach the container through
@@ -59,7 +61,7 @@ def enable(tmp_path, *, ops_present=True, jobs_seed="", create_ok=0):
     fake.chmod(0o755)
     env = {**os.environ,
            "PATH": f"{tmp_path}:{os.environ['PATH']}",
-           "STATE": str(tmp_path / "hermes-home"),
+           "STATE": state, "GROUP_NAME": group_name, "UID_MAP": uid_map,
            "CALLS": str(calls), "JOBS": str(jobs), "CRON_ARGV": str(argv),
            "OPS_TOML_EXIT": "0" if ops_present else "1",
            "CREATE_OK": str(create_ok)}
@@ -81,33 +83,29 @@ def test_creates_the_daily_job_delivering_to_the_owners_group(tmp_path):
     assert tokens[tokens.index("--deliver") + 1] == "plow_chat:cht_x"
 
 
-def test_refuses_a_second_job(tmp_path):
-    run, calls, argv = enable(tmp_path, jobs_seed=EXISTING_JOB)
-
-    assert run.returncode != 0
-    assert "cron" not in calls
-
-
-def test_refuses_without_ops_toml(tmp_path):
-    run, calls, argv = enable(tmp_path, ops_present=False)
-
-    assert run.returncode != 0
-    assert "cron" not in calls
-
-
 @pytest.mark.parametrize(
-    ("kwargs", "says"),
+    ("kwargs", "creates", "says"),
     [
-        pytest.param({"jobs_seed": EXISTING_JOB}, "already exists",
-                     id="second-job-message"),
-        pytest.param({"ops_present": False}, "ops.toml",
-                     id="missing-ops-toml-message"),
-        pytest.param({"create_ok": 1}, None, id="a-refused-create-fails-the-run"),
+        pytest.param({"jobs_seed": EXISTING_JOB}, False, "already exists",
+                     id="second-job"),
+        pytest.param({"ops_present": False}, False, "ops.toml",
+                     id="missing-ops-toml"),
+        pytest.param({"state": ""}, False, "HERMES_HOME",
+                     id="hermes-home-unset"),
+        pytest.param({"group_name": ""}, False, "PLOW_CHAT_APPROVAL_GROUP",
+                     id="group-name-unset"),
+        pytest.param({"uid_map": "cht_y=Other"}, False,
+                     "names no group", id="group-not-in-uid-map"),
+        pytest.param({"create_ok": 1}, True, None,
+                     id="a-refused-create-fails-the-run"),
     ],
 )
-def test_the_run_stops_rather_than_creating_a_half_wired_job(tmp_path, kwargs, says):
+def test_the_run_stops_rather_than_creating_a_half_wired_job(
+    tmp_path, kwargs, creates, says
+):
     run, calls, _ = enable(tmp_path, **kwargs)
 
     assert run.returncode != 0
+    assert (calls == ["cron"]) is creates
     if says:
         assert says in run.stdout + run.stderr
