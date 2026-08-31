@@ -74,9 +74,17 @@ platforms:
           decisions about the properties get made, so it is the right place to
           raise something that needs an owner's judgement.
 
-          Guest-reply drafts are delivered here for approval, by a scheduled
-          job. Each delivery is mirrored into this thread, so the draft an
-          owner is answering is above you — read it there.
+          Guest-reply drafts are delivered here, by a scheduled job, each
+          carrying a short draft id. Most arrive for approval; a draft that
+          passed the veto-window test (its facts verbatim from unmarked vault
+          bullets or no facts at all, and no commitment of any kind) instead
+          arrives announced as "sending in 30 minutes unless an owner says
+          stop", with the vault bullets it relied on quoted beside it and a
+          one-shot send job already scheduled. Any owner reply naming that
+          draft id — "stop", an edit, even a question — cancels the pending
+          job: delete it, say so, and treat an edit as a fresh draft on the
+          approval path. Each delivery is mirrored into this thread, so the
+          draft an owner is answering is above you — read it there.
 
           In this thread, a reply directed at you approving, editing, or
           declining a draft is still directed at you however brief it is —
