@@ -56,6 +56,14 @@ def test_verdict_evidence_is_the_attributed_unlock():
     kind, ev = watch.verdict([unlock("other"), unlock("code-1", at="T2")], {"code-1"})
     assert kind == "started" and ev["occurred_at"] == "T2"
 
+def test_verdict_activity_most_recent_when_out_of_order():
+    # Ensure activity verdict returns the event with the latest timestamp, not list position
+    kind, ev = watch.verdict(
+        [unlock(at="2026-08-31T17:12:00.000Z"), unlock("other", at="2026-08-31T17:15:00.000Z")],
+        set()
+    )
+    assert kind == "activity" and ev["occurred_at"] == "2026-08-31T17:15:00.000Z"
+
 def test_checkin_time_prefers_reservation_arrival():
     r = {"check_in_details": {"arrival_at": {"hour": 15, "minute": 30}}}
     assert watch.checkin_time(r, prop()) == (15, 30)
@@ -75,6 +83,22 @@ def test_load_ops_refuses_missing_field():
 def test_load_ops_refuses_bad_default_time():
     with pytest.raises(SystemExit, match="default_checkin_time"):
         watch.load_ops_text(OPS.replace("16:00", "4pm"))
+
+def test_load_ops_refuses_empty_access_code_ids():
+    with pytest.raises(SystemExit, match="cleaner_access_code_ids"):
+        watch.load_ops_text(OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = []'))
+
+def test_load_ops_refuses_string_access_code_ids():
+    with pytest.raises(SystemExit, match="cleaner_access_code_ids"):
+        watch.load_ops_text(OPS.replace('cleaner_access_code_ids = ["code-1"]', 'cleaner_access_code_ids = "code-1"'))
+
+def test_load_ops_refuses_bad_toml():
+    with pytest.raises(SystemExit, match="ops.toml"):
+        watch.load_ops_text("this is not valid toml {{{")
+
+def test_load_ops_refuses_missing_properties_section():
+    with pytest.raises(SystemExit, match="properties"):
+        watch.load_ops_text("[other]\nkey = 'value'")
 
 def test_prompt_carries_verdict_and_confirmation_instruction():
     block = watch.render_block(
