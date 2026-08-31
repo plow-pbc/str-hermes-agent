@@ -163,9 +163,9 @@ two; #46 records why the allowlist never was.
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
 | `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `~/.hermes` |
 | `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`, installed into the runtime vault at deploy. The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
-| `scripts/restore-runtime-config.sh` | This agent's restore hook, run **by** `agent-mgr restore str` (declared as `AGENT_RESTORE_HOOK`): seeds the runtime vault from `runtime/vault-seed/`, rebuilds the property hubs, composes `SOUL.md`, and refuses without a vault at `~/hermes-vault`. Not a standalone entry point. |
+| `scripts/restore-runtime-config.sh` | This agent's deploy hook, run **by** `agent-mgr deploy str` (declared as `AGENT_DEPLOY_HOOK`): seeds the runtime vault from `runtime/vault-seed/`, rebuilds the property hubs, composes `SOUL.md`, and refuses without a vault at `~/hermes-vault`. Not a standalone entry point. |
 | `.env.example` | The environment-key contract, with no values |
-| [`.claude/skills/deploy-str-hermes/`](.claude/skills/deploy-str-hermes/SKILL.md) | Redeploy to `wakeup` — reseat, restore, force-recreate |
+| [`.claude/skills/deploy-str-hermes/`](.claude/skills/deploy-str-hermes/SKILL.md) | Redeploy to `wakeup` — reseat, deploy, force-recreate |
 | [`.claude/skills/smoke-str-hermes/`](.claude/skills/smoke-str-hermes/SKILL.md) | Prove the deployed container answers, and what that does not prove |
 | `REVIEW.md` | What this repo is for and how PRs against it are reviewed — read before writing code |
 
@@ -253,8 +253,8 @@ agent-mgr register str "$PWD"
 git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
 mkdir -p ~/hermes-vault
 git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
-agent-mgr restore str
-# No dotenv install here: `agent-mgr restore` seeds one from THIS repo's
+agent-mgr deploy str
+# No dotenv install here: `agent-mgr deploy` seeds one from THIS repo's
 # .env.example (it prefers an instance's own over the fleet template), so the
 # home gets all six keys below at mode 600 — verified, not assumed. It never
 # clobbers an existing one. Fill HOSTEX_TOKEN and SEAM_API_KEY from 1Password.
@@ -280,15 +280,15 @@ desired chat. Hermes persists that host-specific home target to the dotenv as
 intentionally not tracked.
 
 <a name="applying-a-runtime-edit"></a>
-Applying a `runtime/` edit — or re-running the restore for any other reason:
+Applying a `runtime/` edit — or re-running the deploy for any other reason:
 
 ```sh
-agent-mgr restore str
+agent-mgr deploy str
 ```
 
-`restore` returns before the gateway is serving, and there is no healthcheck
+`deploy` returns before the gateway is serving, and there is no healthcheck
 to wait on, so watch `agent-mgr logs str` until it lists its
-platforms. `agent-mgr restore` installs `config.yaml`, and the script composes `SOUL.md`; it
+platforms. `agent-mgr deploy` installs `config.yaml`, and the script composes `SOUL.md`; it
 never touches `~/.hermes/.env`, so the home target survives.
 
 Skip `agent-mgr sign-in str` only when a valid
@@ -433,12 +433,12 @@ not overwritten.
 
 What a group is *for* is separate, and lives in `runtime/config.yaml` under
 `platforms.plow_chat.extra.group_prompts`, keyed by that display name — the
-tracked config carries no `cht_` id, since those are per-account and a restore
+tracked config carries no `cht_` id, since those are per-account and a redeploy
 onto a fresh host would bind to groups that no longer exist. A group's prompt is
 appended to the stay-quiet-unless-addressed policy and cannot replace it, so no
 group can be configured into answering everything. A prompt whose key matches no
 configured group is logged and skipped — that is the normal state of a fresh
-restore, where the tracked prompts are present but the dotenv labels are not yet
+deploy, where the tracked prompts are present but the dotenv labels are not yet
 — so check the gateway log after renaming a group.
 
 Invalid configuration prevents the Plow platform from starting; the gateway log
@@ -520,7 +520,7 @@ the inbound poller, which runs before any turn exists, and `bin/hostex-raw`,
 which stages conversations from a shell script (see below).
 
 Config lives in `runtime/config.yaml` under `mcp_servers.hostex` — edit it
-there, never the live copy, which the next restore overwrites. Apply an edit
+there, never the live copy, which the next deploy overwrites. Apply an edit
 the way [applying a `runtime/` edit](#applying-a-runtime-edit) describes.
 The token is `HOSTEX_TOKEN` in `~/.hermes/.env`, substituted into the
 `Authorization` header at connect time; its source of truth is the 1Password
@@ -640,7 +640,7 @@ HMAC where Hostex sends a static header token. Revisit at hardening.
 One-time, on the deployed checkout:
 
 ```sh
-agent-mgr restore str                           # 1 — reloads the gateway
+agent-mgr deploy str                           # 1 — reloads the gateway
 agent-mgr compose str up -d --force-recreate    # 2
 ```
 
@@ -659,7 +659,7 @@ noted with the state file above.
 
 **1** applies the tracked runtime config, which is what puts `send_message` on
 the live allowlist so an approved reply can actually go out. Being tracked, a
-later restore re-applies it rather than undoing it.
+later deploy re-applies it rather than undoing it.
 
 **2** attaches the mount and restarts, because `config.yaml` is read at
 gateway start and `up -d` alone is a no-op once the mount has landed.
@@ -1009,7 +1009,7 @@ just quietly say things twice.
 
 `agent.env` declares `scripts/no-nightly-running` as this agent's
 `AGENT_PRE_TRANSITION` guard, and **agent-mgr invokes it before every container
-transition** — `up`, `down`, `restart`, `restore`, and a `compose` passthrough
+transition** — `up`, `down`, `restart`, `deploy`, and a `compose` passthrough
 whose subcommand transitions. Nothing here restates it **except the
 manual-nightly recovery below**, which runs `nightly.sh` through an `exec`
 passthrough and so fires no hook — there it guards a second concurrent ingest
@@ -1021,12 +1021,12 @@ scanner written to keep them honest then took three more rounds and still could
 not see a table cell, a justfile recipe, or an imperative in prose. A hook the
 tool calls has no copies and no blind spots.
 
-That leaves a real, accepted window: restore fetches the pinned plugin and
+That leaves a real, accepted window: deploy fetches the pinned plugin and
 rewrites the vault (`cp -a` over the seed, then `build-hubs`), so a 03:00 fire
-starting *during* restore is not caught by a check that ran before it. Accepted
+starting *during* deploy is not caught by a check that ran before it. Accepted
 rather than closed, because the nightly runs at one fixed hour and deploys are
 operator-driven — do not deploy at 03:00. The alternative is a gate inside the
-restore hook, which cannot ask the container without the hook calling back into
+deploy hook, which cannot ask the container without the hook calling back into
 agent-mgr, and that is the ownership inversion this migration removed.
 
 **Do not run that one on the scheduler.** A whole-corpus pass needs roughly

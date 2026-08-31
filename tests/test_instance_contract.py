@@ -69,10 +69,10 @@ def test_the_descriptor_is_the_whole_contract_with_agent_mgr():
     - STR_REPO is the DEPLOY clone. Code is written in ~/Hacking and runs from
       ~/services; a runtime aimed at the former goes stale the first time the
       branch moves.
-    - AGENT_CONFIG is why `agent-mgr restore str` works at all -- this agent's
+    - AGENT_CONFIG is why `agent-mgr deploy str` works at all -- this agent's
       config lives under runtime/, and without naming it this repo kept a second
       installer that hardcoded the path and the home.
-    - AGENT_RESTORE_HOOK is what makes one command the whole deploy.
+    - AGENT_DEPLOY_HOOK is what makes one command the whole deploy.
     """
     settings = descriptor()
     expected = {
@@ -84,14 +84,14 @@ def test_the_descriptor_is_the_whole_contract_with_agent_mgr():
         "STR_VAULT": "$HOME/hermes-vault",
         "STR_REPO": "$HOME/services/sams-str-hermes-agent",
         "AGENT_CONFIG": "runtime/config.yaml",
-        "AGENT_RESTORE_HOOK": "scripts/restore-runtime-config.sh",
+        "AGENT_DEPLOY_HOOK": "scripts/restore-runtime-config.sh",
     }
     assert {k: settings.get(k) for k in expected} == expected
 
     # The two paths agent-mgr resolves against this repo have to exist, or the
     # failure surfaces only when someone runs a deploy.
     assert (ROOT / settings["AGENT_CONFIG"]).is_file()
-    hook = ROOT / settings["AGENT_RESTORE_HOOK"]
+    hook = ROOT / settings["AGENT_DEPLOY_HOOK"]
     assert hook.is_file() and hook.stat().st_mode & 0o111, "the hook is not executable"
 
     # No dev checkout anywhere in the settings.
@@ -202,7 +202,7 @@ def test_the_readme_does_not_hand_agent_mgr_a_pin_this_repo_owns():
 
 def test_the_hook_neither_reimplements_nor_orchestrates_deployment():
     """It used to `mkdir` the home and `install` the config itself, hardcoding
-    both -- which is how `agent-mgr restore str` came to be broken. Then it
+    both -- which is how `agent-mgr deploy str` came to be broken. Then it
     called back into agent-mgr, which left two places sequencing the plugin
     install. Then the sequencing moved to the README, which is worse: the
     operator is not an owner.
@@ -213,14 +213,14 @@ def test_the_hook_neither_reimplements_nor_orchestrates_deployment():
     script = (ROOT / "scripts" / "restore-runtime-config.sh").read_text()
     body = "\n".join(l for l in script.splitlines() if not l.lstrip().startswith("#"))
     # Quoted spans stripped for the orchestration check below: the hook's own
-    # error message names `agent-mgr restore str` as the command to run
+    # error message names `agent-mgr deploy str` as the command to run
     # instead, which is guidance, not a call.
     unquoted = QUOTED.sub("", body)
     for reimplemented in ('hermes_home="$HOME/.hermes"',
                           'install -m 600 "$repo_root/runtime/config.yaml"',
                           'mkdir -p "$hermes_home"'):
         assert reimplemented not in body, f"re-implements agent-mgr: {reimplemented}"
-    for orchestrated in ("agent-mgr restore", "agent-mgr install-plugin", "agent-mgr resolve"):
+    for orchestrated in ("agent-mgr deploy", "agent-mgr install-plugin", "agent-mgr resolve"):
         assert orchestrated not in unquoted, (
             f"the hook is calling its own caller: {orchestrated} -- agent-mgr "
             "runs this and exports what it needs")
@@ -256,7 +256,7 @@ def test_nothing_writes_into_the_agents_home_without_resolving_it():
 
 
 def test_the_restore_hook_is_never_invoked_directly():
-    """`agent-mgr restore str` is the one deploy entry point, and it runs this
+    """`agent-mgr deploy str` is the one deploy entry point, and it runs this
     hook itself. A doc or recipe that calls the script directly is the shape
     that put deployment ordering in the operator's hands: the hook alone
     installs no config and no plugin, so it produces a deploy that reads
@@ -271,7 +271,7 @@ def test_the_restore_hook_is_never_invoked_directly():
             continue
         if stripped.startswith("test -"):        # the deploy skill's presence guards
             continue
-        if "AGENT_RESTORE_HOOK" in line:         # the declaration, and prose naming it
+        if "AGENT_DEPLOY_HOOK" in line:         # the declaration, and prose naming it
             continue
         # Prose naming the file in backticks is a reference, not a call --
         # bin/build-hubs explains its own contract that way.
@@ -279,14 +279,14 @@ def test_the_restore_hook_is_never_invoked_directly():
             continue
         offenders.append(f"{f.relative_to(ROOT)}:{i}: {line.strip()[:100]}")
     assert not offenders, (
-        "these invoke the restore hook directly instead of through "
-        "`agent-mgr restore str`:\n" + "\n".join(offenders))
+        "these invoke the deploy hook directly instead of through "
+        "`agent-mgr deploy str`:\n" + "\n".join(offenders))
 
 
 
 
 def test_the_deploy_asserts_the_hook_actually_ran():
-    """Declaring AGENT_RESTORE_HOOK proves nothing: this repo cannot see whether
+    """Declaring AGENT_DEPLOY_HOOK proves nothing: this repo cannot see whether
     agent-mgr honours it, and the test that checks the key is present stays green
     either way. Unhonoured, config.yaml still lands and the container still
     recreates, so the gateway comes up over an un-overlaid vault, empty hub lists
@@ -297,8 +297,8 @@ def test_the_deploy_asserts_the_hook_actually_ran():
     """
     skill = (ROOT / ".claude/skills/deploy-str-hermes/SKILL.md").read_text()
     assert "Restored tracked Hermes configuration to" in skill, (
-        "the deploy does not verify the restore hook ran")
-    assert "AGENT_RESTORE_HOOK" in skill and "NOT applied" in skill
+        "the deploy does not verify the deploy hook ran")
+    assert "AGENT_DEPLOY_HOOK" in skill and "NOT applied" in skill
 
     # And the hook must still print the line the deploy greps for.
     hook = (ROOT / "scripts/restore-runtime-config.sh").read_text()

@@ -60,7 +60,7 @@ skill maps the host — rather than piping these through `ssh` inline.
 - **Pull `--ff-only`, on `main` only.** A non-fast-forward means prod diverged; stop and investigate.
 - **Never** force-push, `--no-verify`, `git stash`, `git reset --hard`, `git clean`, or `git checkout -- <path>`.
 - **Never print secret values.** `~/.hermes/.env` holds the Hostex, Seam, and Plow credentials; check presence or last 3 chars, never `cat` it.
-- **Restore replaces `~/.hermes/config.yaml` and `~/.hermes/SOUL.md` wholesale** — the SOUL is composed from `runtime/SOUL.md` plus the vault index, so a host-side edit to it is lost; edit `runtime/SOUL.md` instead. It also overlays the deploy-owned seed into the runtime vault — `AGENTS.md` and `.env` — so an edit made to those *in the vault* is lost on the next deploy; edit `runtime/vault-seed/` instead. The property hubs under `properties/` are the vault's own: edit their prose there, it survives a deploy. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages immediately after the overlay, and again on every nightly. Rename the page, don't edit the link. `agent-mgr restore str` installs the pinned Plow Chat plugin as part of the same command, so it is the whole of "apply `runtime/`". What it does not touch is the agent's `.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a redeploy does not unbind the home chat.
+- **Restore replaces `~/.hermes/config.yaml` and `~/.hermes/SOUL.md` wholesale** — the SOUL is composed from `runtime/SOUL.md` plus the vault index, so a host-side edit to it is lost; edit `runtime/SOUL.md` instead. It also overlays the deploy-owned seed into the runtime vault — `AGENTS.md` and `.env` — so an edit made to those *in the vault* is lost on the next deploy; edit `runtime/vault-seed/` instead. The property hubs under `properties/` are the vault's own: edit their prose there, it survives a deploy. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages immediately after the overlay, and again on every nightly. Rename the page, don't edit the link. `agent-mgr deploy str` installs the pinned Plow Chat plugin as part of the same command, so it is the whole of "apply `runtime/`". What it does not touch is the agent's `.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a redeploy does not unbind the home chat.
 
 ## 1. Confirm the checkout is deployable
 
@@ -78,7 +78,7 @@ included, means someone edited production directly or recreated a vault
 inside the checkout. The Plow Chat plugin is no longer part of this
 tree — it is installed into `~/.hermes/plugins` from a pinned upstream SHA, so
 a file hand-dropped *there* is running in production and this check cannot see
-it. The plugin install inside `agent-mgr restore str` (step 3) rewrites only the files it
+it. The plugin install inside `agent-mgr deploy str` (step 3) rewrites only the files it
 manages under `plugins/plow-chat-platform/`, so it bounds drift in *that*
 plugin and nothing more — a sibling directory dropped into `~/.hermes/plugins`
 is loaded by the gateway and is checked by neither this gate nor the installer.
@@ -162,16 +162,16 @@ An empty log means nothing new — say so rather than reporting a deploy.
   # agent.env still declared it and every test stayed green.
   agent-mgr resolve str | grep -q '^AGENT_PRE_TRANSITION=' \
     || { echo "FATAL: the installed agent-mgr does not implement AGENT_PRE_TRANSITION — the nightly guard would NOT run. Update ~/services/agent-mgr."; exit 1; }
-  # This repo declares AGENT_RESTORE_HOOK, but nothing here can see whether
+  # This repo declares AGENT_DEPLOY_HOOK, but nothing here can see whether
   # agent-mgr honoured it. Unhonoured, config.yaml still
   # lands, step 4 still recreates the container, and the gateway comes up
   # listing its platforms over an un-overlaid vault, empty hub lists and a stale
   # SOUL -- every check green, the deploy shipping nothing. The hook's own
   # closing line is the one signal that it ran.
-  out=$(agent-mgr restore str) || { printf '%s\n' "$out" >&2; echo "FATAL: agent-mgr restore str failed"; exit 1; }
+  out=$(agent-mgr deploy str) || { printf '%s\n' "$out" >&2; echo "FATAL: agent-mgr deploy str failed"; exit 1; }
   printf '%s\n' "$out" >&2
   printf '%s\n' "$out" | grep -q '^Restored tracked Hermes configuration to ' \
-    || { echo "FATAL: agent-mgr restore did not run this repo's AGENT_RESTORE_HOOK — the vault seed, hubs and SOUL were NOT applied"; exit 1; }
+    || { echo "FATAL: agent-mgr deploy did not run this repo's AGENT_DEPLOY_HOOK — the vault seed, hubs and SOUL were NOT applied"; exit 1; }
 )
 ```
 
@@ -187,17 +187,17 @@ or deploy the branch that adds them. Either way, bringing the gateway up
 anyway means step 4 runs against whatever stale `~/.hermes/config.yaml` is
 already there.
 
-`runtime/config.yaml` is canonical — model route, Hostex allowlist, and the Seam server all live there. Editing the live copy instead is how the two drift, and the next restore silently wins.
+`runtime/config.yaml` is canonical — model route, Hostex allowlist, and the Seam server all live there. Editing the live copy instead is how the two drift, and the next deploy silently wins.
 
 One command, because `agent-mgr` owns the deploy end to end: it creates the
 home, installs `runtime/config.yaml` (named by `AGENT_CONFIG` in `agent.env`)
-and the pinned plugin, then runs this repo's own restore hook
-(`AGENT_RESTORE_HOOK` → `scripts/restore-runtime-config.sh`) for the vault seed,
+and the pinned plugin, then runs this repo's own deploy hook
+(`AGENT_DEPLOY_HOOK` → `scripts/restore-runtime-config.sh`) for the vault seed,
 the hub rebuild and the composed SOUL — and reloads the gateway once at the end.
-A failing hook fails the restore, so a refusal cannot read as a landed deploy.
+A failing hook fails the deploy, so a refusal cannot read as a landed deploy.
 
 It used to be the other way round: the script hardcoded the home and
-re-implemented the config install, which is how `agent-mgr restore str` came to
+re-implemented the config install, which is how `agent-mgr deploy str` came to
 be broken without anyone noticing. It is a reconcile, not a first-time install —
 verified against the pinned installer rather than assumed: a second run
 rewrites every file it manages, so a bumped pin swaps the adapter and a
