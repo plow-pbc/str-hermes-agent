@@ -106,10 +106,10 @@ That is deliberate at one operator — see § Inbound guest messages → What th
 changes about the trust boundary for the reasoning, which turns on the fact
 that the obvious structural alternative was not a boundary either (#46).
 
-Still thin, and worth fixing when it bites rather than before: several
-conversations can be outstanding at once, and nothing addresses a draft by
-id, so "yes, send it" relies on the conversation being unambiguous. A draft
-store with ids, expiry, and send-once semantics is designed in #29.
+Still thin, and worth fixing when it bites rather than before: every delivery
+now carries a draft id, so "yes, send it" and "stop" can name their target,
+but ids live only in the prompt contract — a draft store with expiry and
+send-once semantics is designed in #29 and remains unbuilt.
 
 **4. Group awareness.** Feed the cleaner and handyman threads into the same
 memory the drafter reads, so operational reality — a broken appliance, a late
@@ -813,9 +813,9 @@ any of them can approve. That is an instruction, not a gate — a deliberate
 choice at one operator, made because the alternative was not the gate it
 looked like.
 
-Two owners can approve the same draft, and nothing addresses a draft by id
-yet, so the only thing between a second approval and a duplicate guest message
-is the agent knowing it already sent. That is the same ambiguity #29 was
+Two owners can approve the same draft, and while every delivery now carries a
+draft id, nothing enforces send-once, so the only thing between a second
+approval and a duplicate guest message is the agent knowing it already sent. That is the same ambiguity #29 was
 already designed to close; a second approver widens it rather than creating
 it.
 
