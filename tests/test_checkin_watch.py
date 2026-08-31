@@ -91,7 +91,7 @@ def test_prompt_carries_verdict_and_confirmation_instruction():
     assert "Do not message any guest" in out
 
 
-UTC_NOON_PT = datetime.datetime(2026, 8, 31, 19, 0, tzinfo=datetime.timezone.utc)
+UTC_NOON_PT = datetime.datetime(2026, 9, 1, 3, 0, tzinfo=datetime.timezone.utc)  # 2026-08-31T20:00 PT
 
 
 def fake_apis(monkeypatch, *, checkins, checkouts=(), events=(), online=True,
@@ -116,20 +116,19 @@ RESERVATION = {"guest_name": "Pat", "number_of_guests": 2,
                "check_in_details": {"arrival_at": None}}
 
 
-def test_no_checkins_is_silent(monkeypatch):
-    fake_apis(monkeypatch, checkins=[])
-    assert watch.run("t", "s", [prop()], UTC_NOON_PT) == watch.SILENT
-
-
-def test_started_names_the_cleaner_code(monkeypatch):
-    fake_apis(monkeypatch, checkins=[RESERVATION], events=[unlock("code-1")])
+@pytest.mark.parametrize("fake_apis_kwargs,expected", [
+    ({"checkins": []}, watch.SILENT),
+    ({"checkins": [RESERVATION], "events": [unlock("code-1")]}, ("STARTED", "Pat")),
+    ({"checkins": [RESERVATION], "online": False}, "LOCK OFFLINE"),
+])
+def test_run_verdicts(monkeypatch, fake_apis_kwargs, expected):
+    fake_apis(monkeypatch, **fake_apis_kwargs)
     out = watch.run("t", "s", [prop()], UTC_NOON_PT)
-    assert "STARTED" in out and "Pat" in out
-
-
-def test_offline_lock_says_so(monkeypatch):
-    fake_apis(monkeypatch, checkins=[RESERVATION], online=False)
-    assert "LOCK OFFLINE" in watch.run("t", "s", [prop()], UTC_NOON_PT)
+    if isinstance(expected, tuple):
+        for e in expected:
+            assert e in out
+    else:
+        assert expected in out
 
 
 def test_every_check_failing_exits_nonzero(monkeypatch):
