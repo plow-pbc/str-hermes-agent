@@ -314,7 +314,7 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     # the two files. A rewrite that keeps the id but moves it would leave the
     # consumer anchor pointing at whatever precedes the marker, which in a
     # delivery that quotes the guest is plausibly the guest's own text.
-    assert "name the conversation id above it, then a `DRAFT:` line" in flowed
+    assert "(2) the conversation id, (3) a `DRAFT:` line, (4) the wording" in flowed
     # The delivery now carries the guest's own words, not a paraphrase of them,
     # so it is the first time guest-authored text reaches the chat approval
     # happens in. Two clauses hold that: the quote stays attributed, and an
