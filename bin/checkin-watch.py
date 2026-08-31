@@ -52,11 +52,19 @@ def one_line(text: str) -> str:
 def load_ops_text(text: str) -> list[dict]:
     """Parse and validate ops.toml. Refuses an incomplete model by name:
     a property half-described would otherwise skip silently forever."""
-    properties = tomllib.loads(text)["properties"]
+    try:
+        parsed = tomllib.loads(text)
+    except Exception as e:
+        sys.exit(f"checkin-watch: ops.toml parse error: {e}")
+    properties = parsed.get("properties")
+    if not properties:
+        sys.exit("checkin-watch: ops.toml has no [[properties]] entries")
     for prop in properties:
         for key in REQUIRED:
             if key not in prop:
                 sys.exit(f"checkin-watch: ops.toml property missing {key!r}")
+        if not isinstance(prop["cleaner_access_code_ids"], list) or not prop["cleaner_access_code_ids"]:
+            sys.exit("checkin-watch: cleaner_access_code_ids must be a non-empty list")
         if not re.fullmatch(r"\d\d:\d\d", prop["default_checkin_time"]):
             sys.exit("checkin-watch: default_checkin_time must be HH:MM, got "
                      f"{prop['default_checkin_time']!r}")
@@ -94,7 +102,9 @@ def verdict(events: list[dict], code_ids: set[str]) -> tuple[str, dict | None]:
         if event.get("access_code_id") in code_ids:
             return "started", event
     if unlocks:
-        return "activity", unlocks[-1]
+        # Sort by occurred_at to get the most recent unlock regardless of API order
+        most_recent = max(unlocks, key=lambda e: e.get("occurred_at", ""))
+        return "activity", most_recent
     return "none", None
 
 
