@@ -73,6 +73,9 @@ def test_the_descriptor_is_the_whole_contract_with_agent_mgr():
       config lives under runtime/, and without naming it this repo kept a second
       installer that hardcoded the path and the home.
     - AGENT_RESTORE_HOOK is what makes one command the whole deploy.
+    - AGENT_LIVE makes agent-mgr ask before any container transition — the
+      ask-first gate beside AGENT_PRE_TRANSITION's hard veto; agent.env says
+      why.
     """
     settings = descriptor()
     expected = {
@@ -85,6 +88,7 @@ def test_the_descriptor_is_the_whole_contract_with_agent_mgr():
         "STR_REPO": "$HOME/services/sams-str-hermes-agent",
         "AGENT_CONFIG": "runtime/config.yaml",
         "AGENT_RESTORE_HOOK": "scripts/restore-runtime-config.sh",
+        "AGENT_LIVE": "1",
     }
     assert {k: settings.get(k) for k in expected} == expected
 
