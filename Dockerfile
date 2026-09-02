@@ -3,7 +3,7 @@
 # compose build` — which the README documents as the routine rebuild —
 # re-resolves a tag every time it runs.
 # Bump deliberately: `docker buildx imagetools inspect nousresearch/hermes-agent:latest`.
-FROM nousresearch/hermes-agent@sha256:c84f3494f86ae32d6a82a3b7d56111d712f3d82f75f9744e8ae07668889714c2
+FROM nousresearch/hermes-agent@sha256:8f4e8677281eca188bc9d2fda90806646ba19941fce55fa8fda2d63112ff48a8
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't
