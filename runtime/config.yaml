@@ -47,6 +47,30 @@ cron:
 #
 # The cost is that the owners share conversation context in a group thread,
 # which is what a group thread reads like anyway.
+# On a full-budget timeout the aux client skips the same-provider retry for
+# compression and falls back -- but by default there is nowhere to land, so an
+# oversized session freezes and every turn re-stalls. A sibling agent lost ~30h
+# to that on 2026-08-31 (plow-pbc/life-assistant-hermes-agent#71); this agent
+# runs the same provider, so it is the same exposure.
+#
+# The model is pinned, not free-form: a ChatGPT-account codex serves only
+# gpt-5.6-sol and gpt-5.5; every other id 400s. Verify a swap by the fallback
+# log lines, never the return value -- the implicit main-model fallback reports
+# success for a model the account actually rejected. gpt-5.5 was confirmed
+# GENUINE against this agent's own auth before landing, and the pinned image
+# (0.19.0) was confirmed to carry the fallback_chain machinery, so this is
+# honoured rather than inert.
+#
+# Primary gives up first (180s) because reaching the fallback fast is the point;
+# the chain entry keeps 300s since by then it is the only hope left.
+auxiliary:
+  compression:
+    timeout: 180
+    fallback_chain:
+    - provider: openai-codex
+      model: gpt-5.5
+      timeout: 300
+
 group_sessions_per_user: false
 plugins:
   enabled:
