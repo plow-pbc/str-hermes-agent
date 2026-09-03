@@ -13,11 +13,17 @@ loaded by path under test, each script inserts its own directory first.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 BASE = "https://api.hostex.io/v3"
+# Hostex stalls mid-body for over 30 s most days between 16:00 and 17:00 UTC.
+# One stall on a 2-minute poll is not worth a text to the owners, so retry it.
+TIMEOUT_S = 30
+ATTEMPTS = 3
+BACKOFF_S = 2
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -32,7 +38,8 @@ OPENER = urllib.request.build_opener(_NoRedirect)
 def get(path: str, token: str, user_agent: str, **params: object) -> dict:
     """One Hostex GET. Raises rather than defaulting — a caller that cannot
     read must not report "nothing new". Hostex 403s the default Python-urllib
-    User-Agent, so every caller names itself."""
+    User-Agent, so every caller names itself. A transport stall is retried;
+    an HTTP status is not."""
     url = f"{BASE}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -41,5 +48,13 @@ def get(path: str, token: str, user_agent: str, **params: object) -> dict:
         "User-Agent": user_agent,
         "Accept": "application/json",
     })
-    with OPENER.open(request, timeout=30) as response:
-        return json.loads(response.read().decode())
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with OPENER.open(request, timeout=TIMEOUT_S) as response:
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError:
+            raise  # a status is an answer, not a stall; the redirect refusal lands here too
+        except OSError:
+            if attempt == ATTEMPTS:
+                raise
+            time.sleep(BACKOFF_S * attempt)
