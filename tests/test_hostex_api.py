@@ -16,7 +16,6 @@ from __future__ import annotations
 import http.server
 import json
 import pathlib
-import socketserver
 import sys
 import threading
 import urllib.error
@@ -45,8 +44,8 @@ def test_a_redirect_is_refused_and_the_token_is_not_replayed(monkeypatch):
         def log_message(self, *args):
             pass
 
-    origin = socketserver.TCPServer(("127.0.0.1", 0), Handler)
-    elsewhere = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+    origin = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    elsewhere = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     ports["elsewhere"] = elsewhere.server_address[1]
     for server in (origin, elsewhere):
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -94,10 +93,7 @@ def test_a_stall_is_retried_and_a_status_is_not(monkeypatch, responses, outcome)
         def log_message(self, *args):
             pass
 
-    class Server(socketserver.ThreadingTCPServer):
-        daemon_threads = True
-
-    server = Server(("127.0.0.1", 0), Handler)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         monkeypatch.setattr(
