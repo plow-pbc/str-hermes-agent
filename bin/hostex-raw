@@ -73,7 +73,7 @@ def read_token() -> str:
 def api_get(path: str, tok: str, **params: object) -> dict:
     """One Hostex GET; transport and redirect policy live in hostex_api.
 
-    No retry loop. A transient failure aborts the run loudly and costs
+    The client retries a stall; past that, the run aborts loudly and costs
     nothing: there is no progress to lose, so the next run resumes exactly
     where this one stopped."""
     return hostex_api.get(path, tok, "hostex-raw/1.0", **params)

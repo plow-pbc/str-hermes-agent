@@ -14,6 +14,7 @@ not 200 — a followed redirect must both record the header and raise, so
 from __future__ import annotations
 
 import http.server
+import json
 import pathlib
 import socketserver
 import sys
@@ -60,3 +61,56 @@ def test_a_redirect_is_refused_and_the_token_is_not_replayed(monkeypatch):
         for server in (origin, elsewhere):
             server.shutdown()
             server.server_close()
+
+
+@pytest.mark.parametrize("responses, outcome", [
+    (["stall", "stall", "ok"], {"data": {"conversations": []}}),
+    (["stall", "stall", "stall"], TimeoutError),
+    (["500"], urllib.error.HTTPError),
+])
+def test_a_stall_is_retried_and_a_status_is_not(monkeypatch, responses, outcome):
+    """If a stall were not retried, one slow afternoon read would fail the
+    2-minute poll and the scheduler would text the owners a failure report;
+    if a status were retried, a real refusal would only surface three times
+    slower."""
+    requests = []
+    released = threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            response = responses[len(requests) - 1]
+            if response == "500":
+                self.send_response(500)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            if response == "stall":   # headers out, body withheld until teardown
+                released.wait(5)      # bounded so a lost client timeout fails, not hangs
+                return
+            self.wfile.write(json.dumps(outcome).encode())
+
+        def log_message(self, *args):
+            pass
+
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+
+    server = Server(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(
+            hostex_api, "BASE", f"http://127.0.0.1:{server.server_address[1]}/v3")
+        monkeypatch.setattr(hostex_api, "TIMEOUT_S", 0.2)
+        monkeypatch.setattr(hostex_api, "BACKOFF_S", 0)
+        if isinstance(outcome, dict):
+            assert hostex_api.get("/conversations", "SECRET", "test/1.0") == outcome
+        else:
+            with pytest.raises(outcome):
+                hostex_api.get("/conversations", "SECRET", "test/1.0")
+        assert len(requests) == len(responses)
+    finally:
+        released.set()
+        server.shutdown()
+        server.server_close()
