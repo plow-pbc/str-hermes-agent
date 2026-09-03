@@ -1338,3 +1338,9 @@ this host, so turning it on is a fleet decision rather than this repo's.
 - No `hermes gateway install`; the container *is* the service.
 - Sign-in uses the device-code flow, so no browser or port-forward is needed
   inside the container.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 The Plow Collective, Inc.
+
+"Plow" and the Plow logo are trademarks of The Plow Collective, Inc. The license grants no trademark rights.
