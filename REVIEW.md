@@ -182,7 +182,7 @@ Beyond the universal set in `standards.md`:
 | Propose a defensive guard for an input shape not observed in the guest-conversation corpus. | Flag a failure the corpus actually produced, citing the file and the count. |
 | Ask for a fallback when the operator would rather the run fail loudly and re-fetch. | Flag a failure that is *silent* — a check that passes on broken data. |
 | Push a hardening remedy up to `blocking` because the runtime is privileged. | Emit it at `low` with the ticket it belongs to. |
-| — | Flag a change that a **sibling repo owns** per [`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos): guest-send trust or approval policy (the `plow_chat` plugin gates the send, `plow` holds the trust state), generic Plow-assistant persona text ported from another variant (the base's `image/seed/SOUL.md`), a Hermes runtime fix carried here instead of taken as an image digest bump (the fork, then the base). The test is who else would have to change if the fact changed. |
+| — | Flag a change that a **sibling repo owns** per [`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos): send enforcement or trust state (the `plow_chat` plugin gates the send, `plow` holds which chats are trusted — the STR eligibility rule in `runtime/SOUL.md` stays here), generic Plow-assistant persona text ported from another variant (the base's `image/seed/SOUL.md`), a Hermes runtime fix carried here instead of taken as an image digest bump (the fork, then the base). The test is who else would have to change if the fact changed. |
 
 ### What is worth blocking on
 

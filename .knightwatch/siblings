@@ -9,7 +9,10 @@
 # compose template and the plugin pin, plow owns the relay and the chat trust
 # state, hermes-plow-chat is the plow_chat plugin that frames every turn. The
 # peer variants that used to be listed here own nothing this repo consumes.
+# plow-hermes-agent is not a build input (this image is FROM upstream) but its
+# README map and seed SOUL.md are what the gate compares persona text against.
 
 plow-pbc/agent-mgr
 plow-pbc/plow
 plow-pbc/hermes-plow-chat
+plow-pbc/plow-hermes-agent

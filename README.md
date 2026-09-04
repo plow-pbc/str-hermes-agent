@@ -340,14 +340,18 @@ owns what is in
 [`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos);
 read it before a change that touches a neighbour. The test is **who else would
 have to change if this fact changed** — if the answer is a sibling, the change
-belongs there and this repo takes a pin bump.
+belongs there; this repo only follows, by bumping its pin if it holds one.
 
 Not here:
 
-- **Guest-send trust or approval policy.** The `plow_chat` plugin
+- **Send enforcement and trust state.** The `plow_chat` plugin
   ([`hermes-plow-chat`](https://github.com/plow-pbc/hermes-plow-chat)) gates
-  outbound sends and [`plow`](https://github.com/plow-pbc/plow) holds the trust
-  state; a policy written as prose here is a second path no dashboard reads.
+  outbound sends and [`plow`](https://github.com/plow-pbc/plow) holds which
+  chats are trusted. What *is* this repo's is the STR-specific eligibility
+  rule — which guest may be answered, and on whose approval — which lives in
+  `runtime/SOUL.md` and is what the config and the poller delegate to. A copy
+  of the *enforcement* here, or a second trust flag, is a path no dashboard
+  reads.
 - **Generic Plow-assistant persona text.** Anything a second assistant would
   also want belongs in the base's `image/seed/SOUL.md`
   ([`plow-hermes-agent`](https://github.com/plow-pbc/plow-hermes-agent));
@@ -366,9 +370,10 @@ Examples:
   (`AGENT_DEPLOY_HOOK`) instead of keeping a local spelling, leaving the deploy
   mechanism with its one owner:
   https://github.com/plow-pbc/str-hermes-agent/pull/4
-- Violation — #3 added a two-tier guest-send rule as ~40 lines of
-  `group_prompts` prose in `runtime/config.yaml`, a second approval path in a
-  repo that owns neither the plugin's send gate nor `plow`'s trust state:
+- Drift — #3 put the two-tier eligibility rule (this repo's) into ~40 lines of
+  `group_prompts` prose in `runtime/config.yaml` beside the one in
+  `runtime/SOUL.md`, so the rule has two homes here and reads as a second
+  approval path next to the plugin's send gate:
   https://github.com/plow-pbc/str-hermes-agent/pull/3
 
 ## Day-to-day
