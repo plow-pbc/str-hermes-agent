@@ -262,27 +262,46 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     assert not re.search(r"^\s*- (\.|\$\{STR_REPO\}):/", compose, re.M), (
         "compose.override.yml mounts the checkout root; mount ~/hermes-vault instead"
     )
-    # The vault has one container path, and five files restate it: compose
-    # mounts it, nightly.sh defaults to it, ingest-all mounts a host vault onto
-    # it, runtime/vault-seed/.env resolves it for the wiki tools (installed to
+    # Every container-side path resolves through AGENT_HOME_TARGET, which
+    # agent-mgr exports from the agent's boot contract: /opt/data for an agent
+    # that has not opted in, /var/lib/hermes for one that has. A mount written
+    # against it is correct under either, so the cutover between them is a
+    # descriptor change alone, not a change here. `:?` on the first use,
+    # matching how the file already reuses ${STR_REPO} bare after its own
+    # first `:?` -- an agent-mgr that predates the export must fail loudly at
+    # compose time, not silently mount at the literal `/repo/vault` an unset
+    # variable would produce.
+    home = r"\$\{AGENT_HOME_TARGET(?::\?[^}]*)?\}"
+    for suffix in ("bin:" + home + "/scripts:ro", "mcp-seam:" + home + "/mcp-seam:ro",
+                   "runtime:" + home + "/repo/runtime:ro"):
+        assert re.search(rf"^\s*- \$\{{STR_REPO\}}/{suffix}$", compose, re.M), suffix
+    assert re.search(rf"^\s*- \$\{{STR_VAULT:\?\}}:{home}/repo/vault$", compose, re.M)
+    # The vault also has one *host-side* path, and four more files restate it:
+    # nightly.sh defaults to it, ingest-all mounts a host vault onto it,
+    # runtime/vault-seed/.env resolves it for the wiki tools (installed to
     # vault/.env by restore-runtime-config.sh, which is where the runtime
     # actually reads it from), and test-wiki's `-v` REPLACES compose's mount
-    # only while it names that target character for character. Let any one
-    # drift and the failure is silent — the e2e still writes where it is
-    # told, while the production vault rides along read-write through the
-    # mount that no longer got replaced. Asserted here as one literal over
-    # all five rather than a per-file check added the round after each
-    # becomes load-bearing.
+    # only while it names that target character for character. These four
+    # stay on the legacy /opt/data literal on purpose: they run inside the
+    # container off $HERMES_HOME, which the base image bakes to /opt/data
+    # until this agent's own descriptor opts into the boot contract -- unlike
+    # compose's mount target, they are not this repo's to parameterize from
+    # AGENT_HOME_TARGET (a host-side compose variable), and moving them to
+    # $HERMES_HOME is follow-up work for that cutover, not this one. Let any
+    # one drift from the others and the failure is silent — the e2e still
+    # writes where it is told, while the production vault rides along
+    # read-write through the mount that no longer got replaced. Asserted here
+    # as one literal over all four rather than a per-file check added the
+    # round after each becomes load-bearing.
     #
     # Anchored, not `in`. An unanchored match passes a *suffixed* target
-    # (`…/vault-prod` in compose while `CV` still says `…/vault` is exactly the
+    # (`…/vault-prod` while `CV` still says `…/vault` is exactly the
     # divergence this exists to catch) and passes a commented-out line — which
     # this file already names as a live hazard three tests down, with
     # `# - HERMES_DASHBOARD=1` sitting nine lines under the vault mount.
     vault = "/opt/data/repo/vault"
     runtime = "/opt/data/repo/runtime"
     for path, literal in (
-        ("compose.override.yml", f"- ${{STR_VAULT:?}}:{vault}"),
         ("bin/nightly.sh", f'VAULT="${{VAULT:-{vault}}}"'),
         ("bin/ingest-all", f'CVAULT="{vault}"'),
         ("justfile", f"CV={vault}"),
@@ -296,9 +315,9 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
         ("bin/ingest-all", 'VAULT="${1:-$HOME/hermes-vault}"'),
         # The persona half of the SOUL nightly.sh rebuilds is a sibling mount
         # of the same directory build-soul is handed as an explicit argument
-        # here, and compose's `./runtime:/opt/data/repo/runtime:ro` mount
-        # below must keep naming the same path. Narrowing either alone breaks
-        # the SOUL rebuild, and nightly.sh note-and-continues past that
+        # here, and compose's runtime mount above must keep landing at the
+        # same in-container path this literal assumes. Narrowing either alone
+        # breaks the SOUL rebuild, and nightly.sh note-and-continues past that
         # failure — so the run reports success every night while the
         # injected index quietly goes stale.
         (
@@ -313,14 +332,6 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     # its own — hence a substring here. Drift in this one unmounts nothing; it
     # tells the agent to look where the vault no longer is.
     assert vault in (ROOT / "runtime/SOUL.md").read_text()
-    # The scheduler's copy stays read-only, which is only true while it has one
-    # path into the container.
-    # Through ${STR_REPO}, not `./`: Compose resolves a relative path in an
-    # override against agent-mgr's directory, not this repo's, so `./bin` would
-    # mount agent-mgr's bin -- or nothing -- over the scheduler's scripts.
-    assert re.search(r"^\s*- \$\{STR_REPO\}/bin:/opt/data/scripts:ro$", compose, re.M)
-    assert re.search(
-        rf"^\s*- \$\{{STR_REPO\}}/runtime:{re.escape(runtime)}:ro$", compose, re.M)
 
 
 def test_every_tool_soul_names_is_one_some_server_offers():

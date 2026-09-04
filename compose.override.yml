@@ -20,15 +20,23 @@ services:
       # The runtime vault -- a plain directory outside the checkout, and never a
       # git repository. Read-write because ingest rewrites pages in place and
       # hostex-raw stages fetched conversations here.
-      - ${STR_VAULT:?}:/opt/data/repo/vault
+      #
+      # Container-side paths come from AGENT_HOME_TARGET, not a literal
+      # /opt/data: agent-mgr resolves it from the agent's boot contract, so it
+      # names /opt/data for an agent that has not opted in and /var/lib/hermes
+      # for one that has -- a mount written against it is correct under both,
+      # and the cutover between them is a descriptor change alone. Required
+      # (`:?`), not defaulted: an agent-mgr that predates the export must fail
+      # loudly here rather than silently mount at the wrong path.
+      - ${STR_VAULT:?}:${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}/repo/vault
       # Hermes cron refuses to run a script outside $HERMES_HOME/scripts, so
       # bin/ is mounted there rather than copied -- this repo stays the source of
       # truth for what the scheduler executes.
-      - ${STR_REPO}/bin:/opt/data/scripts:ro
+      - ${STR_REPO}/bin:${AGENT_HOME_TARGET}/scripts:ro
       # Seam smart-lock MCP server, mounted rather than baked in so the pinned
       # upstream image stays swappable. Hermes launches it over stdio.
-      - ${STR_REPO}/mcp-seam:/opt/data/mcp-seam:ro
+      - ${STR_REPO}/mcp-seam:${AGENT_HOME_TARGET}/mcp-seam:ro
       # The persona half of the SOUL the nightly rebuilds. A directory rather
       # than the file, so a deploy fast-forward that replaces the inode does not
       # leave the container reading the old one.
-      - ${STR_REPO}/runtime:/opt/data/repo/runtime:ro
+      - ${STR_REPO}/runtime:${AGENT_HOME_TARGET}/repo/runtime:ro
