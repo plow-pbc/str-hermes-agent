@@ -67,10 +67,15 @@ test-wiki:
     # Schema from the checkout, corpus from the runtime vault — the two owners
     # this split created, and only the runtime vault holds both. The whole seed
     # directory, the same way the deploy installs it: enumerating its contents
-    # here made this recipe a second owner of that directory's schema. Its
-    # `.env` rides along unrewritten, because the OBSIDIAN_VAULT_PATH it carries
-    # is $CV, and in this run that path is the scratch vault.
+    # here made this recipe a second owner of that directory's schema.
     cp -a runtime/vault-seed/. "$V"/
+    # The seed's OBSIDIAN_VAULT_PATH is a placeholder, same as at install time
+    # (restore-runtime-config.sh) -- obsidian-wiki reads its own .env as plain
+    # KEY=VALUE with no expansion, so left alone it points this run at the
+    # legacy path rather than $V, and a run that then reads production's real
+    # vault by accident looks exactly as green as one that read the scratch
+    # copy it meant to.
+    sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$CV|" "$V/.env"
     # The live corpus and its manifest, so this exercises the nightly that
     # actually runs rather than the one-time bootstrap. Without them every run
     # re-ingests all 235 conversations — ~24 agent rounds, over an hour.

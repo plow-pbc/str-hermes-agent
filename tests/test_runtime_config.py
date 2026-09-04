@@ -334,6 +334,11 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     justfile = (ROOT / "justfile").read_text()
     assert 'HH="${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}"' in justfile
     assert 'CV="$HH/repo/vault"' in justfile
+    # The seed's OBSIDIAN_VAULT_PATH is a placeholder here too, same reason
+    # and same rewrite as restore-runtime-config.sh's -- the only two places
+    # that copy runtime/vault-seed/.env, and both have to fix it up since the
+    # file itself cannot.
+    assert 'sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$CV|" "$V/.env"' in justfile
 
     # runtime/vault-seed/.env's OBSIDIAN_VAULT_PATH is read by the
     # third-party obsidian-wiki CLI as plain KEY=VALUE, with no ${VAR}
