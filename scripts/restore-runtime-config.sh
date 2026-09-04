@@ -78,6 +78,15 @@ umask 077
 # which is the right end state for a condition the deploy never creates.
 cp -a --remove-destination "$repo_root/runtime/vault-seed/." "$vault/"
 
+# The seed's OBSIDIAN_VAULT_PATH is a placeholder: obsidian-wiki reads its
+# own .env as plain KEY=VALUE, with no ${VAR} expansion of its own, so the
+# copy above cannot leave it pointing at wherever the vault actually mounts
+# -- this script is the one layer left that can still resolve it. Required
+# (`:?`), not defaulted, so an agent-mgr that predates the export fails here
+# rather than installing a config pointing at an unmounted vault.
+container_vault="${AGENT_HOME_TARGET:?agent-mgr did not export AGENT_HOME_TARGET -- run me through 'agent-mgr deploy str'}/repo/vault"
+sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$container_vault|" "$vault/.env"
+
 # The hubs are the vault's own (the seed ships none — the property list is the
 # operator's), and their Operations lists are rebuilt here rather than left to
 # the next nightly: the 2026-08-24 deploy reverted a hub and that property's

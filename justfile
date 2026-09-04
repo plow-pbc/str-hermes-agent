@@ -50,12 +50,12 @@ test-wiki:
     # `-v` at the same target replaces compose's mount instead of joining it, so
     # naming the canonical path is what makes production unreachable here.
     #
-    # Read off the image, the same variable the running container resolves
-    # HERMES_HOME to: this recipe's own shell has none of its own, and a wrong
-    # guess here mounts the scratch vault somewhere production's mount does
-    # not replace, defeating the whole isolation this recipe exists for.
-    HH="$(agent-mgr compose str run --rm --no-deps -T --entrypoint bash hermes \
-      -c 'printf %s "${HERMES_HOME:?}"')" || fail "could not read HERMES_HOME from the image"
+    # Same variable compose resolves the real mount from -- agent-mgr exports
+    # it from the boot contract, so this recipe's scratch mount always lands
+    # on the target compose would have used, unopted or opted-in alike. A
+    # wrong guess here mounts the scratch vault somewhere production's mount
+    # does not replace, defeating the whole isolation this recipe exists for.
+    HH="${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}"
     CV="$HH/repo/vault"
 
     # Empty, never delete: $V is a bind-mount source, and unlinking the inode

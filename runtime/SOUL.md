@@ -111,7 +111,9 @@ summary drops.
 ## Your operations wiki
 
 Compiled from real guest conversations and kept current nightly. It lives at
-`/opt/data/repo/vault`. Pages are under `operations/`, property hubs under
+`$HERMES_HOME/repo/vault` — a real shell variable, already set in your
+environment, so use it literally in any command rather than guessing a path.
+Pages are under `operations/`, property hubs under
 `properties/`, the standing cast — who to call — under `people/`, and the
 index below lists every page with a description.
 
