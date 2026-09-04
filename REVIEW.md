@@ -11,13 +11,11 @@ differently, and only one of them reaches it today:
 - **roborev** is live today — on a copy, not this file. It cannot open files a
   config merely points at, so a sync script inlines this file into
   `.roborev.toml`'s `review_guidelines`. **An edit here does not reach roborev
-  until `.roborev.toml` carries it.** That script is mid-move and currently
-  reachable from neither side — `claude-config` deleted its copy, and the
-  replacement merged into a stale branch of `plow-pbc/seed-auto-roborev`
-  rather than its `main` — so until it lands, edit both files in lockstep.
-- **knightwatch** will read it from the base branch once its loader change
-  lands. Until then it falls back to the org-default operating point, and this
-  repo's specifics below do not reach it.
+  until `.roborev.toml` carries it** — run
+  `~/.config/roborev/sync-review-config.sh <this checkout>` (shipped by the
+  `seed-auto-roborev` seed) and commit the regenerated file with the edit.
+- **knightwatch** reads this file directly off the base branch (since
+  `knightwatch-reviewer#201`), so an edit here reaches it on the next review.
 
 `standards.md` references below resolve inside the knightwatch bundle only;
 roborev cannot see that file.
