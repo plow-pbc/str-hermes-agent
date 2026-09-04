@@ -217,7 +217,11 @@ def run(hostex_token: str, seam_key: str, ops: list[dict],
 
 
 def main() -> None:
-    ops = load_ops(pathlib.Path(os.environ.get("VAULT", "/opt/data/repo/vault")) / "ops.toml")
+    # Lazy, like bash's ${VAR:-default}: os.environ.get would evaluate
+    # hermes_home() -- and so require HERMES_HOME -- even when VAULT is
+    # already set and the fallback is never used.
+    vault = pathlib.Path(os.environ["VAULT"]) if "VAULT" in os.environ else hermes_home() / "repo/vault"
+    ops = load_ops(vault / "ops.toml")
     print(run(read_env_key("HOSTEX_TOKEN"), read_env_key("SEAM_API_KEY"),
               ops, datetime.datetime.now(datetime.timezone.utc)), flush=True)
 

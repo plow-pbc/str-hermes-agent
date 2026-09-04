@@ -37,6 +37,11 @@ def restore_env(tmp_path):
         # every assertion passed against both -- a check that passes on broken
         # data, over the one behaviour this change is.
         "STR_VAULT": str(tmp_path / "runtime-vault"),
+        # A synthetic, container-shaped value rather than either real one
+        # (/opt/data or /var/lib/hermes): proves restore-runtime-config.sh
+        # actually threads the export through rather than happening to match
+        # a hardcoded literal.
+        "AGENT_HOME_TARGET": "/test-container-home",
     }
 
 
@@ -131,9 +136,17 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     # vault, which is the deploy's whole claim on that directory. Asserted here
     # rather than in a second test — same fixture, same invocation, and a
     # separate one would only re-ask this question with a different assertion.
-    for name in ("AGENTS.md", ".env"):
-        assert (vault / name).read_bytes() == (
-            ROOT / "runtime/vault-seed" / name).read_bytes()
+    assert (vault / "AGENTS.md").read_bytes() == (
+        ROOT / "runtime/vault-seed" / "AGENTS.md").read_bytes()
+    # .env is the one seed file the restore rewrites rather than copies
+    # verbatim: obsidian-wiki reads OBSIDIAN_VAULT_PATH as a literal, so the
+    # seed's placeholder is patched to the real container path, sourced from
+    # AGENT_HOME_TARGET rather than restated. Every other line survives the
+    # copy untouched.
+    installed_env = (vault / ".env").read_text()
+    seed_env = (ROOT / "runtime/vault-seed/.env").read_text()
+    assert installed_env.splitlines()[1:] == seed_env.splitlines()[1:]
+    assert "OBSIDIAN_VAULT_PATH=/test-container-home/repo/vault" in installed_env
     # The seed ships no hubs: the property list is the operator's, and lives in
     # the runtime vault. The deploy's claim on that directory is AGENTS.md and
     # .env, plus rebuilding the hub lists the vault already has (#78).
@@ -223,14 +236,23 @@ def test_every_first_party_mcp_server_is_in_the_restorable_config():
     config = (ROOT / "runtime/config.yaml").read_text()
     servers = sorted(p.name for p in ROOT.glob("mcp-*") if p.is_dir())
     assert servers, "precondition: the repo ships at least one first-party MCP server"
-    missing = [s for s in servers if f"/opt/data/{s}/server.py" not in config]
+    # ${HERMES_HOME}, not a literal /opt/data: Hermes' own config loader
+    # interpolates it from the container's env, so this is the one path that
+    # is correct whether or not this agent has opted into agent-mgr's boot
+    # contract -- see the comment above the seam server's own entry.
+    missing = [s for s in servers if f"${{HERMES_HOME}}/{s}/server.py" not in config]
     assert not missing, f"first-party MCP servers absent from runtime/config.yaml: {missing}"
 
 
 def test_every_env_key_the_tracked_config_substitutes_is_declared():
-    """`${FOO}` in the config with no FOO in .env.example is a silent gap."""
+    """`${FOO}` in the config with no FOO in .env.example is a silent gap.
+
+    HERMES_HOME is excluded: it is the image's own env var, always set,
+    never operator-supplied, so it has no business in .env.example beside the
+    REQUIRED_ENV secrets that actually need a blank placeholder there.
+    """
     config = (ROOT / "runtime/config.yaml").read_text()
-    referenced = set(re.findall(r"\$\{([A-Z0-9_]+)\}", config))
+    referenced = set(re.findall(r"\$\{([A-Z0-9_]+)\}", config)) - {"HERMES_HOME"}
     undeclared = sorted(referenced - set(env_assignments()))
     assert not undeclared, f".env.example does not declare: {undeclared}"
 
@@ -262,65 +284,97 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     assert not re.search(r"^\s*- (\.|\$\{STR_REPO\}):/", compose, re.M), (
         "compose.override.yml mounts the checkout root; mount ~/hermes-vault instead"
     )
-    # The vault has one container path, and five files restate it: compose
-    # mounts it, nightly.sh defaults to it, ingest-all mounts a host vault onto
-    # it, runtime/vault-seed/.env resolves it for the wiki tools (installed to
-    # vault/.env by restore-runtime-config.sh, which is where the runtime
-    # actually reads it from), and test-wiki's `-v` REPLACES compose's mount
-    # only while it names that target character for character. Let any one
-    # drift and the failure is silent — the e2e still writes where it is
-    # told, while the production vault rides along read-write through the
-    # mount that no longer got replaced. Asserted here as one literal over
-    # all five rather than a per-file check added the round after each
-    # becomes load-bearing.
-    #
-    # Anchored, not `in`. An unanchored match passes a *suffixed* target
-    # (`…/vault-prod` in compose while `CV` still says `…/vault` is exactly the
-    # divergence this exists to catch) and passes a commented-out line — which
-    # this file already names as a live hazard three tests down, with
-    # `# - HERMES_DASHBOARD=1` sitting nine lines under the vault mount.
-    vault = "/opt/data/repo/vault"
-    runtime = "/opt/data/repo/runtime"
+    # Every container-side path resolves through AGENT_HOME_TARGET, which
+    # agent-mgr exports from the agent's boot contract: /opt/data for an agent
+    # that has not opted in, /var/lib/hermes for one that has. A mount written
+    # against it is correct under either, so the cutover between them is a
+    # descriptor change alone, not a change here. `:?` on the first use,
+    # matching how the file already reuses ${STR_REPO} bare after its own
+    # first `:?` -- an agent-mgr that predates the export must fail loudly at
+    # compose time, not silently mount at the literal `/repo/vault` an unset
+    # variable would produce.
+    home = r"\$\{AGENT_HOME_TARGET(?::\?[^}]*)?\}"
+    for suffix in ("bin:" + home + "/scripts:ro", "mcp-seam:" + home + "/mcp-seam:ro",
+                   "runtime:" + home + "/repo/runtime:ro"):
+        assert re.search(rf"^\s*- \$\{{STR_REPO\}}/{suffix}$", compose, re.M), suffix
+    assert re.search(rf"^\s*- \$\{{STR_VAULT:\?\}}:{home}/repo/vault$", compose, re.M)
+
+    # Everything that reaches the vault (or mcp-seam) from INSIDE the
+    # container resolves through $HERMES_HOME instead of a compose variable:
+    # the image's own env var, /opt/data today and /var/lib/hermes once this
+    # agent opts in, matching wherever compose actually mounted it above
+    # either way. Anchored substrings, not full-line matches: each caller
+    # embeds the reference in a longer expression (a bash default, a Python
+    # call, a YAML scalar), and the literal is what would go stale if any one
+    # of them stopped agreeing with the others.
     for path, literal in (
-        ("compose.override.yml", f"- ${{STR_VAULT:?}}:{vault}"),
-        ("bin/nightly.sh", f'VAULT="${{VAULT:-{vault}}}"'),
-        ("bin/ingest-all", f'CVAULT="{vault}"'),
-        ("justfile", f"CV={vault}"),
-        ("runtime/vault-seed/.env", f"OBSIDIAN_VAULT_PATH={vault}"),
-        # The host-side vault path has ONE owner now: agent.env declares
-        # STR_VAULT, compose interpolates it for the mount, and agent-mgr
-        # exports it to the restore hook. The hook used to keep a second
-        # spelling that this row fenced against; it consumes the export
-        # instead, so there is nothing left to drift.
-        ("agent.env", 'STR_VAULT=$HOME/hermes-vault'),
-        ("bin/ingest-all", 'VAULT="${1:-$HOME/hermes-vault}"'),
-        # The persona half of the SOUL nightly.sh rebuilds is a sibling mount
-        # of the same directory build-soul is handed as an explicit argument
-        # here, and compose's `./runtime:/opt/data/repo/runtime:ro` mount
-        # below must keep naming the same path. Narrowing either alone breaks
-        # the SOUL rebuild, and nightly.sh note-and-continues past that
-        # failure — so the run reports success every night while the
-        # injected index quietly goes stale.
-        (
-            "bin/nightly.sh",
-            f'if ! "$BIN/build-soul" "$VAULT" {runtime}/SOUL.md "$SOUL_OUT"; then',
-        ),
+        ("bin/nightly.sh", 'VAULT="${VAULT:-$HERMES_HOME/repo/vault}"'),
+        ("bin/nightly.sh", 'SOUL_OUT="${SOUL_OUT:-$HERMES_HOME/SOUL.md}"'),
+        ("bin/nightly.sh", '"$HERMES_HOME/repo/runtime/SOUL.md"'),
+        ("bin/checkin-watch.py", 'hermes_home() / "repo/vault"'),
+        ("scripts/enable-checkin-watch.sh", '${VAULT:-$state/repo/vault}'),
+        ("runtime/config.yaml", '${HERMES_HOME}/mcp-seam/server.py'),
     ):
-        assert re.search(
-            rf"(?m)^\s*{re.escape(literal)}$", (ROOT / path).read_text()
-        ), f"{path} no longer contains: {literal}"
-    # The injected prompt names it too, mid-sentence rather than on a line of
-    # its own — hence a substring here. Drift in this one unmounts nothing; it
-    # tells the agent to look where the vault no longer is.
-    assert vault in (ROOT / "runtime/SOUL.md").read_text()
-    # The scheduler's copy stays read-only, which is only true while it has one
-    # path into the container.
-    # Through ${STR_REPO}, not `./`: Compose resolves a relative path in an
-    # override against agent-mgr's directory, not this repo's, so `./bin` would
-    # mount agent-mgr's bin -- or nothing -- over the scheduler's scripts.
-    assert re.search(r"^\s*- \$\{STR_REPO\}/bin:/opt/data/scripts:ro$", compose, re.M)
+        assert literal in (ROOT / path).read_text(), f"{path} no longer contains: {literal}"
+
+    # ingest-all's host branch cannot read $HERMES_HOME directly -- it runs
+    # without a container around it yet -- so it queries the image for it
+    # instead of guessing, required (`:?`) so a throwaway container that
+    # cannot report it stops the run rather than mounting the vault somewhere
+    # the real container does not read from.
+    ingest_all = (ROOT / "bin/ingest-all").read_text()
+    assert '[ -n "${HERMES_HOME:-}" ] && [ -d "$HERMES_HOME/repo" ]' in ingest_all
+    assert 'printf %s "${HERMES_HOME:?}"' in ingest_all
+    assert 'CVAULT="$CHOME/repo/vault"' in ingest_all
+
+    # justfile's test-wiki has no container to query either, but it IS run
+    # through agent-mgr, which exports AGENT_HOME_TARGET into that same
+    # environment -- the same variable compose resolves the real mount from,
+    # so no image query is needed here the way ingest-all needs one.
+    justfile = (ROOT / "justfile").read_text()
+    assert 'HH="${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}"' in justfile
+    assert 'CV="$HH/repo/vault"' in justfile
+    # The seed's OBSIDIAN_VAULT_PATH is a placeholder here too, same reason
+    # and same rewrite as restore-runtime-config.sh's -- the only two places
+    # that copy runtime/vault-seed/.env, and both have to fix it up since the
+    # file itself cannot.
+    assert 'sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$CV|" "$V/.env"' in justfile
+
+    # runtime/vault-seed/.env's OBSIDIAN_VAULT_PATH is read by the
+    # third-party obsidian-wiki CLI as plain KEY=VALUE, with no ${VAR}
+    # expansion of its own (verified against its _read_config_value, a bare
+    # string split on "=") -- so the file itself stays on a placeholder, and
+    # restore-runtime-config.sh, the one layer that CAN expand a variable,
+    # rewrites it from AGENT_HOME_TARGET after the seed copy. Covered by
+    # test_restore_script_populates_fresh_hermes_home, which drives that
+    # script end to end; asserted here only that the seed still ships a
+    # value for the rewrite to replace.
     assert re.search(
-        rf"^\s*- \$\{{STR_REPO\}}/runtime:{re.escape(runtime)}:ro$", compose, re.M)
+        r"(?m)^\s*OBSIDIAN_VAULT_PATH=\S",
+        (ROOT / "runtime/vault-seed/.env").read_text(),
+    )
+    restore = (ROOT / "scripts/restore-runtime-config.sh").read_text()
+    assert "AGENT_HOME_TARGET:?" in restore
+    assert "OBSIDIAN_VAULT_PATH=" in restore
+
+    # runtime/SOUL.md's mention is prose, concatenated verbatim by build-soul
+    # (`cat "$PERSONA"`) into the agent's own injected system prompt -- so
+    # unlike the .env above, the fix is to name a real shell variable the
+    # agent already has in its own tool-execution environment, not to derive
+    # a value from either of build-soul's two callers (which pass genuinely
+    # different $VAULT arguments -- see build-soul's own comment for why that
+    # broke this before).
+    assert "$HERMES_HOME/repo/vault" in (ROOT / "runtime/SOUL.md").read_text()
+
+    # The host-side vault path has ONE owner now: agent.env declares
+    # STR_VAULT, compose interpolates it for the mount, and agent-mgr exports
+    # it to the restore hook. The hook used to keep a second spelling that
+    # this row fenced against; it consumes the export instead, so there is
+    # nothing left to drift.
+    assert re.search(
+        r"(?m)^\s*STR_VAULT=\$HOME/hermes-vault$", (ROOT / "agent.env").read_text()
+    )
+    assert 'VAULT="${1:-$HOME/hermes-vault}"' in ingest_all
 
 
 def test_every_tool_soul_names_is_one_some_server_offers():

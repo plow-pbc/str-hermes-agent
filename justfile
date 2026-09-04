@@ -41,6 +41,7 @@ test-wiki:
     #!/usr/bin/env bash
     set -uo pipefail
     cd {{justfile_directory()}}
+    fail() { echo "FAIL: $1"; exit 1; }
     V=.e2e-vault
     # The vault's own container path, not a sibling of it. `docker compose run`
     # brings the service's volumes with it, so a scratch vault mounted beside
@@ -48,8 +49,14 @@ test-wiki:
     # whole contract is isolation — and the turn driving it is autonomous. A
     # `-v` at the same target replaces compose's mount instead of joining it, so
     # naming the canonical path is what makes production unreachable here.
-    CV=/opt/data/repo/vault
-    fail() { echo "FAIL: $1"; exit 1; }
+    #
+    # Same variable compose resolves the real mount from -- agent-mgr exports
+    # it from the boot contract, so this recipe's scratch mount always lands
+    # on the target compose would have used, unopted or opted-in alike. A
+    # wrong guess here mounts the scratch vault somewhere production's mount
+    # does not replace, defeating the whole isolation this recipe exists for.
+    HH="${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}"
+    CV="$HH/repo/vault"
 
     # Empty, never delete: $V is a bind-mount source, and unlinking the inode
     # leaves the long-running gateway writing into a directory the host can no
@@ -60,10 +67,15 @@ test-wiki:
     # Schema from the checkout, corpus from the runtime vault — the two owners
     # this split created, and only the runtime vault holds both. The whole seed
     # directory, the same way the deploy installs it: enumerating its contents
-    # here made this recipe a second owner of that directory's schema. Its
-    # `.env` rides along unrewritten, because the OBSIDIAN_VAULT_PATH it carries
-    # is $CV, and in this run that path is the scratch vault.
+    # here made this recipe a second owner of that directory's schema.
     cp -a runtime/vault-seed/. "$V"/
+    # The seed's OBSIDIAN_VAULT_PATH is a placeholder, same as at install time
+    # (restore-runtime-config.sh) -- obsidian-wiki reads its own .env as plain
+    # KEY=VALUE with no expansion, so left alone it points this run at the
+    # legacy path rather than $V, and a run that then reads production's real
+    # vault by accident looks exactly as green as one that read the scratch
+    # copy it meant to.
+    sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$CV|" "$V/.env"
     # The live corpus and its manifest, so this exercises the nightly that
     # actually runs rather than the one-time bootstrap. Without them every run
     # re-ingests all 235 conversations — ~24 agent rounds, over an hour.
@@ -141,14 +153,14 @@ test-wiki:
     # the run must stop here rather than fail later as an unexplained empty
     # ingest. Output goes to the log with everything else.
     #
-    # /opt/data/scripts/nightly.sh, which is the same file the scheduler runs.
+    # $HH/scripts/nightly.sh, which is the same file the scheduler runs.
     # The checkout is not mounted — compose.yml mounts ~/hermes-vault at
     # $CV, not a repo-relative path — so this scratch vault comes in on a
     # per-run `-v` rather than widening what production hands the agent for
     # the sake of a test.
-    NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; /etc/cont-init.d/03-link-wiki-skills.sh || { echo \"linking the wiki skills failed\" >&2; exit 1; }; [ -d /opt/data/skills/wiki-digest ] || { echo \"the link script ran but the wiki skills are not linked\" >&2; exit 1; }; exec /opt/data/scripts/nightly.sh"
+    NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; /etc/cont-init.d/03-link-wiki-skills.sh || { echo \"linking the wiki skills failed\" >&2; exit 1; }; [ -d $HH/skills/wiki-digest ] || { echo \"the link script ran but the wiki skills are not linked\" >&2; exit 1; }; exec $HH/scripts/nightly.sh"
     #
-    # SOUL_OUT off the default too. It defaults to /opt/data/SOUL.md, which is
+    # SOUL_OUT off the default too. It defaults to $HERMES_HOME/SOUL.md, which is
     # the live gateway's injected system prompt — this run would compose the
     # scratch vault's index over it and leave production advertising pages that
     # exist only here. The vault mount above covers the vault; this covers the

@@ -66,7 +66,19 @@ def run_ingest(tmp_path):
     def run(vault_path: Path, turn_exit: int = 0):
         # agent-mgr, not docker: the host branch of ingest-all now reaches the
         # container through it, so that is the boundary a stub has to stand at.
-        (stub / "agent-mgr").write_text(f'#!/bin/sh\necho "$@" >> {fed}\nexit {turn_exit}\n')
+        # The HERMES_HOME query is answered before $fed even sees it and
+        # without turn_exit applying to it: it is not a turn, so a
+        # failed-turn test would otherwise never reach the turn it means to
+        # fail (wrong diagnostic), and every fed-count assertion would be off
+        # by one call that fed nothing to the agent.
+        (stub / "agent-mgr").write_text(
+            '#!/bin/sh\n'
+            'case "$*" in\n'
+            '  *\'printf %s "${HERMES_HOME:?}"\'*) printf %s /opt/data; exit 0 ;;\n'
+            'esac\n'
+            f'echo "$@" >> {fed}\n'
+            f'exit {turn_exit}\n'
+        )
         (stub / "agent-mgr").chmod(0o755)
         result = subprocess.run(
             [str(INGEST_ALL), str(vault_path)],
