@@ -1338,7 +1338,7 @@ never fetched for you; agent-mgr's HOWTO § Set up Latch owns the steps. From
 wakeup:
 
 ```sh
-agent-mgr restore str        # installs runtime/ first: set-latch refuses a config without the block
+agent-mgr deploy str         # installs runtime/ first: set-latch refuses a config without the block
 agent-mgr set-latch str      # paste the JSON Latch showed; it reloads the agent
 agent-mgr check-latch str    # "latch reachable ... (HTTP 200)"
 ```
