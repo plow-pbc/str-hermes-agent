@@ -29,7 +29,7 @@ def test_nightly_rebuilds_the_soul_after_ingest() -> None:
     # e2e exercises every SOUL path except the production one. A wrong default
     # here exits 0 into a path nothing reads: no note, digest says ok, e2e green,
     # and the injected index quietly stops tracking the pages the run just wrote.
-    assert 'SOUL_OUT:-/opt/data/SOUL.md' in NIGHTLY
+    assert 'SOUL_OUT:-$HERMES_HOME/SOUL.md' in NIGHTLY
     assert '"$SOUL_OUT"' in NIGHTLY
 
 

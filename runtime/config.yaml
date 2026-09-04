@@ -196,7 +196,14 @@ mcp_servers:
     - --with
     - fastmcp==3.4.5
     - python
-    - /opt/data/mcp-seam/server.py
+    # Interpolated by Hermes' own config loader (agent/secret_scope, falling
+    # back to os.environ) -- the same mechanism the SEAM_API_KEY entry below
+    # already relies on, verified to recurse into `args` too. HERMES_HOME is
+    # the image's own env var, /opt/data today and /var/lib/hermes once this
+    # agent opts into agent-mgr's boot contract -- matching wherever compose
+    # actually mounts mcp-seam either way, with no compose-level variable
+    # reaching into this file.
+    - ${HERMES_HOME}/mcp-seam/server.py
     env:
       SEAM_API_KEY: ${SEAM_API_KEY}
     enabled: true

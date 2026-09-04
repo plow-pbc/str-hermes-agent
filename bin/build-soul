@@ -33,8 +33,8 @@ VAULT="$1"
 PERSONA="$2"
 OUT="$3"
 # Passed, not derived. The two callers do not share a filesystem layout: the
-# scheduler's vault is a bind mount at /opt/data/repo/vault and the host's is
-# ~/hermes-vault, outside the checkout entirely. Deriving the persona from
+# scheduler's vault is a bind mount at $HERMES_HOME/repo/vault and the host's
+# is ~/hermes-vault, outside the checkout entirely. Deriving the persona from
 # either one gets the other wrong, which is how this broke before — and
 # nightly.sh note-and-continues past a failed rebuild, so the symptom is a
 # silently stale injected index rather than a failure.

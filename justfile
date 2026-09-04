@@ -41,6 +41,7 @@ test-wiki:
     #!/usr/bin/env bash
     set -uo pipefail
     cd {{justfile_directory()}}
+    fail() { echo "FAIL: $1"; exit 1; }
     V=.e2e-vault
     # The vault's own container path, not a sibling of it. `docker compose run`
     # brings the service's volumes with it, so a scratch vault mounted beside
@@ -48,8 +49,14 @@ test-wiki:
     # whole contract is isolation — and the turn driving it is autonomous. A
     # `-v` at the same target replaces compose's mount instead of joining it, so
     # naming the canonical path is what makes production unreachable here.
-    CV=/opt/data/repo/vault
-    fail() { echo "FAIL: $1"; exit 1; }
+    #
+    # Read off the image, the same variable the running container resolves
+    # HERMES_HOME to: this recipe's own shell has none of its own, and a wrong
+    # guess here mounts the scratch vault somewhere production's mount does
+    # not replace, defeating the whole isolation this recipe exists for.
+    HH="$(agent-mgr compose str run --rm --no-deps -T --entrypoint bash hermes \
+      -c 'printf %s "${HERMES_HOME:?}"')" || fail "could not read HERMES_HOME from the image"
+    CV="$HH/repo/vault"
 
     # Empty, never delete: $V is a bind-mount source, and unlinking the inode
     # leaves the long-running gateway writing into a directory the host can no
@@ -141,14 +148,14 @@ test-wiki:
     # the run must stop here rather than fail later as an unexplained empty
     # ingest. Output goes to the log with everything else.
     #
-    # /opt/data/scripts/nightly.sh, which is the same file the scheduler runs.
+    # $HH/scripts/nightly.sh, which is the same file the scheduler runs.
     # The checkout is not mounted — compose.yml mounts ~/hermes-vault at
     # $CV, not a repo-relative path — so this scratch vault comes in on a
     # per-run `-v` rather than widening what production hands the agent for
     # the sake of a test.
-    NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; /etc/cont-init.d/03-link-wiki-skills.sh || { echo \"linking the wiki skills failed\" >&2; exit 1; }; [ -d /opt/data/skills/wiki-digest ] || { echo \"the link script ran but the wiki skills are not linked\" >&2; exit 1; }; exec /opt/data/scripts/nightly.sh"
+    NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; /etc/cont-init.d/03-link-wiki-skills.sh || { echo \"linking the wiki skills failed\" >&2; exit 1; }; [ -d $HH/skills/wiki-digest ] || { echo \"the link script ran but the wiki skills are not linked\" >&2; exit 1; }; exec $HH/scripts/nightly.sh"
     #
-    # SOUL_OUT off the default too. It defaults to /opt/data/SOUL.md, which is
+    # SOUL_OUT off the default too. It defaults to $HERMES_HOME/SOUL.md, which is
     # the live gateway's injected system prompt — this run would compose the
     # scratch vault's index over it and leave production advertising pages that
     # exist only here. The vault mount above covers the vault; this covers the

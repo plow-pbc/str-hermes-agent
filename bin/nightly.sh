@@ -24,12 +24,18 @@
 #      is a job that did not run tomorrow either.
 set -uo pipefail
 
-VAULT="${VAULT:-/opt/data/repo/vault}"
+# The image sets HERMES_HOME (/opt/data today, /var/lib/hermes once this
+# agent opts into agent-mgr's boot contract) -- indexing it here, rather than
+# hardcoding either literal, keeps VAULT and SOUL_OUT correct under both.
+# Required, not defaulted: a container that has lost the variable must fail
+# here, not silently resolve a vault or SOUL that is not actually mounted.
+HERMES_HOME="${HERMES_HOME:?nightly.sh: HERMES_HOME is unset in the container}"
+VAULT="${VAULT:-$HERMES_HOME/repo/vault}"
 # The composed SOUL's destination. Overridable for the same reason $VAULT is:
 # `just test-wiki` points both at scratch, and this one is the live gateway's
 # injected system prompt — a run that composed a scratch vault's index over it
 # would leave production advertising pages that exist nowhere but the test.
-SOUL_OUT="${SOUL_OUT:-/opt/data/SOUL.md}"
+SOUL_OUT="${SOUL_OUT:-$HERMES_HOME/SOUL.md}"
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS=""
 
@@ -120,9 +126,9 @@ fi
 # than abort: the digest below is this run's liveness signal, so a stale SOUL
 # must be reported through it, not made silent by skipping the message that
 # would have said so.
-# $SOUL_OUT defaults to /opt/data/SOUL.md, which is ~/.hermes/SOUL.md on the
-# host — the same file the deploy path writes, through the compose mount.
-if ! "$BIN/build-soul" "$VAULT" /opt/data/repo/runtime/SOUL.md "$SOUL_OUT"; then
+# $SOUL_OUT defaults to $HERMES_HOME/SOUL.md, which is ~/.hermes/SOUL.md on
+# the host — the same file the deploy path writes, through the compose mount.
+if ! "$BIN/build-soul" "$VAULT" "$HERMES_HOME/repo/runtime/SOUL.md" "$SOUL_OUT"; then
   note "SOUL rebuild failed; the injected index is stale"
 fi
 

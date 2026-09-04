@@ -217,7 +217,9 @@ def run(hostex_token: str, seam_key: str, ops: list[dict],
 
 
 def main() -> None:
-    ops = load_ops(pathlib.Path(os.environ.get("VAULT", "/opt/data/repo/vault")) / "ops.toml")
+    ops = load_ops(
+        pathlib.Path(os.environ.get("VAULT", str(hermes_home() / "repo/vault"))) / "ops.toml"
+    )
     print(run(read_env_key("HOSTEX_TOKEN"), read_env_key("SEAM_API_KEY"),
               ops, datetime.datetime.now(datetime.timezone.utc)), flush=True)
 

@@ -8,9 +8,11 @@ state=$(agent-mgr compose str exec -T hermes sh -c 'printf %s "$HERMES_HOME"')
 [ -n "$state" ] || { echo "HERMES_HOME is unset in the container"; exit 1; }
 
 # The durable model must exist before the job does: a job without it fires
-# daily Script Errors at the owners until someone writes the file.
+# daily Script Errors at the owners until someone writes the file. The default
+# comes from $state, already resolved and checked above, rather than a second
+# literal that could drift from it.
 agent-mgr compose str exec -T hermes sh -c \
-  'test -f "${VAULT:-/opt/data/repo/vault}/ops.toml"' \
+  "test -f \"\${VAULT:-$state/repo/vault}/ops.toml\"" \
   || { echo "no ops.toml in the runtime vault - write it first (README § Pre-check-in cleaner status)"; exit 1; }
 
 # Refuse a second job, same reasoning as enable-hostex-inbound.sh.

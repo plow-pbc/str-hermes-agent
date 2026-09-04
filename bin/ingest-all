@@ -26,9 +26,14 @@ BATCH=10
 # Keyed on the bind mount compose.yml guarantees, not on `command -v hermes`:
 # installing the Hermes CLI on the host would otherwise silently flip an
 # operator run into container mode and hand the agent a host-relative vault
-# path. Absent marker => host => docker, which is the safe direction.
-if [ -d /opt/data/repo ]; then
+# path. Absent marker => host => docker, which is the safe direction. The
+# marker itself is $HERMES_HOME/repo, not a literal /opt/data, so this reads
+# correctly whether or not this agent has opted into agent-mgr's boot
+# contract -- a host shell has no HERMES_HOME at all, so the -n guard alone
+# already rules a host run out before the directory is even checked.
+if [ -n "${HERMES_HOME:-}" ] && [ -d "$HERMES_HOME/repo" ]; then
   CVAULT="$VAULT"
+  resolve_cvault() { :; }  # already resolved above; the host branch queries the image instead
   turn() { hermes chat -q "$1"; }
 else
   # A host run brings its own vault in, at the one container path a vault ever
@@ -40,7 +45,22 @@ else
   # cannot see production at all. The manifest's absolute keys are unchanged.
   VAULT_ABS="$(cd "$VAULT" && pwd -P)" \
     || { echo "ingest-all: no vault at $VAULT" >&2; exit 1; }
-  CVAULT="/opt/data/repo/vault"
+  # Read off the image itself, the same variable the running container
+  # resolves HERMES_HOME to -- a host shell has none of its own, so this is
+  # the one place that value can come from. Required, not defaulted: a
+  # throwaway container that cannot report it must stop this run rather than
+  # mount the vault somewhere the real container does not read from.
+  #
+  # Deferred to resolve_cvault, called from the loop below only once it knows
+  # there is something to feed -- a query against the image is a container of
+  # its own, and a run that finds nothing to ingest should cost none.
+  resolve_cvault() {
+    [ -n "${CVAULT:-}" ] && return
+    CHOME="$(agent-mgr compose str run --rm --no-deps -T --entrypoint bash hermes \
+      -c 'printf %s "${HERMES_HOME:?}"')" \
+      || { echo "ingest-all: could not read HERMES_HOME from the image" >&2; exit 1; }
+    CVAULT="$CHOME/repo/vault"
+  }
   # --entrypoint bash, and therefore --user, for the reason test-wiki documents
   # at length: without it the image's own entrypoint boots s6, s6 boots a
   # gateway, and this throwaway container joins the live agent's chat alongside
@@ -283,6 +303,9 @@ while :; do
   # and a round with exactly one left fed nothing, stalled, and aborted the run.
   before=$(printf '%s\n' "$SCOPE" | grep -c .)
   [ "$before" -eq 0 ] && { echo "ingest-all: manifest covers everything in scope"; break; }
+  # Only past the "nothing to do" exit: this is what actually costs a
+  # container on the host branch, and a clean run should not pay for it.
+  resolve_cvault
 
   round=$((round + 1))
   if [ "$round" -gt "$MAX_ROUNDS" ]; then
