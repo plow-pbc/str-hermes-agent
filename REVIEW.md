@@ -11,13 +11,11 @@ differently, and only one of them reaches it today:
 - **roborev** is live today — on a copy, not this file. It cannot open files a
   config merely points at, so a sync script inlines this file into
   `.roborev.toml`'s `review_guidelines`. **An edit here does not reach roborev
-  until `.roborev.toml` carries it.** That script is mid-move and currently
-  reachable from neither side — `claude-config` deleted its copy, and the
-  replacement merged into a stale branch of `plow-pbc/seed-auto-roborev`
-  rather than its `main` — so until it lands, edit both files in lockstep.
-- **knightwatch** will read it from the base branch once its loader change
-  lands. Until then it falls back to the org-default operating point, and this
-  repo's specifics below do not reach it.
+  until `.roborev.toml` carries it** — run
+  `~/.config/roborev/sync-review-config.sh <this checkout>` (shipped by the
+  `seed-auto-roborev` seed) and commit the regenerated file with the edit.
+- **knightwatch** reads this file directly off the base branch (since
+  `knightwatch-reviewer#201`), so an edit here reaches it on the next review.
 
 `standards.md` references below resolve inside the knightwatch bundle only;
 roborev cannot see that file.
@@ -182,6 +180,7 @@ Beyond the universal set in `standards.md`:
 | Propose a defensive guard for an input shape not observed in the guest-conversation corpus. | Flag a failure the corpus actually produced, citing the file and the count. |
 | Ask for a fallback when the operator would rather the run fail loudly and re-fetch. | Flag a failure that is *silent* — a check that passes on broken data. |
 | Push a hardening remedy up to `blocking` because the runtime is privileged. | Emit it at `low` with the ticket it belongs to. |
+| — | Flag a change that a **sibling repo owns** per [`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos): send enforcement or trust state (the `plow_chat` plugin gates the send, `plow` holds which chats are trusted — the STR eligibility rule in `runtime/SOUL.md` stays here), generic Plow-assistant persona text ported from another variant (the base's `image/seed/SOUL.md`), a Hermes runtime fix carried here instead of taken as an image digest bump (the fork, then the base). The test is who else would have to change if the fact changed. |
 
 ### What is worth blocking on
 

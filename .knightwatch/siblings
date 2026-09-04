@@ -4,7 +4,15 @@
 #
 # One per line. The reviewer host must also carry a SOURCE_PATHS entry for
 # each, or the sibling reports as `missing` and is never searched.
+#
+# Each row is an edge this repo actually has: agent-mgr deploys it and owns the
+# compose template and the plugin pin, plow owns the relay and the chat trust
+# state, hermes-plow-chat is the plow_chat plugin that frames every turn. The
+# peer variants that used to be listed here own nothing this repo consumes.
+# plow-hermes-agent is not a build input (this image is FROM upstream) but its
+# README map and seed SOUL.md are what the gate compares persona text against.
 
 plow-pbc/agent-mgr
-plow-pbc/property-hunt-hermes-agent
-plow-pbc/life-assistant-hermes-agent
+plow-pbc/plow
+plow-pbc/hermes-plow-chat
+plow-pbc/plow-hermes-agent

@@ -333,6 +333,49 @@ filed as issues and declined in-PR — they do not add scope.** It is not a
 blanket amnesty; `REVIEW.md` § The carve-outs is the canonical list of
 what still blocks a merge.
 
+## Where changes go
+
+This repo is one of several that assemble a Plow agent. The map of which repo
+owns what is in
+[`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos);
+read it before a change that touches a neighbour. The test is **who else would
+have to change if this fact changed** — if the answer is a sibling, the change
+belongs there; this repo only follows, by bumping its pin if it holds one.
+
+Not here:
+
+- **Send enforcement and trust state.** The `plow_chat` plugin
+  ([`hermes-plow-chat`](https://github.com/plow-pbc/hermes-plow-chat)) gates
+  outbound sends and [`plow`](https://github.com/plow-pbc/plow) holds which
+  chats are trusted. What *is* this repo's is the STR-specific eligibility
+  rule — which guest may be answered, and on whose approval — which lives in
+  `runtime/SOUL.md` and is what the config and the poller delegate to. A copy
+  of the *enforcement* here, or a second trust flag, is a path no dashboard
+  reads.
+- **Generic Plow-assistant persona text.** Anything a second assistant would
+  also want belongs in the base's `image/seed/SOUL.md`
+  ([`plow-hermes-agent`](https://github.com/plow-pbc/plow-hermes-agent));
+  `runtime/SOUL.md` is for what makes this the rentals agent.
+- **A Hermes runtime fix.** It goes to the fork and upstream, not into a
+  workaround here — this repo takes it as the image digest bump the Dockerfile
+  pins.
+- **Deployment, provisioning, and container lifecycle**, including the bring-up
+  sequence documented below: the compose template, skill replay, and the
+  fleet's plugin pin are [`agent-mgr`](https://github.com/plow-pbc/agent-mgr)'s,
+  and this repo only declares its own facts in `agent.env`.
+
+Examples:
+
+- Adherence — #4 adopted agent-mgr's `restore` → `deploy` rename
+  (`AGENT_DEPLOY_HOOK`) instead of keeping a local spelling, leaving the deploy
+  mechanism with its one owner:
+  https://github.com/plow-pbc/str-hermes-agent/pull/4
+- Drift — #3 put the two-tier eligibility rule (this repo's) into ~40 lines of
+  `group_prompts` prose in `runtime/config.yaml` beside the one in
+  `runtime/SOUL.md`, so the rule has two homes here and reads as a second
+  approval path next to the plugin's send gate:
+  https://github.com/plow-pbc/str-hermes-agent/pull/3
+
 ## Day-to-day
 
 `agent-mgr` resolves this agent by name through its registry, so these run from
