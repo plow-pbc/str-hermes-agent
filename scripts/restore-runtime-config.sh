@@ -56,6 +56,13 @@ hermes_home="${AGENT_HOME:-}"
   exit 1
 }
 
+# Established here, with the other required inputs, and used only after the
+# seed copy below -- validate-then-write, not write-then-mutate. Required
+# (`:?`), not defaulted, so an agent-mgr that predates the export fails here,
+# before anything is written, rather than after the seed copy has already
+# landed a config pointing at an unmounted vault.
+container_vault="${AGENT_HOME_TARGET:?agent-mgr did not export AGENT_HOME_TARGET -- run me through 'agent-mgr deploy str'}/repo/vault"
+
 umask 077
 
 # The hand-authored half of runtime/. The nightly owns
@@ -81,10 +88,8 @@ cp -a --remove-destination "$repo_root/runtime/vault-seed/." "$vault/"
 # The seed's OBSIDIAN_VAULT_PATH is a placeholder: obsidian-wiki reads its
 # own .env as plain KEY=VALUE, with no ${VAR} expansion of its own, so the
 # copy above cannot leave it pointing at wherever the vault actually mounts
-# -- this script is the one layer left that can still resolve it. Required
-# (`:?`), not defaulted, so an agent-mgr that predates the export fails here
-# rather than installing a config pointing at an unmounted vault.
-container_vault="${AGENT_HOME_TARGET:?agent-mgr did not export AGENT_HOME_TARGET -- run me through 'agent-mgr deploy str'}/repo/vault"
+# -- this script is the one layer left that can still resolve it.
+# container_vault is established above, with the other required inputs.
 sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$container_vault|" "$vault/.env"
 
 # The hubs are the vault's own (the seed ships none — the property list is the

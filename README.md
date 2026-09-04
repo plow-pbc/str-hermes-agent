@@ -1059,7 +1059,7 @@ instead, where nothing is watching the clock:
 agent-mgr compose str exec hermes hermes cron remove wiki-nightly
 AGENT_CONTAINER=$(agent-mgr resolve str | sed -n 's/^AGENT_CONTAINER=//p') \
   ./scripts/no-nightly-running \
-  && agent-mgr compose str exec -u hermes hermes /opt/data/scripts/nightly.sh
+  && agent-mgr compose str exec -u hermes hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
 ./scripts/enable-wiki-nightly.sh
 ```
 
