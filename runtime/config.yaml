@@ -1,8 +1,9 @@
 # The declarative half of ~/.hermes — everything that is a deliberate choice for
 # this deployment. Keys equal to the image's own defaults are deliberately
 # absent so the image supplies its own current defaults instead of a frozen
-# snapshot; likewise _config_version. (The image is pinned by digest in the
-# Dockerfile — "current" means whatever that pinned image ships, not `latest`.) Verified against the running image: with
+# snapshot; likewise _config_version. (The image is pinned by an immutable
+# base-<sha> tag in the Dockerfile — "current" means whatever that pinned image
+# ships, not `latest`.) Verified against the running image: with
 # the key absent, hermes config get _config_version reports the current 33 and
 # the file is left byte-identical — an unversioned config is read as current,
 # not as an old schema needing migration.
