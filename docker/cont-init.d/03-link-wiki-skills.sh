@@ -2,8 +2,8 @@
 # Link the enabled wiki skills into $HERMES_HOME/skills at container start.
 #
 # Runs after the image's own bundled-skill sync (01-hermes-setup), because
-# ~/.hermes is mounted over /opt/data and masks anything the image writes there
-# at build time.
+# ~/.hermes is mounted over $HERMES_HOME and masks anything the image writes
+# there at build time.
 #
 # Only this subset is linked. The other ~30 skills that ship in the wheel stay
 # in the package, unlinked and invisible to the agent — enable one by adding it
@@ -18,7 +18,7 @@ ENABLED=(
   wiki-query
 )
 
-SKILLS_DIR="${HERMES_HOME:-/opt/data}/skills"
+SKILLS_DIR="${HERMES_HOME:?the image sets this; a container without it must not guess}/skills"
 WIKI_PY="${WIKI_VENV:-/opt/wiki-venv}/bin/python"
 SRC="$("$WIKI_PY" -c 'import obsidian_wiki, pathlib; print(pathlib.Path(obsidian_wiki.__file__).parent / "_data" / "skills")')"
 

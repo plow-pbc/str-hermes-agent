@@ -24,9 +24,9 @@
 #      is a job that did not run tomorrow either.
 set -uo pipefail
 
-# The image sets HERMES_HOME (/opt/data today, /var/lib/hermes once this
-# agent opts into agent-mgr's boot contract) -- indexing it here, rather than
-# hardcoding either literal, keeps VAULT and SOUL_OUT correct under both.
+# The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
+# here, rather than hardcoding the literal, keeps VAULT and SOUL_OUT correct
+# across base images.
 # Required, not defaulted: a container that has lost the variable must fail
 # here, not silently resolve a vault or SOUL that is not actually mounted.
 HERMES_HOME="${HERMES_HOME:?nightly.sh: HERMES_HOME is unset in the container}"

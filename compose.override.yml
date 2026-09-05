@@ -21,11 +21,10 @@ services:
       # git repository. Read-write because ingest rewrites pages in place and
       # hostex-raw stages fetched conversations here.
       #
-      # Container-side paths come from AGENT_HOME_TARGET, not a literal
-      # /opt/data: agent-mgr resolves it from the agent's boot contract, so it
-      # names /opt/data for an agent that has not opted in and /var/lib/hermes
-      # for one that has -- a mount written against it is correct under both,
-      # and the cutover between them is a descriptor change alone. Required
+      # Container-side paths come from AGENT_HOME_TARGET, not a literal:
+      # agent-mgr derives it from the image's own HERMES_HOME (/var/lib/hermes
+      # on the Plow base, /opt/data on the upstream image), so a mount written
+      # against it is correct under either base. Required
       # (`:?`), not defaulted: an agent-mgr that predates the export must fail
       # loudly here rather than silently mount at the wrong path.
       - ${STR_VAULT:?}:${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}/repo/vault

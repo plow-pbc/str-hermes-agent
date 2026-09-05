@@ -188,7 +188,7 @@ def hermes_home() -> pathlib.Path:
 def read_token() -> str:
     """Resolve HOSTEX_TOKEN from $HERMES_HOME/.env.
 
-    In-container that is /opt/data/.env — the host's ~/.hermes/.env through
+    In-container that is /var/lib/hermes/.env — the host's ~/.hermes/.env through
     the compose mount, and the only path cron runs by.
     """
     env = hermes_home() / ".env"

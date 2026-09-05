@@ -12,7 +12,7 @@ Deploy merged `main` to the container that actually runs on `wakeup`.
 | Host | `wakeup` |
 | Checkout | `~/services/sams-str-hermes-agent` — **this is what runs** |
 | Container | `hermes`, Docker Compose, `restart: unless-stopped` |
-| State | `~/.hermes` on the host, mounted at `/opt/data` |
+| State | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
 
 This is the **redeploy** path: an existing host, already bootstrapped. First-time
 setup of a host — credentials, installing and registering `agent-mgr`,

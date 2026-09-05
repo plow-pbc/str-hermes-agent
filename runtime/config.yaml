@@ -200,9 +200,8 @@ mcp_servers:
     # Interpolated by Hermes' own config loader (agent/secret_scope, falling
     # back to os.environ) -- the same mechanism the SEAM_API_KEY entry below
     # already relies on, verified to recurse into `args` too. HERMES_HOME is
-    # the image's own env var, /opt/data today and /var/lib/hermes once this
-    # agent opts into agent-mgr's boot contract -- matching wherever compose
-    # actually mounts mcp-seam either way, with no compose-level variable
+    # the image's own env var (/var/lib/hermes on the Plow base) -- matching
+    # wherever compose actually mounts mcp-seam, with no compose-level variable
     # reaching into this file.
     - ${HERMES_HOME}/mcp-seam/server.py
     env:
