@@ -289,11 +289,14 @@ agent-mgr compose str build
 # and here there is none yet.
 agent-mgr activate str
 agent-mgr up str
-# Sign-in after up: `agent-mgr sign-in` authenticates INSIDE the running
-# container and refuses when no gateway is up. It holds the codex OAuth the
-# compression fallback uses; the main route needs no sign-in, it is the Plow
-# credential activation wrote.
-agent-mgr sign-in str
+# The codex OAuth the compression fallback uses, added INSIDE the running
+# container under the host uid, the way `agent-mgr sign-in` does it -- but not
+# through `sign-in` itself, which reads the provider off the live config and
+# would add `plow`, the main route, which needs no sign-in: it is the Plow
+# credential activation wrote. Then `up` again: a current-contract agent has no
+# restart, and cont-init only runs at container creation.
+agent-mgr compose str exec --user "$(id -u):$(id -g)" -it hermes hermes auth add openai-codex
+agent-mgr up str
 ```
 
 After pairing and activating the private Plow chat, send `/sethome` in the
