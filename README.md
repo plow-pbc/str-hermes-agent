@@ -67,7 +67,7 @@ token and the ability to open doors.
 | Runtime | Docker Compose, container `hermes` |
 | Deployed checkout | `~/services/sams-str-hermes-agent` — **this is what actually runs** |
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
-| Persistent state | `~/.hermes` on the host, mounted at `/opt/data` |
+| Persistent state | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
 | Runtime vault | `~/hermes-vault` — outside every checkout, never a git repo |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
@@ -178,7 +178,7 @@ between the two; #46 records why the allowlist never was.
 |---|---|
 | `agent.env` | This agent's descriptor — home, container, build context, timezone |
 | `compose.override.yml` | What this agent adds to agent-mgr's service: the derived image, the vault and `bin/` mounts |
-| `bin/` | Scripts Hermes' scheduler runs, mounted at `/opt/data/scripts` |
+| `bin/` | Scripts Hermes' scheduler runs, mounted at `/var/lib/hermes/scripts` |
 | `mcp-seam/` | Seam lock-control MCP server, bind-mounted read-only into the data volume |
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
 | `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `~/.hermes` |
@@ -1030,17 +1030,17 @@ around.
 `--script nightly.sh`, a bare name, not a path. Hermes resolves it under
 `$HERMES_HOME/scripts` and refuses anything outside — which is why `bin/` is
 mounted there (see § Layout) rather than run from the repo checkout. An absolute
-path into `/opt/data/repo/bin` is rejected at create time.
+path into `/var/lib/hermes/repo/bin` is rejected at create time.
 
 It is not scheduled until you register it. A handoff that stops at "merged"
 leaves the chain inert while looking installed: the script is in the image's
-view of `/opt/data/scripts`, the vault is mounted, and nothing runs.
+view of `/var/lib/hermes/scripts`, the vault is mounted, and nothing runs.
 
-The run needs both mounts. `bin/` arrives read-only at `/opt/data/scripts` so
+The run needs both mounts. `bin/` arrives read-only at `/var/lib/hermes/scripts` so
 the scheduler will execute it and a turn processing guest text cannot rewrite
 it. `vault/` no longer exists in this repo. The runtime vault is `~/hermes-vault`
 on the host — a plain directory, never a git repository — mounted read-write at
-`/opt/data/repo/vault` because ingest rewrites pages and `hostex-raw` writes
+`/var/lib/hermes/repo/vault` because ingest rewrites pages and `hostex-raw` writes
 fetched conversations into it. Its history lives in the private `sams-str-vault`
 repo, whose git directory sits beside the worktree rather than inside it, and
 which `scripts/promote-vault` commits and pushes on a host-side schedule.
@@ -1049,7 +1049,7 @@ The vault, and not the checkout around it. The checkout was mounted here once,
 and an ingest turn used the `.git` that came with it: finding pages missing
 from the working tree, it ran `git restore --source=HEAD` over them and then
 spent the round updating what it had restored (#89). The same mount also gave
-`bin/` a second, writable path at `/opt/data/repo/bin`, so the read-only mount
+`bin/` a second, writable path at `/var/lib/hermes/repo/bin`, so the read-only mount
 above was not in fact bounding what a turn could do to the scheduler's scripts.
 An unattended turn holds a terminal and its own view of what the tree should
 look like, so what it can reach is the only boundary there is.
@@ -1172,7 +1172,7 @@ and nothing here can.
 The durable model — which properties, which lock, which cleaner, which
 thread — is a hand-authored `ops.toml` at the top of the private vault:
 `~/hermes-vault/ops.toml`, mounted into the container at
-`/opt/data/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
+`/var/lib/hermes/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
 YAML: the image ships no PyYAML and `tomllib` is stdlib.
 
 ```toml

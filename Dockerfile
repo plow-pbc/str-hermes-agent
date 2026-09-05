@@ -23,8 +23,8 @@ RUN uv venv "$WIKI_VENV" \
     && "$WIKI_VENV/bin/obsidian-wiki" --help > /dev/null
 ENV PATH="/opt/wiki-venv/bin:${PATH}"
 
-# ~/.hermes is bind-mounted over /opt/data, so anything written to
-# /opt/data/skills at build time is masked at runtime. The image's own bundled
+# ~/.hermes is bind-mounted over $HERMES_HOME (/var/lib/hermes on this base), so
+# anything written to its skills/ at build time is masked at runtime. The image's own bundled
 # skills work around this by syncing in at boot; this does the same for ours.
 COPY docker/cont-init.d/03-link-wiki-skills.sh /etc/cont-init.d/03-link-wiki-skills.sh
 RUN chmod +x /etc/cont-init.d/03-link-wiki-skills.sh
