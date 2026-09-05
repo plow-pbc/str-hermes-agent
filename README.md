@@ -316,7 +316,7 @@ to wait on, so watch `agent-mgr logs str` until it lists its
 platforms. `agent-mgr deploy` installs `config.yaml`, and the script composes `SOUL.md`; it
 never touches `~/.hermes/.env`, so the home target survives.
 
-Skip `agent-mgr sign-in str` only when a valid
+Skip the `hermes auth add openai-codex` step only when a valid
 `~/.hermes/auth.json` was restored through a separate secure backup. The
 runtime restoration script copies the tracked configuration and composes
 `SOUL.md`; it does not create secrets, OAuth, sessions, or derived gateway
