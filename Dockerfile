@@ -1,11 +1,12 @@
 # The Plow base image: upstream Hermes plus plow-init, which asks Plow who this
 # agent is at every boot and writes what it learns -- the model route, the
 # `plow` MCP server that is the operator's Mac over the relay -- into the home.
-# Pinned by an immutable base-<sha> tag (plow-hermes-agent README, "Building a
-# variant image"); CI publishes one per plow-hermes-agent commit that
-# plow-pbc/plow's agents.json pins. Bump deliberately, to a sha that repo has
-# published.
-FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-357a87c0e511fbad5a1ab7adc4d8aeafde33c86f
+# Pinned by the base-<sha> tag AND its digest: the registry's tags are mutable
+# (plow terraform/ecr.tf), so the tag names the commit for a reader and the
+# digest is what docker actually resolves. CI publishes one tag per
+# plow-hermes-agent commit that plow-pbc/plow's agents.json pins; bump both,
+# from `docker manifest inspect` of the new tag.
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-357a87c0e511fbad5a1ab7adc4d8aeafde33c86f@sha256:63d5fab9eef17db087cfa4fbc596d71a0ee07794481f93c5f064d486a492af38
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't

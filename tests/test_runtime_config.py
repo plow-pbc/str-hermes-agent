@@ -217,14 +217,12 @@ def test_tracked_config_pins_the_model_route_uses_env_secrets_and_enables_plow()
     came up on a different provider. Same class as a missing MCP server.
     """
     config = (ROOT / "runtime/config.yaml").read_text()
-    # The route plow-init rewrites every boot from the base image's seed; the
-    # tracked copy must say the same, or a restore comes up on one route and
-    # the next boot silently moves it to another.
-    assert "provider: plow" in config
-    assert "default: anthropic/claude-sonnet-5" in config
-    assert config.count('base_url: "${PLOW_API_BASE}/v1"') == 2
-    assert "openai-codex" not in config
-    assert "auxiliary:" not in config
+    # plow-init owns the model route and rewrites it every boot; a tracked copy
+    # would be a second source of truth. What stays repo-owned is the codex
+    # compression fallback -- a second provider a Plow stall cannot take down.
+    assert "\nmodel:" not in f"\n{config}"
+    assert "\nproviders:" not in f"\n{config}"
+    assert "provider: openai-codex\n      model: gpt-5.5" in config
     assert "Authorization: Bearer ${HOSTEX_TOKEN}" in config
     assert "- search_conversations" in config   # only appears under include:
     assert "plow-chat-platform" in config

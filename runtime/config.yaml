@@ -1,9 +1,8 @@
 # The declarative half of ~/.hermes — everything that is a deliberate choice for
 # this deployment. Keys equal to the image's own defaults are deliberately
 # absent so the image supplies its own current defaults instead of a frozen
-# snapshot; likewise _config_version. (The image is pinned by an immutable
-# base-<sha> tag in the Dockerfile — "current" means whatever that pinned image
-# ships, not `latest`.) Verified against the running image: with
+# snapshot; likewise _config_version. (The image is pinned by digest in the
+# Dockerfile — "current" means whatever that pinned image ships, not `latest`.) Verified against the running image: with
 # the key absent, hermes config get _config_version reports the current 33 and
 # the file is left byte-identical — an unversioned config is read as current,
 # not as an old schema needing migration.
@@ -13,22 +12,9 @@
 # them; because the container mounts ~/.hermes, that is also the deployment's
 # widest blast radius. See the trust boundary in the README before adding a
 # group chat.
-# What plow-init writes on every boot from the base image's seed, restated here
-# so a restore and a boot agree. Plow's proxy fronts Anthropic; the id must be
-# one the proxy serves.
-model:
-  default: anthropic/claude-sonnet-5
-  provider: plow
-  base_url: "${PLOW_API_BASE}/v1"
-  key_env: HERMES_CUSTOM_PLOW_API_KEY
-providers:
-  plow:
-    name: plow
-    base_url: "${PLOW_API_BASE}/v1"
-    key_env: HERMES_CUSTOM_PLOW_API_KEY
-    stale_timeout_seconds: 55
-    models:
-      anthropic/claude-sonnet-5: {}
+# No model route here: plow-init owns it, rewriting model/providers from the
+# base image's seed on every boot (Plow's proxy, per the operator's ruling), so
+# a tracked copy could only drift from what actually boots.
 agent:
   # Carried over from the original install rather than re-derived; kept so a
   # restore reproduces the behaviour the operator has been running with.
@@ -61,6 +47,35 @@ cron:
 #
 # The cost is that the owners share conversation context in a group thread,
 # which is what a group thread reads like anyway.
+# On a full-budget timeout the aux client skips the same-provider retry for
+# compression and falls back -- but by default there is nowhere to land, so an
+# oversized session freezes and every turn re-stalls. A sibling agent lost ~30h
+# to that on 2026-08-31 (plow-pbc/life-assistant-hermes-agent#71); the main
+# route is Plow's proxy now, but the codex OAuth in auth.json is still valid and
+# a second provider is exactly what a same-provider stall cannot take down.
+#
+# The model is pinned, not free-form: a ChatGPT-account codex serves only
+# gpt-5.6-sol and gpt-5.5; every other id 400s. Verify a swap by the fallback
+# log lines, never the return value -- the implicit main-model fallback reports
+# success for a model the account actually rejected. gpt-5.5 was confirmed
+# GENUINE against this agent's own auth before landing, and the pinned image
+# (0.19.0) was confirmed to carry the fallback_chain machinery, so this is
+# honoured rather than inert.
+#
+# No task-level `timeout` on purpose. The image floors a config-derived
+# compression timeout at 300s so a slow reasoning summary is not cut off into
+# the deterministic context marker (#54915) -- a lower value is silently raised,
+# and setting one that DID bite would re-introduce that bug. A genuinely dead
+# stream is caught at 60s by the no-progress timeout, not by this budget.
+# The chain entry keeps its own 300s: without one it inherits the 30s auxiliary
+# default, far too short for a summary.
+auxiliary:
+  compression:
+    fallback_chain:
+    - provider: openai-codex
+      model: gpt-5.5
+      timeout: 300
+
 group_sessions_per_user: false
 plugins:
   enabled:

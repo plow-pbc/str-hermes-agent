@@ -404,7 +404,7 @@ agent-mgr compose str exec hermes hermes pairing list   # who's allowed to text 
 A `runtime/` edit — the plugin pin included — is not one of these; `up -d` is a
 no-op for an unchanged image. Use [Applying a `runtime/` edit](#applying-a-runtime-edit).
 
-Rebuilding is not upgrading. Every input is pinned — the base image by an immutable `base-<sha>` tag,
+Rebuilding is not upgrading. Every input is pinned — the base image by digest,
 `obsidian-wiki` by version — so `agent-mgr compose str build`
 reproduces what is already running and picks up only changes to this repo. To
 upgrade, bump a pin in the `Dockerfile` and then rebuild; that way the version

@@ -194,9 +194,7 @@ def test_the_readme_does_not_hand_agent_mgr_a_pin_this_repo_owns():
     *while* the paragraph below said the Dockerfile owned it, so a check that
     only looks for the carve-out stays green on exactly that shape.
     """
-    # By digest, or by the registry's immutable base-<full sha> tag -- either
-    # names one image forever; a floating tag does not.
-    assert re.search(r"^FROM \S+(@sha256:[0-9a-f]{64}|:base-[0-9a-f]{40})$",
+    assert re.search(r"^FROM \S+@sha256:[0-9a-f]{64}$",
                      (ROOT / "Dockerfile").read_text(), re.M), "the image pin moved"
     readme = (ROOT / "README.md").read_text()
     m = re.search(r"\*\*How deployment works.*?not here\.\*\*", readme, re.S)
