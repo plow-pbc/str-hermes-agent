@@ -282,16 +282,18 @@ agent-mgr deploy str
 # First, because the image is derived here and `up` would otherwise trigger a
 # multi-minute build under a step named something else.
 agent-mgr compose str build
-# Up before sign-in: `agent-mgr sign-in` authenticates INSIDE the running
-# container, unlike the throwaway-container form it replaced, and refuses when
-# no gateway is up. It is safe to start unauthenticated — the gateway comes up
-# and simply cannot answer until the credential lands.
-agent-mgr up str
-agent-mgr sign-in str
-# Activation writes PLOW_CHAT_CHAT_UID and PLOW_CHAT_TOKEN into ~/.hermes/.env,
-# which the gateway reads only at startup — so it reloads the gateway itself
-# once the credential is written. No separate restart.
+# Activate BEFORE up: this image boots through plow-init, which needs the
+# credential activation writes (PLOW_AGENT_TOKEN and PLOW_API_BASE) before
+# agent-mgr will create the container at all. Activation runs on the host and
+# polls until the code is texted back; it reloads a running gateway itself,
+# and here there is none yet.
 agent-mgr activate str
+agent-mgr up str
+# Sign-in after up: `agent-mgr sign-in` authenticates INSIDE the running
+# container and refuses when no gateway is up. It holds the codex OAuth the
+# compression fallback uses; the main route needs no sign-in, it is the Plow
+# credential activation wrote.
+agent-mgr sign-in str
 ```
 
 After pairing and activating the private Plow chat, send `/sethome` in the
