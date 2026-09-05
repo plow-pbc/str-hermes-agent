@@ -189,7 +189,7 @@ or deploy the branch that adds them. Either way, bringing the gateway up
 anyway means step 4 runs against whatever stale `~/.hermes/config.yaml` is
 already there.
 
-`runtime/config.yaml` is canonical — model route, Hostex allowlist, and the Seam server all live there. Editing the live copy instead is how the two drift, and the next deploy silently wins.
+`runtime/config.yaml` is canonical for what this repo owns — the Hostex allowlist and the Seam server. The model route is not in it: the base image's `plow-init` writes `model`/`providers` into the live config from its seed at every boot, so a route problem is diagnosed in `~/.hermes/config.yaml` and the container's boot log, never repaired in the tracked file. Editing the live copy for anything else is how the two drift, and the next deploy silently wins.
 
 One command, because `agent-mgr` owns the deploy end to end: it creates the
 home, installs `runtime/config.yaml` (named by `AGENT_CONFIG` in `agent.env`)
