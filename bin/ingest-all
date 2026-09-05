@@ -27,9 +27,8 @@ BATCH=10
 # installing the Hermes CLI on the host would otherwise silently flip an
 # operator run into container mode and hand the agent a host-relative vault
 # path. Absent marker => host => docker, which is the safe direction. The
-# marker itself is $HERMES_HOME/repo, not a literal /opt/data, so this reads
-# correctly whether or not this agent has opted into agent-mgr's boot
-# contract -- a host shell has no HERMES_HOME at all, so the -n guard alone
+# marker itself is $HERMES_HOME/repo, not a literal home path, so this reads
+# correctly on any base image -- a host shell has no HERMES_HOME at all, so the -n guard alone
 # already rules a host run out before the directory is even checked.
 if [ -n "${HERMES_HOME:-}" ] && [ -d "$HERMES_HOME/repo" ]; then
   CVAULT="$VAULT"

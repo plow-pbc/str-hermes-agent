@@ -12,9 +12,9 @@
 # them; because the container mounts ~/.hermes, that is also the deployment's
 # widest blast radius. See the trust boundary in the README before adding a
 # group chat.
-model:
-  default: gpt-5.6-sol
-  provider: openai-codex
+# No model route here: plow-init owns it, rewriting model/providers from the
+# base image's seed on every boot (Plow's proxy, per the operator's ruling), so
+# a tracked copy could only drift from what actually boots.
 agent:
   # Carried over from the original install rather than re-derived; kept so a
   # restore reproduces the behaviour the operator has been running with.
@@ -50,8 +50,9 @@ cron:
 # On a full-budget timeout the aux client skips the same-provider retry for
 # compression and falls back -- but by default there is nowhere to land, so an
 # oversized session freezes and every turn re-stalls. A sibling agent lost ~30h
-# to that on 2026-08-31 (plow-pbc/life-assistant-hermes-agent#71); this agent
-# runs the same provider, so it is the same exposure.
+# to that on 2026-08-31 (plow-pbc/life-assistant-hermes-agent#71); the main
+# route is Plow's proxy now, but the codex OAuth in auth.json is still valid and
+# a second provider is exactly what a same-provider stall cannot take down.
 #
 # The model is pinned, not free-form: a ChatGPT-account codex serves only
 # gpt-5.6-sol and gpt-5.5; every other id 400s. Verify a swap by the fallback
@@ -199,9 +200,8 @@ mcp_servers:
     # Interpolated by Hermes' own config loader (agent/secret_scope, falling
     # back to os.environ) -- the same mechanism the SEAM_API_KEY entry below
     # already relies on, verified to recurse into `args` too. HERMES_HOME is
-    # the image's own env var, /opt/data today and /var/lib/hermes once this
-    # agent opts into agent-mgr's boot contract -- matching wherever compose
-    # actually mounts mcp-seam either way, with no compose-level variable
+    # the image's own env var (/var/lib/hermes on the Plow base) -- matching
+    # wherever compose actually mounts mcp-seam, with no compose-level variable
     # reaching into this file.
     - ${HERMES_HOME}/mcp-seam/server.py
     env:
@@ -216,16 +216,3 @@ mcp_servers:
                 convert_access_code_to_managed]
       resources: false
       prompts: false
-  # Plow Latch, reached over the Plow relay: the browser and the filesystem
-  # this reaches are the operator's own Mac, not this container -- Mercury,
-  # Hostex's web UI, anything behind a login only that Mac holds. The relay
-  # authorises the connection and tells the Mac who is asking; the Mac
-  # authorises each action. The credential is an OAuth grant from the relay
-  # (`hermes mcp login latch`, README § Plow Latch), scoped to relay:call and
-  # persisted under the agent's home -- not the pasted account-wide pair the
-  # sibling agents still carry (plow-pbc/agent-mgr#40). The uid is the one
-  # value still carried by hand.
-  latch:
-    url: https://api.plow.co/v1/relay/devices/${DOMO_DEVICE_UID}/mcp
-    auth: oauth
-    enabled: true

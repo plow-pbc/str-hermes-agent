@@ -12,7 +12,7 @@ Deploy merged `main` to the container that actually runs on `wakeup`.
 | Host | `wakeup` |
 | Checkout | `~/services/sams-str-hermes-agent` — **this is what runs** |
 | Container | `hermes`, Docker Compose, `restart: unless-stopped` |
-| State | `~/.hermes` on the host, mounted at `/opt/data` |
+| State | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
 
 This is the **redeploy** path: an existing host, already bootstrapped. First-time
 setup of a host — credentials, installing and registering `agent-mgr`,
@@ -150,7 +150,19 @@ reports "Already up to date" and deploys code that was never merged.
 
 An empty log means nothing new — say so rather than reporting a deploy.
 
-## 3. Apply the tracked runtime config
+## 3. Build, then apply the tracked runtime config
+
+Build first. `agent-mgr deploy` derives the boot contract — the home target
+the vault seed's `.env` and every mount are written against — from the image
+that is present locally, and it only builds one when none is. On a redeploy
+the stale image is present, so a deploy before the build would seed the vault
+for the old contract and the recreate below would then boot the new one over
+it. The build is safe before anything knows the contract: nothing in it reads
+`AGENT_HOME_TARGET`.
+
+```sh
+agent-mgr compose str build
+```
 
 ```sh
 (
@@ -189,7 +201,7 @@ or deploy the branch that adds them. Either way, bringing the gateway up
 anyway means step 4 runs against whatever stale `~/.hermes/config.yaml` is
 already there.
 
-`runtime/config.yaml` is canonical — model route, Hostex allowlist, and the Seam server all live there. Editing the live copy instead is how the two drift, and the next deploy silently wins.
+`runtime/config.yaml` is canonical for what this repo owns — the Hostex allowlist and the Seam server. The model route is not in it: the base image's `plow-init` writes `model`/`providers` into the live config from its seed at every boot, so a route problem is diagnosed in `~/.hermes/config.yaml` and the container's boot log, never repaired in the tracked file. Editing the live copy for anything else is how the two drift, and the next deploy silently wins.
 
 One command, because `agent-mgr` owns the deploy end to end: it creates the
 home, installs `runtime/config.yaml` (named by `AGENT_CONFIG` in `agent.env`)
@@ -214,10 +226,9 @@ also be the plugin install refusing agent-mgr's `runtime/plow-chat-plugin.ref` w
 not a 40-char SHA, or failing to fetch it; the message names which. See
 Troubleshooting.
 
-## 4. Bring it up, in this order
+## 4. Bring it up
 
 ```sh
-agent-mgr compose str build
 agent-mgr compose str up -d --force-recreate
 ```
 
@@ -227,7 +238,7 @@ the next run re-ingests that conversation and appends its facts a second time.
 Nothing reports it; the pages just quietly say things twice. Wait for the run to
 finish.
 
-Ordered immediately before the recreate, after `build`: the build is minutes
+Ordered right after the deploy, not before the build: the build is minutes
 long, and a 03:00 fire can start in anything sitting between the check and the
 transition it guards. agent-mgr owns when it runs; `agent.env` owns which
 script it is.
@@ -238,7 +249,7 @@ the configuration it loaded at its last start — including the one step 3 just
 replaced. And `up`, not `restart`, because Compose substitutes the environment
 at container create time.
 
-`build` before it, and no `pull` at all. The image is derived here rather than
+`build` ahead of it in step 3, and no `pull` at all. The image is derived here rather than
 tracked upstream: the Dockerfile layers `obsidian-wiki` onto the pinned base so
 the nightly wiki chain has the skills it runs on. `--force-recreate` recreates
 the container from whatever image already exists, so without the build a deploy

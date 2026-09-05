@@ -1,9 +1,12 @@
-# Pinned by digest, not by tag. This image is a large unreviewed surface landing
-# in a runtime that holds a Hostex token and a writable vault, and `docker
-# compose build` — which the README documents as the routine rebuild —
-# re-resolves a tag every time it runs.
-# Bump deliberately: `docker buildx imagetools inspect nousresearch/hermes-agent:latest`.
-FROM nousresearch/hermes-agent@sha256:8f4e8677281eca188bc9d2fda90806646ba19941fce55fa8fda2d63112ff48a8
+# The Plow base image: upstream Hermes plus plow-init, which asks Plow who this
+# agent is at every boot and writes what it learns -- the model route, the
+# `plow` MCP server that is the operator's Mac over the relay -- into the home.
+# Pinned by the base-<sha> tag AND its digest: the registry's tags are mutable
+# (plow terraform/ecr.tf), so the tag names the commit for a reader and the
+# digest is what docker actually resolves. CI publishes one tag per
+# plow-hermes-agent commit that plow-pbc/plow's agents.json pins; bump both,
+# from `docker manifest inspect` of the new tag.
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-357a87c0e511fbad5a1ab7adc4d8aeafde33c86f@sha256:63d5fab9eef17db087cfa4fbc596d71a0ee07794481f93c5f064d486a492af38
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't
@@ -20,8 +23,8 @@ RUN uv venv "$WIKI_VENV" \
     && "$WIKI_VENV/bin/obsidian-wiki" --help > /dev/null
 ENV PATH="/opt/wiki-venv/bin:${PATH}"
 
-# ~/.hermes is bind-mounted over /opt/data, so anything written to
-# /opt/data/skills at build time is masked at runtime. The image's own bundled
+# ~/.hermes is bind-mounted over $HERMES_HOME (/var/lib/hermes on this base), so
+# anything written to its skills/ at build time is masked at runtime. The image's own bundled
 # skills work around this by syncing in at boot; this does the same for ours.
 COPY docker/cont-init.d/03-link-wiki-skills.sh /etc/cont-init.d/03-link-wiki-skills.sh
 RUN chmod +x /etc/cont-init.d/03-link-wiki-skills.sh

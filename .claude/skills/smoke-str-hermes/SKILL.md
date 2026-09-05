@@ -66,7 +66,7 @@ agent-mgr compose str exec -T hermes hermes chat -q 'Reply with exactly: PONG' <
 
 Expect `PONG` in the reply box. This proves the container is serving, the model route resolves, and its credentials are valid.
 
-A hang means the model provider is unreachable or OAuth expired — check with `agent-mgr compose str run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider means the live `~/.hermes/config.yaml` carries a model route production does not run; compare it against tracked `runtime/config.yaml`.
+A hang means the model provider is unreachable or OAuth expired — check with `agent-mgr compose str run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `~/.hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
 
 ## 2. Tool reachability — does it still reach Hostex
 

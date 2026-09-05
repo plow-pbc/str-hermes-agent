@@ -76,7 +76,7 @@ umask 077
 # --remove-destination, and it is load-bearing. This copy runs on the host as
 # the operator, into a directory the agent writes. A planted RELATIVE symlink
 # resolves differently on each side: `AGENTS.md -> ../.ssh/authorized_keys`
-# lands on /opt/data/repo/.ssh inside the container (nothing there) and on
+# lands on $HERMES_HOME/repo/.ssh inside the container (nothing there) and on
 # ~/.ssh on the host — which no mount exposes, so it is a real crossing rather
 # than a slower route to what the agent already holds, and the payoff is an SSH
 # lockout. Plain `cp -a` follows it and writes through; --remove-destination

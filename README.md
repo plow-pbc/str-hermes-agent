@@ -10,10 +10,13 @@ A [Hermes](https://howto.plow.co/hermes) agent — texted from iMessage — that
 helps an owner run their short-term rentals. It runs in Docker on `wakeup`, not on the
 Raspberry Pi the upstream guide assumes.
 
-Uses the official `nousresearch/hermes-agent` image (s6-supervised, pinned
-SQLite, uid remap) rather than a hand-rolled one. All state except the vault
-lives in `~/.hermes` on the host, mounted at `/opt/data`; the vault is
-`~/hermes-vault`, mounted in beside it. The image is stateless.
+Uses the Plow base image (`plow-cloud-agents:base-<sha>`, built by
+[plow-hermes-agent](https://github.com/plow-pbc/plow-hermes-agent) on the
+official `nousresearch/hermes-agent` image) rather than a hand-rolled one: it
+adds `plow-init`, which asks Plow who this agent is at every boot. All state
+except the vault lives in `~/.hermes` on the host, mounted at `/var/lib/hermes`
+(the image's `HERMES_HOME`); the vault is `~/hermes-vault`, mounted in beside
+it. The image is stateless.
 
 ## What this is for
 
@@ -64,7 +67,7 @@ token and the ability to open doors.
 | Runtime | Docker Compose, container `hermes` |
 | Deployed checkout | `~/services/sams-str-hermes-agent` — **this is what actually runs** |
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
-| Persistent state | `~/.hermes` on the host, mounted at `/opt/data` |
+| Persistent state | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
 | Runtime vault | `~/hermes-vault` — outside every checkout, never a git repo |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
@@ -83,7 +86,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
-| Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Configured; live once the relay grant is signed in** — `mcp_servers.latch` in `runtime/config.yaml`, one `hermes mcp login latch` (§ Plow Latch) |
+| Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Provisioned by the base image** — `plow-init` writes the `plow` MCP server from the agent's own Plow identity at every boot (§ Plow Latch) |
 | Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
 
 ## Roadmap
@@ -175,7 +178,7 @@ between the two; #46 records why the allowlist never was.
 |---|---|
 | `agent.env` | This agent's descriptor — home, container, build context, timezone |
 | `compose.override.yml` | What this agent adds to agent-mgr's service: the derived image, the vault and `bin/` mounts |
-| `bin/` | Scripts Hermes' scheduler runs, mounted at `/opt/data/scripts` |
+| `bin/` | Scripts Hermes' scheduler runs, mounted at `/var/lib/hermes/scripts` |
 | `mcp-seam/` | Seam lock-control MCP server, bind-mounted read-only into the data volume |
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
 | `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `~/.hermes` |
@@ -270,25 +273,32 @@ agent-mgr register str "$PWD"
 git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
 mkdir -p ~/hermes-vault
 git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
+# Build before deploy, always: `agent-mgr deploy` derives the boot contract
+# from the image present locally (building one only when none is), and writes
+# the vault seed's paths against it. The same order the deploy skill uses on
+# a redeploy, where a stale image would otherwise decide.
+agent-mgr compose str build
 agent-mgr deploy str
 # No dotenv install here: `agent-mgr deploy` seeds one from THIS repo's
 # .env.example (it prefers an instance's own over the fleet template), so the
 # home gets all six keys below at mode 600 — verified, not assumed. It never
 # clobbers an existing one. Fill HOSTEX_TOKEN and SEAM_API_KEY from 1Password.
 # Activation replaces the blank PLOW_CHAT_* placeholders in place.
-# First, because the image is derived here and `up` would otherwise trigger a
-# multi-minute build under a step named something else.
-agent-mgr compose str build
-# Up before sign-in: `agent-mgr sign-in` authenticates INSIDE the running
-# container, unlike the throwaway-container form it replaced, and refuses when
-# no gateway is up. It is safe to start unauthenticated — the gateway comes up
-# and simply cannot answer until the credential lands.
-agent-mgr up str
-agent-mgr sign-in str
-# Activation writes PLOW_CHAT_CHAT_UID and PLOW_CHAT_TOKEN into ~/.hermes/.env,
-# which the gateway reads only at startup — so it reloads the gateway itself
-# once the credential is written. No separate restart.
+# Activate BEFORE up: this image boots through plow-init, which needs the
+# credential activation writes (PLOW_AGENT_TOKEN and PLOW_API_BASE) before
+# agent-mgr will create the container at all. Activation runs on the host and
+# polls until the code is texted back; it reloads a running gateway itself,
+# and here there is none yet.
 agent-mgr activate str
+agent-mgr up str
+# The codex OAuth the compression fallback uses, added INSIDE the running
+# container under the host uid, the way `agent-mgr sign-in` does it -- but not
+# through `sign-in` itself, which reads the provider off the live config and
+# would add `plow`, the main route, which needs no sign-in: it is the Plow
+# credential activation wrote. Then `up` again: a current-contract agent has no
+# restart, and cont-init only runs at container creation.
+agent-mgr compose str exec --user "$(id -u):$(id -g)" -it hermes hermes auth add openai-codex
+agent-mgr up str
 ```
 
 After pairing and activating the private Plow chat, send `/sethome` in the
@@ -308,7 +318,7 @@ to wait on, so watch `agent-mgr logs str` until it lists its
 platforms. `agent-mgr deploy` installs `config.yaml`, and the script composes `SOUL.md`; it
 never touches `~/.hermes/.env`, so the home target survives.
 
-Skip `agent-mgr sign-in str` only when a valid
+Skip the `hermes auth add openai-codex` step only when a valid
 `~/.hermes/auth.json` was restored through a separate secure backup. The
 runtime restoration script copies the tracked configuration and composes
 `SOUL.md`; it does not create secrets, OAuth, sessions, or derived gateway
@@ -1027,17 +1037,17 @@ around.
 `--script nightly.sh`, a bare name, not a path. Hermes resolves it under
 `$HERMES_HOME/scripts` and refuses anything outside — which is why `bin/` is
 mounted there (see § Layout) rather than run from the repo checkout. An absolute
-path into `/opt/data/repo/bin` is rejected at create time.
+path into `/var/lib/hermes/repo/bin` is rejected at create time.
 
 It is not scheduled until you register it. A handoff that stops at "merged"
 leaves the chain inert while looking installed: the script is in the image's
-view of `/opt/data/scripts`, the vault is mounted, and nothing runs.
+view of `/var/lib/hermes/scripts`, the vault is mounted, and nothing runs.
 
-The run needs both mounts. `bin/` arrives read-only at `/opt/data/scripts` so
+The run needs both mounts. `bin/` arrives read-only at `/var/lib/hermes/scripts` so
 the scheduler will execute it and a turn processing guest text cannot rewrite
 it. `vault/` no longer exists in this repo. The runtime vault is `~/hermes-vault`
 on the host — a plain directory, never a git repository — mounted read-write at
-`/opt/data/repo/vault` because ingest rewrites pages and `hostex-raw` writes
+`/var/lib/hermes/repo/vault` because ingest rewrites pages and `hostex-raw` writes
 fetched conversations into it. Its history lives in the private `sams-str-vault`
 repo, whose git directory sits beside the worktree rather than inside it, and
 which `scripts/promote-vault` commits and pushes on a host-side schedule.
@@ -1046,7 +1056,7 @@ The vault, and not the checkout around it. The checkout was mounted here once,
 and an ingest turn used the `.git` that came with it: finding pages missing
 from the working tree, it ran `git restore --source=HEAD` over them and then
 spent the round updating what it had restored (#89). The same mount also gave
-`bin/` a second, writable path at `/opt/data/repo/bin`, so the read-only mount
+`bin/` a second, writable path at `/var/lib/hermes/repo/bin`, so the read-only mount
 above was not in fact bounding what a turn could do to the scheduler's scripts.
 An unattended turn holds a terminal and its own view of what the tree should
 look like, so what it can reach is the only boundary there is.
@@ -1169,7 +1179,7 @@ and nothing here can.
 The durable model — which properties, which lock, which cleaner, which
 thread — is a hand-authored `ops.toml` at the top of the private vault:
 `~/hermes-vault/ops.toml`, mounted into the container at
-`/opt/data/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
+`/var/lib/hermes/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
 YAML: the image ships no PyYAML and `tomllib` is stdlib.
 
 ```toml
@@ -1372,30 +1382,22 @@ Anything behind a login only the operator's Mac holds — Mercury for paying a
 handyman, the Airbnb and Hostex web UIs — the agent reaches through Plow
 Latch: an MCP server the Mac serves over the Plow relay, which authorises the
 connection and tells the Mac which agent is asking, while the Mac approves
-each action. The block is `mcp_servers.latch` in `runtime/config.yaml`.
+each action.
 
-The credential is an **OAuth grant from the relay**, not the pasted
-`DOMO_MCP_TOKEN` pair the sibling agents carry (plow-pbc/agent-mgr#40): it
-holds `relay:call` alone, it is one revocable session in the portal, and
-Hermes keeps it under `~/.hermes/mcp-tokens/`, so it survives a redeploy.
-`DOMO_DEVICE_UID` — the account uid in the URL — is the one value still set
-by hand in the dotenv. Once, from wakeup, after `agent-mgr deploy str`:
+Nothing in this repo configures it. The base image's `plow-init` asks Plow
+`GET /v1/agents/cloud/me` with the agent's own `PLOW_AGENT_TOKEN` at every
+boot and writes the answer into the home: the `plow` entry under
+`mcp_servers` in `config.yaml` (enabled when the account has a Mac, disabled
+when `mcp_url` comes back null) and `PLOW_MCP_URL` in the dotenv. The same
+token is the relay credential, so there is no Latch pair to mint and nothing
+carried by hand; a token minted before relay access existed answers 403 on
+the relay and needs a fresh activation (`agent-mgr activate str`) on an
+agent-mgr that keeps `relay:call` when it narrows (plow-pbc/agent-mgr#157).
 
-```sh
-agent-mgr compose str exec --user "$(id -u):$(id -g)" -it hermes hermes mcp login latch
-```
-
-It prints an authorization URL. Open it in any browser, consent, and the
-browser lands on a `http://127.0.0.1:<port>/callback?code=…` page it cannot
-load — that is expected: the callback server is inside the container. Copy
-that whole URL and paste it at the prompt; Hermes accepts the pasted redirect
-in place of the listener. `hermes mcp test latch` then lists the Mac's tools.
-`agent-mgr check-latch` does not apply — it reads the pasted pair, which this
-agent does not hold.
-
-Widening the agent's reach to the Mac is deliberate (§ Review priority, "Tool
-reach is deliberate") — every action still lands in Latch's approval UI and
-audit log on the Mac.
+Verify from wakeup: `agent-mgr compose str exec -T hermes hermes mcp test plow`
+lists the Mac's tools. Widening the agent's reach to the Mac is deliberate
+(§ Review priority, "Tool reach is deliberate") — every action still lands in
+Latch's approval UI and audit log on the Mac.
 
 ## Dashboard
 

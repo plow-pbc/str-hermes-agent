@@ -53,7 +53,7 @@ def read_token() -> str:
     Two contexts, unlike `bin/hostex-poll.py`, which indexes `HERMES_HOME`
     directly because cron only ever runs it in-container. This one is also
     documented as a host command, where that variable is unset — so the home
-    fallback stays and the literal `/opt/data/.env` goes: the image sets
+    fallback stays and the literal home path goes: the image sets
     HERMES_HOME to exactly that, so the literal was only reachable in a
     container that had lost it, which is the "silently resolving somewhere the
     enable script does not look" case the poller's docstring rejects.
