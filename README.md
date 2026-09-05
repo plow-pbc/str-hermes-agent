@@ -1382,7 +1382,7 @@ Hermes keeps it under `~/.hermes/mcp-tokens/`, so it survives a redeploy.
 by hand in the dotenv. Once, from wakeup, after `agent-mgr deploy str`:
 
 ```sh
-agent-mgr compose str exec -it hermes hermes mcp login latch
+agent-mgr compose str exec --user "$(id -u):$(id -g)" -it hermes hermes mcp login latch
 ```
 
 It prints an authorization URL. Open it in any browser, consent, and the
