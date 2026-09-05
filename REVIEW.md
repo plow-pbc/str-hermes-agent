@@ -52,8 +52,9 @@ acceptance — those stay blocking. Nothing here is exposed to anyone but the
 operator.
 
 **Architectural commitments:**
-- Compose + the upstream `nousresearch/hermes-agent` image. No hand-rolled
-  image beyond a thin derived layer. All non-vault state in `~/.hermes` on the host; the vault is `~/hermes-vault`, mounted in.
+- Compose + the Plow base image (`plow-hermes-agent`, on the upstream
+  `nousresearch/hermes-agent` image). No hand-rolled image beyond a thin
+  derived layer. All non-vault state in `~/.hermes` on the host; the vault is `~/hermes-vault`, mounted in.
 - Shell + small Python scripts. No application server, no framework, no
   database.
 - Generated vault content is data, not engineered code — job output, not

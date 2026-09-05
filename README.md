@@ -10,10 +10,13 @@ A [Hermes](https://howto.plow.co/hermes) agent — texted from iMessage — that
 helps an owner run their short-term rentals. It runs in Docker on `wakeup`, not on the
 Raspberry Pi the upstream guide assumes.
 
-Uses the official `nousresearch/hermes-agent` image (s6-supervised, pinned
-SQLite, uid remap) rather than a hand-rolled one. All state except the vault
-lives in `~/.hermes` on the host, mounted at `/opt/data`; the vault is
-`~/hermes-vault`, mounted in beside it. The image is stateless.
+Uses the Plow base image (`plow-cloud-agents:base-<sha>`, built by
+[plow-hermes-agent](https://github.com/plow-pbc/plow-hermes-agent) on the
+official `nousresearch/hermes-agent` image) rather than a hand-rolled one: it
+adds `plow-init`, which asks Plow who this agent is at every boot. All state
+except the vault lives in `~/.hermes` on the host, mounted at `/var/lib/hermes`
+(the image's `HERMES_HOME`); the vault is `~/hermes-vault`, mounted in beside
+it. The image is stateless.
 
 ## What this is for
 
@@ -83,7 +86,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
-| Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Configured; live once the relay grant is signed in** — `mcp_servers.latch` in `runtime/config.yaml`, one `hermes mcp login latch` (§ Plow Latch) |
+| Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Provisioned by the base image** — `plow-init` writes the `plow` MCP server from the agent's own Plow identity at every boot (§ Plow Latch) |
 | Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
 
 ## Roadmap
@@ -401,7 +404,7 @@ agent-mgr compose str exec hermes hermes pairing list   # who's allowed to text 
 A `runtime/` edit — the plugin pin included — is not one of these; `up -d` is a
 no-op for an unchanged image. Use [Applying a `runtime/` edit](#applying-a-runtime-edit).
 
-Rebuilding is not upgrading. Every input is pinned — the base image by digest,
+Rebuilding is not upgrading. Every input is pinned — the base image by an immutable `base-<sha>` tag,
 `obsidian-wiki` by version — so `agent-mgr compose str build`
 reproduces what is already running and picks up only changes to this repo. To
 upgrade, bump a pin in the `Dockerfile` and then rebuild; that way the version
@@ -1372,30 +1375,21 @@ Anything behind a login only the operator's Mac holds — Mercury for paying a
 handyman, the Airbnb and Hostex web UIs — the agent reaches through Plow
 Latch: an MCP server the Mac serves over the Plow relay, which authorises the
 connection and tells the Mac which agent is asking, while the Mac approves
-each action. The block is `mcp_servers.latch` in `runtime/config.yaml`.
+each action.
 
-The credential is an **OAuth grant from the relay**, not the pasted
-`DOMO_MCP_TOKEN` pair the sibling agents carry (plow-pbc/agent-mgr#40): it
-holds `relay:call` alone, it is one revocable session in the portal, and
-Hermes keeps it under `~/.hermes/mcp-tokens/`, so it survives a redeploy.
-`DOMO_DEVICE_UID` — the account uid in the URL — is the one value still set
-by hand in the dotenv. Once, from wakeup, after `agent-mgr deploy str`:
+Nothing in this repo configures it. The base image's `plow-init` asks Plow
+`GET /v1/agents/cloud/me` with the agent's own `PLOW_AGENT_TOKEN` at every
+boot and writes the answer into the home: the `plow` entry under
+`mcp_servers` in `config.yaml` (enabled when the account has a Mac, disabled
+when `mcp_url` comes back null) and `PLOW_MCP_URL` in the dotenv. The same
+token is the relay credential, so there is no Latch pair to mint and nothing
+carried by hand; a token minted before relay access existed answers 403 on
+the relay and needs a fresh activation (`agent-mgr activate str`).
 
-```sh
-agent-mgr compose str exec --user "$(id -u):$(id -g)" -it hermes hermes mcp login latch
-```
-
-It prints an authorization URL. Open it in any browser, consent, and the
-browser lands on a `http://127.0.0.1:<port>/callback?code=…` page it cannot
-load — that is expected: the callback server is inside the container. Copy
-that whole URL and paste it at the prompt; Hermes accepts the pasted redirect
-in place of the listener. `hermes mcp test latch` then lists the Mac's tools.
-`agent-mgr check-latch` does not apply — it reads the pasted pair, which this
-agent does not hold.
-
-Widening the agent's reach to the Mac is deliberate (§ Review priority, "Tool
-reach is deliberate") — every action still lands in Latch's approval UI and
-audit log on the Mac.
+Verify from wakeup: `agent-mgr compose str exec -T hermes hermes mcp test plow`
+lists the Mac's tools. Widening the agent's reach to the Mac is deliberate
+(§ Review priority, "Tool reach is deliberate") — every action still lands in
+Latch's approval UI and audit log on the Mac.
 
 ## Dashboard
 

@@ -12,9 +12,22 @@
 # them; because the container mounts ~/.hermes, that is also the deployment's
 # widest blast radius. See the trust boundary in the README before adding a
 # group chat.
+# What plow-init writes on every boot from the base image's seed, restated here
+# so a restore and a boot agree. Plow's proxy fronts Anthropic; the id must be
+# one the proxy serves.
 model:
-  default: gpt-5.6-sol
-  provider: openai-codex
+  default: anthropic/claude-sonnet-5
+  provider: plow
+  base_url: "${PLOW_API_BASE}/v1"
+  key_env: HERMES_CUSTOM_PLOW_API_KEY
+providers:
+  plow:
+    name: plow
+    base_url: "${PLOW_API_BASE}/v1"
+    key_env: HERMES_CUSTOM_PLOW_API_KEY
+    stale_timeout_seconds: 55
+    models:
+      anthropic/claude-sonnet-5: {}
 agent:
   # Carried over from the original install rather than re-derived; kept so a
   # restore reproduces the behaviour the operator has been running with.
@@ -47,34 +60,6 @@ cron:
 #
 # The cost is that the owners share conversation context in a group thread,
 # which is what a group thread reads like anyway.
-# On a full-budget timeout the aux client skips the same-provider retry for
-# compression and falls back -- but by default there is nowhere to land, so an
-# oversized session freezes and every turn re-stalls. A sibling agent lost ~30h
-# to that on 2026-08-31 (plow-pbc/life-assistant-hermes-agent#71); this agent
-# runs the same provider, so it is the same exposure.
-#
-# The model is pinned, not free-form: a ChatGPT-account codex serves only
-# gpt-5.6-sol and gpt-5.5; every other id 400s. Verify a swap by the fallback
-# log lines, never the return value -- the implicit main-model fallback reports
-# success for a model the account actually rejected. gpt-5.5 was confirmed
-# GENUINE against this agent's own auth before landing, and the pinned image
-# (0.19.0) was confirmed to carry the fallback_chain machinery, so this is
-# honoured rather than inert.
-#
-# No task-level `timeout` on purpose. The image floors a config-derived
-# compression timeout at 300s so a slow reasoning summary is not cut off into
-# the deterministic context marker (#54915) -- a lower value is silently raised,
-# and setting one that DID bite would re-introduce that bug. A genuinely dead
-# stream is caught at 60s by the no-progress timeout, not by this budget.
-# The chain entry keeps its own 300s: without one it inherits the 30s auxiliary
-# default, far too short for a summary.
-auxiliary:
-  compression:
-    fallback_chain:
-    - provider: openai-codex
-      model: gpt-5.5
-      timeout: 300
-
 group_sessions_per_user: false
 plugins:
   enabled:
@@ -216,16 +201,3 @@ mcp_servers:
                 convert_access_code_to_managed]
       resources: false
       prompts: false
-  # Plow Latch, reached over the Plow relay: the browser and the filesystem
-  # this reaches are the operator's own Mac, not this container -- Mercury,
-  # Hostex's web UI, anything behind a login only that Mac holds. The relay
-  # authorises the connection and tells the Mac who is asking; the Mac
-  # authorises each action. The credential is an OAuth grant from the relay
-  # (`hermes mcp login latch`, README § Plow Latch), scoped to relay:call and
-  # persisted under the agent's home -- not the pasted account-wide pair the
-  # sibling agents still carry (plow-pbc/agent-mgr#40). The uid is the one
-  # value still carried by hand.
-  latch:
-    url: https://api.plow.co/v1/relay/devices/${DOMO_DEVICE_UID}/mcp
-    auth: oauth
-    enabled: true

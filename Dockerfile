@@ -1,9 +1,11 @@
-# Pinned by digest, not by tag. This image is a large unreviewed surface landing
-# in a runtime that holds a Hostex token and a writable vault, and `docker
-# compose build` — which the README documents as the routine rebuild —
-# re-resolves a tag every time it runs.
-# Bump deliberately: `docker buildx imagetools inspect nousresearch/hermes-agent:latest`.
-FROM nousresearch/hermes-agent@sha256:8f4e8677281eca188bc9d2fda90806646ba19941fce55fa8fda2d63112ff48a8
+# The Plow base image: upstream Hermes plus plow-init, which asks Plow who this
+# agent is at every boot and writes what it learns -- the model route, the
+# `plow` MCP server that is the operator's Mac over the relay -- into the home.
+# Pinned by an immutable base-<sha> tag (plow-hermes-agent README, "Building a
+# variant image"); CI publishes one per plow-hermes-agent commit that
+# plow-pbc/plow's agents.json pins. Bump deliberately, to a sha that repo has
+# published.
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-357a87c0e511fbad5a1ab7adc4d8aeafde33c86f
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't

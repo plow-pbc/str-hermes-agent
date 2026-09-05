@@ -13,7 +13,7 @@ REQUIRED_ENV = {
     "HOSTEX_TOKEN",
     "PLOW_CHAT_TOKEN",
     "SEAM_API_KEY",
-    "DOMO_DEVICE_UID",
+    "PLOW_API_BASE",
     "PLOW_CHAT_CHAT_UID",
     "PLOW_CHAT_APPROVAL_GROUP",
     "PLOW_CHAT_GROUP_UIDS",
@@ -217,9 +217,14 @@ def test_tracked_config_pins_the_model_route_uses_env_secrets_and_enables_plow()
     came up on a different provider. Same class as a missing MCP server.
     """
     config = (ROOT / "runtime/config.yaml").read_text()
-    assert "provider: openai-codex" in config
-    assert "default: gpt-5.6-sol" in config
-    assert "base_url:" not in config
+    # The route plow-init rewrites every boot from the base image's seed; the
+    # tracked copy must say the same, or a restore comes up on one route and
+    # the next boot silently moves it to another.
+    assert "provider: plow" in config
+    assert "default: anthropic/claude-sonnet-5" in config
+    assert config.count('base_url: "${PLOW_API_BASE}/v1"') == 2
+    assert "openai-codex" not in config
+    assert "auxiliary:" not in config
     assert "Authorization: Bearer ${HOSTEX_TOKEN}" in config
     assert "- search_conversations" in config   # only appears under include:
     assert "plow-chat-platform" in config
