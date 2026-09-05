@@ -5,8 +5,10 @@
 # (plow terraform/ecr.tf), so the tag names the commit for a reader and the
 # digest is what docker actually resolves. CI publishes one tag per
 # plow-hermes-agent commit that plow-pbc/plow's agents.json pins; bump both,
-# from `docker manifest inspect` of the new tag.
-FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-357a87c0e511fbad5a1ab7adc4d8aeafde33c86f@sha256:63d5fab9eef17db087cfa4fbc596d71a0ee07794481f93c5f064d486a492af38
+# taking the INDEX digest (`docker buildx imagetools inspect <tag>`, the top
+# `Digest:` line) -- a per-platform manifest digest under it does not resolve
+# as a FROM.
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-357a87c0e511fbad5a1ab7adc4d8aeafde33c86f@sha256:b04c20af23f2c13ef67e350eda97116f64b641593e1fd767f4df8c72e0aa6f0d
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't
