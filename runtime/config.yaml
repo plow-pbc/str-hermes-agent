@@ -220,11 +220,12 @@ mcp_servers:
   # this reaches are the operator's own Mac, not this container -- Mercury,
   # Hostex's web UI, anything behind a login only that Mac holds. The relay
   # authorises the connection and tells the Mac who is asking; the Mac
-  # authorises each action. Both values come from the agent's dotenv, minted
-  # in Latch on that Mac (agent-mgr HOWTO, "Set up Latch") and installed with
-  # `agent-mgr set-latch str`; `agent-mgr check-latch str` proves the pair.
+  # authorises each action. The credential is an OAuth grant from the relay
+  # (`hermes mcp login latch`, README § Plow Latch), scoped to relay:call and
+  # persisted under the agent's home -- not the pasted account-wide pair the
+  # sibling agents still carry (plow-pbc/agent-mgr#40). The uid is the one
+  # value still carried by hand.
   latch:
     url: https://api.plow.co/v1/relay/devices/${DOMO_DEVICE_UID}/mcp
-    headers:
-      Authorization: Bearer ${DOMO_MCP_TOKEN}
+    auth: oauth
     enabled: true
