@@ -83,6 +83,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
+| Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Configured; live once the Latch pair is set** — `mcp_servers.latch` in `runtime/config.yaml`, credential from `agent-mgr set-latch str` (§ Plow Latch) |
 | Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
 
 ## Roadmap
@@ -1364,6 +1365,31 @@ working. Tracked with the fuller set of options in
 https://github.com/srosro/sams-str-hermes-agent/issues/7. Revisit when a
 non-owner operates this, when guest mail is handled unattended, or on a real
 attempt.
+
+## Plow Latch (the operator's Mac)
+
+Anything behind a login only the operator's Mac holds — Mercury for paying a
+handyman, the Airbnb and Hostex web UIs — the agent reaches through Plow
+Latch: an MCP server the Mac serves over the Plow relay, which authorises the
+connection and tells the Mac which agent is asking, while the Mac approves
+each action. Same block every sibling agent carries, under
+`mcp_servers.latch` in `runtime/config.yaml`.
+
+The pair it substitutes, `DOMO_DEVICE_UID` and `DOMO_MCP_TOKEN`, is minted in
+Latch on that Mac (*Agents → can't use OAuth? create a static credential*) and
+never fetched for you; agent-mgr's HOWTO § Set up Latch owns the steps. From
+wakeup:
+
+```sh
+agent-mgr deploy str         # installs runtime/ first: set-latch refuses a config without the block
+agent-mgr set-latch str      # paste the JSON Latch showed; it reloads the agent
+agent-mgr check-latch str    # "latch reachable ... (HTTP 200)"
+```
+
+A revoked pair reads `... is REVOKED` there; re-mint on the Mac, re-run
+`set-latch`. Widening the agent's reach to the Mac is deliberate (§ Review
+priority, "Tool reach is deliberate") — every action still lands in Latch's
+approval UI and audit log on the Mac.
 
 ## Dashboard
 
