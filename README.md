@@ -273,15 +273,17 @@ agent-mgr register str "$PWD"
 git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
 mkdir -p ~/hermes-vault
 git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
+# Build before deploy, always: `agent-mgr deploy` derives the boot contract
+# from the image present locally (building one only when none is), and writes
+# the vault seed's paths against it. The same order the deploy skill uses on
+# a redeploy, where a stale image would otherwise decide.
+agent-mgr compose str build
 agent-mgr deploy str
 # No dotenv install here: `agent-mgr deploy` seeds one from THIS repo's
 # .env.example (it prefers an instance's own over the fleet template), so the
 # home gets all six keys below at mode 600 — verified, not assumed. It never
 # clobbers an existing one. Fill HOSTEX_TOKEN and SEAM_API_KEY from 1Password.
 # Activation replaces the blank PLOW_CHAT_* placeholders in place.
-# First, because the image is derived here and `up` would otherwise trigger a
-# multi-minute build under a step named something else.
-agent-mgr compose str build
 # Activate BEFORE up: this image boots through plow-init, which needs the
 # credential activation writes (PLOW_AGENT_TOKEN and PLOW_API_BASE) before
 # agent-mgr will create the container at all. Activation runs on the host and
