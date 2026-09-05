@@ -1389,7 +1389,8 @@ boot and writes the answer into the home: the `plow` entry under
 when `mcp_url` comes back null) and `PLOW_MCP_URL` in the dotenv. The same
 token is the relay credential, so there is no Latch pair to mint and nothing
 carried by hand; a token minted before relay access existed answers 403 on
-the relay and needs a fresh activation (`agent-mgr activate str`).
+the relay and needs a fresh activation (`agent-mgr activate str`) on an
+agent-mgr that keeps `relay:call` when it narrows (plow-pbc/agent-mgr#157).
 
 Verify from wakeup: `agent-mgr compose str exec -T hermes hermes mcp test plow`
 lists the Mac's tools. Widening the agent's reach to the Mac is deliberate
