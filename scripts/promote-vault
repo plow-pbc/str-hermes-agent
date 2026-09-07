@@ -125,3 +125,13 @@ fi
 v push -q origin HEAD:main
 printf 'promote-vault: pushed %s (%s files)\n' \
     "$(v rev-parse --short HEAD)" "$(v show --stat --format= HEAD | grep -c '|')"
+
+# The injected index, refreshed from the corpus this push just published. The
+# nightly cannot do it: it runs as hermes inside the container, and plow-init
+# owns $HERMES_HOME/SOUL.md as root at every boot. This job already runs on the
+# host an hour later, so the publish rides with it rather than adding a
+# schedule.
+#
+# After the push, deliberately: an index that advertises pages the credential
+# scan above refused would point the agent at a corpus that never left.
+"$(dirname "${BASH_SOURCE[0]}")/publish-soul" "$vault"

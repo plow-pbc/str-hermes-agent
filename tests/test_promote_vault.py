@@ -10,6 +10,7 @@ git dir and a bare 'remote', and assert on what lands there.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -55,9 +56,20 @@ def vault(tmp_path):
 
 def run_promote(vault_dir):
     """The git dir is `$vault.git` by convention -- which is what the fixture
-    builds, so there is nothing to inject."""
+    builds, so there is nothing to inject.
+
+    AGENT_HOME is pinned under the same tmp_path the vault fixture uses
+    (vault_dir.parent), never the inherited one: promote-vault now calls
+    publish-soul after a successful push, and an unset AGENT_HOME resolves it
+    to the real operator's $HOME/.hermes -- this host's live SOUL.md, in this
+    very repo's own running agent. Without this a green test run overwrites
+    production with the fixture's throwaway corpus.
+    """
+    agent_home = vault_dir.parent / ".agent-home"
+    agent_home.mkdir(exist_ok=True)
+    env = {**os.environ, "AGENT_HOME": str(agent_home)}
     return subprocess.run([str(PROMOTE), str(vault_dir)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env=env)
 
 
 def remote_head_files(remote):
@@ -304,3 +316,17 @@ def test_a_commit_the_remote_never_received_is_pushed_without_a_second_commit(va
     assert "operations/b-property.md" in remote_head_files(remote)
     assert len(remote_commits(remote)) == before + 1, \
         "it made a second, empty commit instead of pushing the one that existed"
+
+
+def test_promote_publishes_the_soul_after_pushing() -> None:
+    """The 04:30 promote is what refreshes the injected index.
+
+    bin/nightly.sh runs as hermes inside the container and cannot publish the
+    SOUL -- plow-init owns the file as root. This host-side cron already runs an
+    hour after the nightly and is the only scheduled thing that can, so the
+    publish rides with it. Ordered after the push: a corpus that failed its
+    credential scan must not have its index advertised.
+    """
+    body = (ROOT / "scripts" / "promote-vault").read_text()
+    assert "publish-soul" in body
+    assert body.index("publish-soul") > body.index("push -q origin")
