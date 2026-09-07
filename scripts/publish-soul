@@ -23,13 +23,42 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# AGENT_HOME and AGENT_CONTAINER, filled from agent.env when this process does
+# not already have them -- an agent-mgr-driven run exports both and must win.
+# Needed because the 04:30 cron line has neither: `cd
+# ~/services/sams-str-hermes-agent && ./scripts/promote-vault`, no agent-mgr,
+# no env file, and neither var is exported even in the operator's own
+# interactive shell. Without this, every run against an already-hardened
+# target reached AGENT_CONTAINER's `:?` below and died -- silently as far as
+# the corpus push above it was concerned, since that had already succeeded.
+#
+# agent.env is agent-mgr's single owner of these two names -- read from it
+# rather than inventing a second default that could drift from it. Sourced in
+# a subshell, never directly: agent.env unconditionally assigns both, and
+# sourcing it into this shell would clobber an agent-mgr-driven run's real
+# values with its own. `.`, not a grep or sed: agent.env is KEY=value with
+# `$HOME` references and comments, meant to be sourced -- a text scrape would
+# return the literal string `$HOME/.hermes`, not the real path. A missing or
+# unreadable agent.env leaves the two empty here rather than aborting, because
+# an agent-mgr-driven run that already has both exported does not need this
+# file to exist at all; the `:?` guards below are what make the truly-
+# undetermined case loud.
+eval "$(
+    . "$repo_root/agent.env" 2>/dev/null || true
+    printf 'agent_env_home=%q\n' "${AGENT_HOME-}"
+    printf 'agent_env_container=%q\n' "${AGENT_CONTAINER-}"
+)"
+: "${AGENT_HOME:=$agent_env_home}"
+: "${AGENT_CONTAINER:=$agent_env_container}"
+
 vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
-home="${AGENT_HOME:-$HOME/.hermes}"
+home="${AGENT_HOME:?publish-soul: could not determine AGENT_HOME -- not exported and not declared in $repo_root/agent.env}"
 target="$home/SOUL.md"
 
-# Composed into the home, so the install below is a same-filesystem rename when
-# the direct path applies. umask 077 while it is a temp file: it carries the
-# operator's whole index, and it is only widened to 0644 at the install.
+# Composed into the home, so the mv below is a same-filesystem rename when the
+# direct path applies. umask 077 while it is a temp file: it carries the
+# operator's whole index, and it is only widened to 0644 at the rename.
 umask 077
 staged="$(mktemp "$target.XXXXXX")"
 trap 'rm -f "$staged"' EXIT
@@ -44,14 +73,26 @@ if [ -f "$target" ] && cmp -s "$staged" "$target"; then
 fi
 
 # The direct path first, established rather than inferred from a failing
-# install: a home whose SOUL.md this user can still replace -- a fresh deploy
+# write: a home whose SOUL.md this user can still replace -- a fresh deploy
 # before the agent's first boot, and every test -- needs no container at all.
-# install(1), not a `>`/`>>` redirect: fs.protected_regular=2 (verified on the
-# live host) makes the kernel refuse a redirect's open of an existing file in a
-# sticky directory when the opener is not that file's owner -- and that refusal
-# holds even for root. install works because it unlinks the destination first
-# and writes a new inode, and root owns the directory either way.
-if install -m 644 "$staged" "$target" 2>/dev/null; then
+#
+# chmod then mv, not install(1) and not a `>`/`>>` redirect. Not the redirect:
+# fs.protected_regular=2 (verified on the live host) makes the kernel refuse a
+# redirect's open of an existing file in a sticky directory when the opener is
+# not that file's owner. Not install(1) either: it unlinks the destination and
+# writes a new inode in place, which is not atomic from the gateway's point of
+# view -- a process killed mid-write leaves the LIVE SOUL truncated, an agent
+# with no instructions, the exact worst case this whole change exists to
+# avoid. `mv` within the same directory is a rename: the path always resolves
+# to either the complete old file or the complete new one, never a partial
+# one, and `staged` already lives in $home (the mktemp above), so this really
+# is a same-filesystem rename rather than a cross-device copy.
+#
+# Stderr captured rather than discarded: if this fails for a reason other than
+# "hardened" (a missing directory, a full disk), the fallback below is not the
+# right diagnosis, and $direct_err is what lets the eventual failure say what
+# actually happened instead of assuming.
+if direct_err=$(chmod 644 "$staged" && mv "$staged" "$target" 2>&1); then
     echo "publish-soul: published $target"
     exit 0
 fi
@@ -60,32 +101,46 @@ fi
 # resolution as scripts/no-nightly-running: not-running is established up front,
 # because "it is not up" and "the check could not run" are the same non-zero
 # status from exec and only one of them has a safe next step.
-container="${AGENT_CONTAINER:?publish-soul: $target is hardened and AGENT_CONTAINER is unset -- run me through agent-mgr, or start the agent}"
+container="${AGENT_CONTAINER:?publish-soul: could not write $target directly ($direct_err), and AGENT_CONTAINER could not be determined -- not exported and not declared in $repo_root/agent.env -- run me through agent-mgr, or start the agent}"
 running=$(docker ps -q --filter "name=^${container}$" --filter status=running) || {
     echo "FATAL: could not ask docker whether ${container} is running" >&2
     exit 1
 }
 [ -n "$running" ] || {
-    echo "FATAL: $target is root-owned (plow-init hardened it) and ${container} is not running." >&2
+    echo "FATAL: could not write $target directly ($direct_err), and ${container} is not running." >&2
     echo "  Only root can replace it. Start the agent and re-run this script." >&2
     exit 1
 }
 
-# install(1) inside the container, so ownership and mode are set as one step by
-# the process that already has root -- and on $HERMES_HOME, which is the same
-# directory as $home through the compose mount.
+# $HERMES_HOME read from the container rather than assumed, and guarded the
+# way bin/nightly.sh guards its own: printenv exits 0 for a set-but-empty
+# variable, and an empty value below would resolve "$1/SOUL.md" to /SOUL.md --
+# the container's filesystem root -- while still printing success.
 hermes_home=$(docker exec "$container" printenv HERMES_HOME) || {
     echo "FATAL: could not read HERMES_HOME from ${container}" >&2
     exit 1
 }
+hermes_home="${hermes_home:?publish-soul: HERMES_HOME is set but empty inside ${container} -- refusing to publish to its filesystem root}"
+
+# mktemp INSIDE $1 (HERMES_HOME), not the container's default tmpdir: a rename
+# is only atomic on the same filesystem, and a scratch dir elsewhere could be a
+# different mount than $HERMES_HOME. chown+chmod happen before the mv, so the
+# rename lands the file at its final identity in one atomic step rather than
+# widening permissions on the live path after it is already visible under that
+# name. The process runs as root (-u root), which is what makes the rename
+# permitted despite the sticky bit -- root can always replace a file in a
+# sticky directory, regardless of who owns it.
 docker exec -u root -i "$container" sh -c '
     set -eu
-    tmp=$(mktemp)
+    home="$1"
+    tmp=$(mktemp "$home/SOUL.md.XXXXXX")
     trap "rm -f \"$tmp\"" EXIT
     cat > "$tmp"
-    install -o root -g root -m 644 "$tmp" "$1/SOUL.md"
+    chown root:root "$tmp"
+    chmod 644 "$tmp"
+    mv "$tmp" "$home/SOUL.md"
 ' _ "$hermes_home" < "$staged" || {
-    echo "FATAL: could not publish the SOUL into ${container}" >&2
+    echo "FATAL: could not publish the SOUL into ${container} ($hermes_home)" >&2
     exit 1
 }
 echo "publish-soul: published $target as root:root 0644"
