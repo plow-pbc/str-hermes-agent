@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# Publish the composed SOUL into $HERMES_HOME. Runs on the HOST.
+# Compose and publish the injected SOUL.md into $HERMES_HOME. Runs on the HOST.
+#
+# SOUL.md is auto-injected into every agent turn (see `hermes --help`: "Skip
+# auto-injection of AGENTS.md, SOUL.md"), which makes it the one seam where
+# fact-awareness is guaranteed once rather than per-path -- the poller prompt,
+# the cron prompts and interactive chat all inherit it. Composed from the
+# tracked persona (runtime/SOUL.md) plus the vault's index -- the index, not
+# the pages: the whole vault is ~61k tokens and the index ~1.7k. The index
+# says what exists; the turn that is already running opens the page it needs,
+# which is a better retrieval decision than any made in advance.
 #
 # The base image hardens the injected identity: plow-init's harden_home() sets
 # $HERMES_HOME/SOUL.md to root:root 0644 inside a root-owned STICKY home, at
@@ -10,7 +19,7 @@
 # host write; the one actor that can is root, and the host reaches root through
 # the container without a password.
 #
-# Recomposed here, never copied from a staged file. The persona half comes from
+# Composed here, never copied from a staged file. The persona half comes from
 # runtime/SOUL.md, which the container mounts READ-ONLY; the index half comes
 # from the vault, which the agent writes. Installing an agent-authored file as
 # root would hand the agent the persona too -- the exact thing harden_home()
@@ -55,14 +64,54 @@ eval "$(
 vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
 home="${AGENT_HOME:?publish-soul: could not determine AGENT_HOME -- not exported and not declared in $repo_root/agent.env}"
 target="$home/SOUL.md"
+persona="$repo_root/runtime/SOUL.md"
+index="$vault/index.md"
+
+# Fail rather than emit a partial SOUL, before the target is touched. A SOUL
+# missing its index is an agent that believes it has no memory and says so
+# confidently -- the quietest failure this repo can ship, because nothing
+# downstream reads as broken.
+[ -f "$persona" ] || { echo "publish-soul: no persona at $persona" >&2; exit 1; }
+[ -f "$index" ]   || { echo "publish-soul: no index at $index" >&2; exit 1; }
+
+# The index comes from the agent's own writable vault, and this script's
+# output is a root-owned, auto-injected file -- so a symlink here reads a host
+# file straight into the agent's context. `index.md -> ../.ssh/id_ed25519`
+# resolves to nothing inside the container and to the operator's private key
+# on the host, which this script would then publish to ~/.hermes/SOUL.md as
+# root.
+#
+# Refused at the open, not by a test before it. `[ -L ]` then `cat` is two
+# steps with the agent writing between them: a loop alternating the index
+# between a real file and a link wins that race on roughly every other
+# deploy, and the losing half only produces a refusal the operator may not
+# read. Opening with O_NOFOLLOW makes the check and the read the same
+# operation.
+read_index() {
+    python3 -c 'import os, sys, shutil
+try:
+    fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW)
+except OSError as e:
+    sys.exit(f"publish-soul: refusing to read {sys.argv[1]}: {e.strerror}")
+shutil.copyfileobj(os.fdopen(fd, "rb"), sys.stdout.buffer)' "$1"
+}
 
 # Composed into the home, so the mv below is a same-filesystem rename when the
 # direct path applies. umask 077 while it is a temp file: it carries the
-# operator's whole index, and it is only widened to 0644 at the rename.
+# operator's whole index, and it is only widened to 0644 at the rename. One
+# write straight into $staged rather than a second internal write-then-rename:
+# $staged is already a scratch file no reader consumes until the mv/docker-exec
+# steps below promote it, so an interrupted write here leaves at worst an
+# orphaned temp file, never a partial live SOUL -- bash cannot begin those
+# later steps until this compound redirect has completed.
 umask 077
 staged="$(mktemp "$target.XXXXXX")"
 trap 'rm -f "$staged"' EXIT
-"$repo_root/bin/build-soul" "$vault" "$repo_root/runtime/SOUL.md" "$staged"
+{
+    cat "$persona"
+    printf '\n'
+    read_index "$index"
+} > "$staged"
 
 # Idempotent and quiet, like promote-vault: this runs from cron every night
 # whether or not the corpus moved, and a rewrite that changes no bytes still

@@ -386,13 +386,16 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     assert "AGENT_HOME_TARGET:?" in restore
     assert "OBSIDIAN_VAULT_PATH=" in restore
 
-    # runtime/SOUL.md's mention is prose, concatenated verbatim by build-soul
-    # (`cat "$PERSONA"`) into the agent's own injected system prompt -- so
-    # unlike the .env above, the fix is to name a real shell variable the
-    # agent already has in its own tool-execution environment, not to derive
-    # a value from either of build-soul's two callers (which pass genuinely
-    # different $VAULT arguments -- see build-soul's own comment for why that
-    # broke this before).
+    # runtime/SOUL.md's mention is prose, concatenated verbatim by
+    # scripts/publish-soul (`cat "$persona"`) into the agent's own injected
+    # system prompt -- so unlike the .env above, the fix is to name a real
+    # shell variable the agent already has in its own tool-execution
+    # environment, not to derive a value from wherever publish-soul happened
+    # to read index.md from. The two are unrelated: publish-soul runs on the
+    # HOST and its $vault argument is wherever the corpus is checked out
+    # there; this string is read by the AGENT, inside the container, for its
+    # own tool calls, and only $HERMES_HOME/repo/vault -- the container's
+    # bind mount -- is correct there.
     assert "$HERMES_HOME/repo/vault" in (ROOT / "runtime/SOUL.md").read_text()
 
     # The host-side vault path has ONE owner now: agent.env declares

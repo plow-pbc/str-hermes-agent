@@ -88,6 +88,52 @@ def test_refuses_a_vault_with_no_index_and_leaves_the_soul_alone(tmp_path: Path)
     assert (home / "SOUL.md").read_text() == published, "clobbered the live SOUL"
 
 
+def test_refuses_a_symlinked_index_and_leaves_the_soul_alone(tmp_path: Path) -> None:
+    """The index comes from the agent's own writable vault, and the output is
+    a root-owned, auto-injected file -- so a symlink here must never be
+    followed. `index.md -> ../.ssh/id_ed25519` resolves to nothing inside the
+    container and to the operator's private key on the host, which this
+    script would otherwise publish to ~/.hermes/SOUL.md as root.
+
+    Refused at the open (O_NOFOLLOW), not by an `[ -L ]` test before it: a
+    test-then-open is two steps with the agent writing between them, and a
+    loop alternating the index between a real file and a link wins that race
+    on roughly every other run. This is the one test in this suite for that
+    control -- it did not previously exist anywhere at this layer, only as a
+    different script's (restore-runtime-config.sh's) unrelated pre-flight
+    guard against the same shape of symlink.
+    """
+    vault, home = _fixture(tmp_path)
+    assert _run(vault, home).returncode == 0
+    published = (home / "SOUL.md").read_text()
+    secret = tmp_path / "id_ed25519"
+    secret.write_text("PRIVATE KEY MATERIAL\n")
+    (vault / "index.md").unlink()
+    (vault / "index.md").symlink_to(secret)
+    result = _run(vault, home)
+    assert result.returncode != 0
+    assert "PRIVATE KEY MATERIAL" not in result.stdout
+    assert "PRIVATE KEY MATERIAL" not in result.stderr
+    assert (home / "SOUL.md").read_text() == published, "clobbered the live SOUL"
+
+
+def test_the_index_is_the_souls_exact_suffix(tmp_path: Path) -> None:
+    """Persona, then one newline, then the index -- byte for byte.
+
+    bin/nightly.sh's own staleness check depends on this exact shape: it
+    tail-compares the SOUL against the vault's index.md to decide whether an
+    injected index has fallen behind the corpus, which only works because the
+    index is the SOUL's literal suffix. A reordering or an extra separator
+    here would silently break that check elsewhere.
+    """
+    vault, home = _fixture(tmp_path)
+    assert _run(vault, home).returncode == 0
+    soul = (home / "SOUL.md").read_bytes()
+    persona = (ROOT / "runtime" / "SOUL.md").read_bytes()
+    index = (vault / "index.md").read_bytes()
+    assert soul == persona + b"\n" + index
+
+
 def test_leaves_no_temp_file_behind(tmp_path: Path) -> None:
     """The compose staging area is the script's own, and it cleans up."""
     vault, home = _fixture(tmp_path)

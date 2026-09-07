@@ -100,10 +100,10 @@ fact-check it against their own memory anyway.
 
 **2. Grounded drafting.** Landed: the wiki is reachable from the running
 gateway, and the agent has an operator persona that knows it manages these
-properties. Both arrive the same way — `bin/build-soul` composes the persona
-with the vault index into `SOUL.md`, which Hermes injects into every turn, so
-"consult the wiki" is a standing instruction the agent carries rather than a
-step any one caller has to remember to add.
+properties. Both arrive the same way — `scripts/publish-soul` composes the
+persona with the vault index into `SOUL.md`, which Hermes injects into every
+turn, so "consult the wiki" is a standing instruction the agent carries rather
+than a step any one caller has to remember to add.
 
 **3. The approval loop.** The core, and now working in its simplest form: the
 watcher surfaces a guest message, the agent proposes wording, an owner approves or
@@ -326,13 +326,12 @@ runtime restoration script copies the tracked configuration and publishes
 state.
 
 `SOUL.md` is **composed and published, not preserved** — and never inside the
-container, which composes nothing for it. `bin/build-soul` concatenates the
-tracked persona in `runtime/SOUL.md` with the vault's `index.md`;
-`scripts/publish-soul` runs that composition and writes the result to
-`~/.hermes/SOUL.md` from the HOST — at deploy, and every night
-`scripts/promote-vault` runs at 04:30. That is how the agent knows on every
-turn what operational facts exist — but a host-side edit to that file is lost
-at the next deploy or the next promote. Edit `runtime/SOUL.md` instead.
+container, which composes nothing for it. `scripts/publish-soul` concatenates
+the tracked persona in `runtime/SOUL.md` with the vault's `index.md` and
+writes the result to `~/.hermes/SOUL.md` from the HOST — at deploy, and every
+night `scripts/promote-vault` runs at 04:30. That is how the agent knows on
+every turn what operational facts exist — but a host-side edit to that file is
+lost at the next deploy or the next promote. Edit `runtime/SOUL.md` instead.
 
 ## Before you write code here
 
