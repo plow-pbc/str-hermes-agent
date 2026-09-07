@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Publish the composed SOUL into $HERMES_HOME. Runs on the HOST.
+#
+# The base image hardens the injected identity: plow-init's harden_home() sets
+# $HERMES_HOME/SOUL.md to root:root 0644 inside a root-owned STICKY home, at
+# every container start, so the agent cannot rewrite what it is. That also puts
+# the file out of reach of the operator -- a sticky directory lets only the
+# file's owner replace it, and after the first boot that owner is root. So the
+# nightly (hermes, in the container) cannot publish, and neither can a plain
+# host write; the one actor that can is root, and the host reaches root through
+# the container without a password.
+#
+# Recomposed here, never copied from a staged file. The persona half comes from
+# runtime/SOUL.md, which the container mounts READ-ONLY; the index half comes
+# from the vault, which the agent writes. Installing an agent-authored file as
+# root would hand the agent the persona too -- the exact thing harden_home()
+# exists to prevent.
+#
+# Lands root:root 0644: harden_home()'s own target, so the next boot's fchown
+# and fchmod change nothing rather than changing this back.
+#
+#   scripts/publish-soul [vault]
+set -euo pipefail
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
+home="${AGENT_HOME:-$HOME/.hermes}"
+target="$home/SOUL.md"
+
+# Composed into the home, so the install below is a same-filesystem rename when
+# the direct path applies. umask 077 while it is a temp file: it carries the
+# operator's whole index, and it is only widened to 0644 at the install.
+umask 077
+staged="$(mktemp "$target.XXXXXX")"
+trap 'rm -f "$staged"' EXIT
+"$repo_root/bin/build-soul" "$vault" "$repo_root/runtime/SOUL.md" "$staged"
+
+# Idempotent and quiet, like promote-vault: this runs from cron every night
+# whether or not the corpus moved, and a rewrite that changes no bytes still
+# costs a gateway prompt-cache miss on the next turn.
+if [ -f "$target" ] && cmp -s "$staged" "$target"; then
+    echo "publish-soul: already current"
+    exit 0
+fi
+
+# The direct path first, established rather than inferred from a failing
+# install: a home whose SOUL.md this user can still replace -- a fresh deploy
+# before the agent's first boot, and every test -- needs no container at all.
+if install -m 644 "$staged" "$target" 2>/dev/null; then
+    echo "publish-soul: published $target"
+    exit 0
+fi
+
+# Otherwise the file is hardened and only root can replace it. Same container
+# resolution as scripts/no-nightly-running: not-running is established up front,
+# because "it is not up" and "the check could not run" are the same non-zero
+# status from exec and only one of them has a safe next step.
+container="${AGENT_CONTAINER:?publish-soul: $target is hardened and AGENT_CONTAINER is unset -- run me through agent-mgr, or start the agent}"
+running=$(docker ps -q --filter "name=^${container}$" --filter status=running) || {
+    echo "FATAL: could not ask docker whether ${container} is running" >&2
+    exit 1
+}
+[ -n "$running" ] || {
+    echo "FATAL: $target is root-owned (plow-init hardened it) and ${container} is not running." >&2
+    echo "  Only root can replace it. Start the agent and re-run this script." >&2
+    exit 1
+}
+
+# install(1) inside the container, so ownership and mode are set as one step by
+# the process that already has root -- and on $HERMES_HOME, which is the same
+# directory as $home through the compose mount.
+hermes_home=$(docker exec "$container" printenv HERMES_HOME) || {
+    echo "FATAL: could not read HERMES_HOME from ${container}" >&2
+    exit 1
+}
+docker exec -u root -i "$container" sh -c '
+    set -eu
+    tmp=$(mktemp)
+    trap "rm -f \"$tmp\"" EXIT
+    cat > "$tmp"
+    install -o root -g root -m 644 "$tmp" "$1/SOUL.md"
+' _ "$hermes_home" < "$staged" || {
+    echo "FATAL: could not publish the SOUL into ${container}" >&2
+    exit 1
+}
+echo "publish-soul: published $target as root:root 0644"
