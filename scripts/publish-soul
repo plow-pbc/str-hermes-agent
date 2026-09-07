@@ -46,6 +46,11 @@ fi
 # The direct path first, established rather than inferred from a failing
 # install: a home whose SOUL.md this user can still replace -- a fresh deploy
 # before the agent's first boot, and every test -- needs no container at all.
+# install(1), not a `>`/`>>` redirect: fs.protected_regular=2 (verified on the
+# live host) makes the kernel refuse a redirect's open of an existing file in a
+# sticky directory when the opener is not that file's owner -- and that refusal
+# holds even for root. install works because it unlinks the destination first
+# and writes a new inode, and root owns the directory either way.
 if install -m 644 "$staged" "$target" 2>/dev/null; then
     echo "publish-soul: published $target"
     exit 0
