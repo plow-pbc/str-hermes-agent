@@ -29,6 +29,17 @@ set -euo pipefail
 vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
 git_dir="$vault.git"
 
+# The injected index, refreshed from whatever this run leaves at $vault's tip
+# -- already-pushed history on a quiet night, or tonight's push. The nightly
+# cannot do this itself: it runs as hermes inside the container, and
+# plow-init owns $HERMES_HOME/SOUL.md as root at every boot. This job already
+# runs on the host an hour later, so the publish rides with it rather than
+# adding a schedule. Called from both exits below, not only after a push: a
+# publish that failed on an earlier night (the container was down, say) is
+# otherwise never retried, and the self-clearing staleness note
+# bin/nightly.sh promises never clears.
+publish_soul="$(dirname "${BASH_SOURCE[0]}")/publish-soul"
+
 [ -d "$vault" ]   || { echo "promote-vault: no vault at $vault" >&2; exit 1; }
 [ -d "$git_dir" ] || { echo "promote-vault: no git dir at $git_dir" >&2; exit 1; }
 
@@ -96,6 +107,7 @@ trap 'rm -f "$scan"' EXIT
 
 if [ ! -s "$scan" ]; then
     echo "promote-vault: nothing to promote"
+    "$publish_soul" "$vault"
     exit 0
 fi
 
@@ -126,12 +138,7 @@ v push -q origin HEAD:main
 printf 'promote-vault: pushed %s (%s files)\n' \
     "$(v rev-parse --short HEAD)" "$(v show --stat --format= HEAD | grep -c '|')"
 
-# The injected index, refreshed from the corpus this push just published. The
-# nightly cannot do it: it runs as hermes inside the container, and plow-init
-# owns $HERMES_HOME/SOUL.md as root at every boot. This job already runs on the
-# host an hour later, so the publish rides with it rather than adding a
-# schedule.
-#
-# After the push, deliberately: an index that advertises pages the credential
-# scan above refused would point the agent at a corpus that never left.
-"$(dirname "${BASH_SOURCE[0]}")/publish-soul" "$vault"
+# After the push, deliberately -- not before: an index that advertises pages
+# the credential scan above refused would point the agent at a corpus that
+# never left.
+"$publish_soul" "$vault"

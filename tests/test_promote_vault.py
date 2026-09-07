@@ -337,5 +337,25 @@ def test_promote_publishes_the_soul_after_pushing() -> None:
     credential scan must not have its index advertised.
     """
     body = (ROOT / "scripts" / "promote-vault").read_text()
-    assert "publish-soul" in body
-    assert body.index("publish-soul") > body.index("push -q origin")
+    call = '"$publish_soul" "$vault"'
+    assert call in body
+    # rindex, not index: the quiet-night call below runs before any push, so
+    # the LAST call in the file is the one this ordering rule is actually
+    # about -- the one that runs on the path where a push happened.
+    assert body.rindex(call) > body.index("push -q origin")
+
+
+def test_promote_publishes_the_soul_on_a_quiet_night_too() -> None:
+    """A publish that failed on an earlier night must be retried on a later
+    quiet one, not stranded until the next real push.
+
+    scripts/promote-vault exits on "nothing to promote" before it ever
+    reaches the post-push publish. Without a call on this path too, a
+    publish that failed once (the container was down, say) is never
+    revisited, and the self-clearing staleness note bin/nightly.sh promises
+    never clears.
+    """
+    body = (ROOT / "scripts" / "promote-vault").read_text()
+    quiet_branch = body[body.index('echo "promote-vault: nothing to promote"'):
+                         body.index("exit 0")]
+    assert '"$publish_soul" "$vault"' in quiet_branch
