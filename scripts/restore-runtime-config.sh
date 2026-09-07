@@ -104,9 +104,12 @@ sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$container_vault|" "$vault
 "$repo_root/bin/build-hubs" "$vault"
 
 # The injected SOUL, composed from the persona and whatever the RUNTIME vault's
-# index says today — that is the vault the agent actually reads. Under `set -e`,
-# so a failed build aborts the restore rather than leaving last deploy's index
-# beside this deploy's config.
-"$repo_root/bin/build-soul" "$vault" "$repo_root/runtime/SOUL.md" "$hermes_home/SOUL.md"
+# index says today — that is the vault the agent actually reads. Through
+# publish-soul rather than build-soul directly: after the agent's first boot the
+# base image's plow-init owns $hermes_home/SOUL.md as root inside a sticky home,
+# where this script's own user can neither rename over it nor write it. Under
+# `set -e`, so a failed publish aborts the restore rather than leaving last
+# deploy's index beside this deploy's config.
+"$repo_root/scripts/publish-soul" "$vault"
 
 printf 'Restored tracked Hermes configuration to %s and seeded %s\n' "$hermes_home" "$vault"

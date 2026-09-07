@@ -124,7 +124,11 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     soul = home / "SOUL.md"
     assert "^[ambiguous]" in soul.read_text()
     assert "Sauna" in soul.read_text()
-    assert stat.S_IMODE(soul.stat().st_mode) == 0o600
+    # 0644 and not build-soul's 0600: the base image's plow-init hardens this
+    # file to root:root 0644 at every boot, so the deploy publishes it at that
+    # shape and the hardening becomes a no-op. Publishing at 0600 would be
+    # silently rewritten on the next start.
+    assert stat.S_IMODE(soul.stat().st_mode) == 0o644
     # This script writes no dotenv of its own, and the check stays rather than
     # becoming a comment: it is what proves the sentence two docs assert -- the
     # /sethome target lives in that file as PLOW_CHAT_HOME_CHANNEL, so a seed
@@ -156,6 +160,19 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     assert "- [Parking](../operations/cedar-cabin-parking.md)" in hub
     assert keys.read_text() == "ssh-ed25519 AAAA operator\n", "wrote through the link"
     assert not (vault / "AGENTS.md").is_symlink(), "link survived instead of being replaced"
+
+
+def test_restore_publishes_the_soul_rather_than_writing_it() -> None:
+    """The deploy must go through the one publisher, not write SOUL.md itself.
+
+    After the first container boot $HERMES_HOME/SOUL.md is root:root inside a
+    root-owned sticky home, so a rename or an in-place write from the deploy
+    user fails with EPERM/EACCES. The publisher is what knows to escalate
+    through the container; a direct build-soul here is that bug returning.
+    """
+    restore = (ROOT / "scripts" / "restore-runtime-config.sh").read_text()
+    assert "publish-soul" in restore
+    assert '/SOUL.md"' not in restore, "the deploy names the published SOUL directly"
 
 
 @pytest.mark.parametrize("state", ["absent", "empty", "symlinked-index"])
