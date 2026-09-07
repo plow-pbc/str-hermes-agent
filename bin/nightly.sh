@@ -25,17 +25,12 @@
 set -uo pipefail
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
-# here, rather than hardcoding the literal, keeps VAULT and SOUL_OUT correct
-# across base images.
+# here, rather than hardcoding the literal, keeps VAULT correct across base
+# images.
 # Required, not defaulted: a container that has lost the variable must fail
 # here, not silently resolve a vault or SOUL that is not actually mounted.
 HERMES_HOME="${HERMES_HOME:?nightly.sh: HERMES_HOME is unset in the container}"
 VAULT="${VAULT:-$HERMES_HOME/repo/vault}"
-# The composed SOUL's destination. Overridable for the same reason $VAULT is:
-# `just test-wiki` points both at scratch, and this one is the live gateway's
-# injected system prompt — a run that composed a scratch vault's index over it
-# would leave production advertising pages that exist nowhere but the test.
-SOUL_OUT="${SOUL_OUT:-$HERMES_HOME/SOUL.md}"
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS=""
 
@@ -92,10 +87,10 @@ fi
 # so the set varies run to run. The vault's suite is the deterministic half of
 # the same signal — it is what caught the 15 — so the chain runs that instead.
 #
-# Note-and-continue, like the SOUL rebuild below: the digest is this run's
-# liveness signal, so a vault that failed its checks has to be reported through
-# it rather than silenced by an abort. The pages are already written by now;
-# aborting would not unwrite them, it would only withhold the news.
+# Note-and-continue: the digest below is this run's liveness signal, so a
+# defect here has to be reported through it rather than silenced by an abort.
+# The pages are already written by now; aborting would not unwrite them, it
+# would only withhold the news.
 #
 # Spelled out rather than `just test` in the vault: `just` is not installed in
 # this image, so delegating would have failed every night and reported it as a
@@ -108,8 +103,10 @@ fi
 # Tonight's pages belong in tonight's hub lists, and the suite below asserts
 # exactly that — so this runs before the gate rather than after it, and a deploy
 # that reverted a hub heals inside the run that would otherwise report it.
-# Note-and-continue like the SOUL rebuild: the pages are already written, and
-# aborting would withhold the news rather than unwrite them.
+# Note-and-continue: the digest below is this run's liveness signal, so a
+# defect here has to be reported through it rather than silenced by an abort.
+# The pages are already written by now; aborting would not unwrite them, it
+# would only withhold the news.
 if ! "$BIN/build-hubs" "$VAULT"; then
   note "hub rebuild failed; property hubs may not list tonight's pages"
 fi
@@ -122,14 +119,23 @@ elif [ "$rc" -ne 0 ]; then
   note "vault checks could not run (rc=$rc); see the cron log"
 fi
 
-# Tonight's pages belong in tomorrow's injected index. Note-and-continue rather
-# than abort: the digest below is this run's liveness signal, so a stale SOUL
-# must be reported through it, not made silent by skipping the message that
-# would have said so.
-# $SOUL_OUT defaults to $HERMES_HOME/SOUL.md, which is ~/.hermes/SOUL.md on
-# the host — the same file the deploy path writes, through the compose mount.
-if ! "$BIN/build-soul" "$VAULT" "$HERMES_HOME/repo/runtime/SOUL.md" "$SOUL_OUT"; then
-  note "SOUL rebuild failed; the injected index is stale"
+# Tonight's pages are not in the injected index yet, and this run cannot put
+# them there: the SOUL is root-owned from plow-init's boot hardening and this
+# chain runs as hermes. scripts/promote-vault publishes it from the host at
+# 04:30. Reported rather than assumed, and compared against the vault's own
+# index so the note clears itself once the publish has run -- an unconditional
+# note every night is one nobody reads.
+#
+# Byte-compared against the SOUL's tail, because the SOUL is composed as
+# persona + "\n" + index and the index is therefore its suffix. NOT `grep -Ff`:
+# that succeeds when ANY line of the index appears anywhere in the SOUL, so the
+# one case this exists to catch -- a night that added a page and left every
+# other line intact -- reports current. Measured against the live container:
+# adding one entry to a copy of the real index, `grep -qFf` said CURRENT and
+# this said STALE.
+if ! tail -c "$(wc -c < "$VAULT/index.md")" "$HERMES_HOME/SOUL.md" 2>/dev/null \
+     | cmp -s - "$VAULT/index.md"; then
+  note "injected index is stale until scripts/promote-vault runs"
 fi
 
 # Bounded for the same reason the aborts are, with room for the real work it

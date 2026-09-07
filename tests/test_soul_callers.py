@@ -18,25 +18,29 @@ from pathlib import Path
 NIGHTLY = (Path(__file__).resolve().parents[1] / "bin" / "nightly.sh").read_text()
 
 
-def test_nightly_rebuilds_the_soul_after_ingest() -> None:
-    """Tonight's pages must be in tomorrow's injected index."""
-    assert "build-soul" in NIGHTLY
-    ingest = NIGHTLY.index("ingest-all")
-    build = NIGHTLY.index("build-soul")
-    assert build > ingest, "build-soul must run after ingest, not before"
-    # And it must land where the gateway injects from. The destination is
-    # overridable so `just test-wiki` can point it at scratch — which means the
-    # e2e exercises every SOUL path except the production one. A wrong default
-    # here exits 0 into a path nothing reads: no note, digest says ok, e2e green,
-    # and the injected index quietly stops tracking the pages the run just wrote.
-    assert 'SOUL_OUT:-$HERMES_HOME/SOUL.md' in NIGHTLY
-    assert '"$SOUL_OUT"' in NIGHTLY
+def test_nightly_does_not_write_the_soul() -> None:
+    """The nightly runs as hermes and structurally cannot publish.
+
+    plow-init hardens $HERMES_HOME/SOUL.md to root:root inside a root-owned
+    sticky home at every boot, so build-soul's closing rename fails with EPERM
+    from in here. It failed silently-ish for exactly one night before this
+    changed: note-and-continue, so the only symptom was a digest prefix.
+    """
+    assert "build-soul" not in NIGHTLY
+    assert "SOUL_OUT" not in NIGHTLY
 
 
-def test_nightly_reports_a_failed_soul_build() -> None:
-    """Every nightly path reports; a silent SOUL failure breaks that contract."""
-    tail = NIGHTLY[NIGHTLY.index("build-soul"):]
-    assert "note " in tail or "notify " in tail
+def test_nightly_reports_an_index_the_publish_has_not_caught_up_to() -> None:
+    """Tonight's pages are not in the injected index until the promote runs.
+
+    The chain must say so, or the staleness the old build-soul step existed to
+    prevent returns as silence -- an agent confidently describing last week's
+    corpus, which is the quietest failure this repo can ship.
+    """
+    assert 'note "injected index is stale' in NIGHTLY
+    assert "promote-vault" in NIGHTLY
+    # After ingest: it measures what tonight actually wrote.
+    assert NIGHTLY.index("injected index is stale") > NIGHTLY.index("ingest-all")
 
 
 def test_nightly_runs_the_vault_suite_after_ingest_and_reports_failure() -> None:

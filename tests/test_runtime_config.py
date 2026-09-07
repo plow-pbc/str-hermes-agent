@@ -329,8 +329,11 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     # of them stopped agreeing with the others.
     for path, literal in (
         ("bin/nightly.sh", 'VAULT="${VAULT:-$HERMES_HOME/repo/vault}"'),
-        ("bin/nightly.sh", 'SOUL_OUT="${SOUL_OUT:-$HERMES_HOME/SOUL.md}"'),
-        ("bin/nightly.sh", '"$HERMES_HOME/repo/runtime/SOUL.md"'),
+        # The nightly no longer composes the SOUL (scripts/publish-soul does,
+        # off the host, where root can replace the hardened file) -- it only
+        # reads the injected SOUL's tail to report whether that publish has
+        # caught up, still resolved through $HERMES_HOME rather than a literal.
+        ("bin/nightly.sh", '"$HERMES_HOME/SOUL.md"'),
         ("bin/checkin-watch.py", 'hermes_home() / "repo/vault"'),
         ("scripts/enable-checkin-watch.sh", '${VAULT:-$state/repo/vault}'),
         ("runtime/config.yaml", '${HERMES_HOME}/mcp-seam/server.py'),
