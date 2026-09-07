@@ -67,7 +67,16 @@ def run_promote(vault_dir):
     """
     agent_home = vault_dir.parent / ".agent-home"
     agent_home.mkdir(exist_ok=True)
-    env = {**os.environ, "AGENT_HOME": str(agent_home)}
+    env = {
+        **os.environ,
+        "AGENT_HOME": str(agent_home),
+        # Unreachable today -- the direct install into agent_home above always
+        # succeeds -- but pinned for the same reason tests/test_publish_soul.py
+        # pins it: an inherited AGENT_CONTAINER naming a real, running agent is
+        # what would make that branch write into a live agent's identity if it
+        # ever does become reachable.
+        "AGENT_CONTAINER": "promote-vault-tests-no-such-container",
+    }
     return subprocess.run([str(PROMOTE), str(vault_dir)],
                           capture_output=True, text=True, env=env)
 
