@@ -337,7 +337,7 @@ def test_promote_publishes_the_soul_after_pushing() -> None:
     credential scan must not have its index advertised.
     """
     body = (ROOT / "scripts" / "promote-vault").read_text()
-    call = '"$publish_soul" "$vault"'
+    call = '"$publish_soul" "$tmpvault"'
     assert call in body
     # rindex, not index: the quiet-night call below runs before any push, so
     # the LAST call in the file is the one this ordering rule is actually
@@ -358,4 +358,42 @@ def test_promote_publishes_the_soul_on_a_quiet_night_too() -> None:
     body = (ROOT / "scripts" / "promote-vault").read_text()
     quiet_branch = body[body.index('echo "promote-vault: nothing to promote"'):
                          body.index("exit 0")]
-    assert '"$publish_soul" "$vault"' in quiet_branch
+    assert '"$publish_soul" "$tmpvault"' in quiet_branch
+
+
+def test_publish_reads_the_committed_index_never_the_worktree() -> None:
+    """Real TOCTOU otherwise: `v add -A` snapshots what the credential scan
+    scans, the commit is pushed, and only then -- several lines later --
+    does the publish happen. A publish reading `$vault/index.md` directly at
+    that point re-reads the mutable worktree, which an overlapping
+    long-running nightly can have rewritten in between; the published SOUL
+    could then advertise an index that was never credential-scanned and is
+    not the commit that was just pushed. Reading from HEAD's own committed
+    tree instead closes the window by construction: a git object at a named
+    commit cannot be rewritten out from under a reader the way a worktree
+    file can. Structural, because reproducing the actual race deterministically
+    would need to pause the script mid-run; both call sites' source shape is
+    what actually removes the window, so that is what this pins.
+    """
+    body = (ROOT / "scripts" / "promote-vault").read_text()
+    assert body.count("v show HEAD:index.md") == 2, \
+        "expected one materialization per call site (quiet night, post-push)"
+    assert '"$publish_soul" "$vault"' not in body, \
+        "a direct call with the worktree vault is the bug returning"
+
+
+def test_promote_publishes_the_committed_index_bytes(vault) -> None:
+    """The materialized tmpvault's index.md must be exactly what HEAD holds --
+    not a truncated or re-encoded copy -- since that is the one guarantee the
+    TOCTOU fix rests on.
+    """
+    work, git_dir, remote = vault
+    (work / "operations" / "b-property.md").write_text("a page tonight\n")
+    (work / "index.md").write_text("# index\n\n- [[A page tonight]]\n")
+
+    r = run_promote(work)
+    assert r.returncode == 0, r.stderr
+    head_index = git(git_dir, work, "show", "HEAD:index.md").stdout
+    assert head_index == "# index\n\n- [[A page tonight]]\n"
+    published = (work.parent / ".agent-home" / "SOUL.md").read_text()
+    assert published.endswith(head_index)

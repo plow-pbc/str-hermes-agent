@@ -29,15 +29,14 @@ set -euo pipefail
 vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
 git_dir="$vault.git"
 
-# The injected index, refreshed from whatever this run leaves at $vault's tip
-# -- already-pushed history on a quiet night, or tonight's push. The nightly
-# cannot do this itself: it runs as hermes inside the container, and
-# plow-init owns $HERMES_HOME/SOUL.md as root at every boot. This job already
-# runs on the host an hour later, so the publish rides with it rather than
-# adding a schedule. Called from both exits below, not only after a push: a
-# publish that failed on an earlier night (the container was down, say) is
-# otherwise never retried, and the self-clearing staleness note
-# bin/nightly.sh promises never clears.
+# scripts/publish-soul, called from both exits below -- not only after a
+# push, because a publish that failed on an earlier night (the container was
+# down, say) is otherwise never retried, and the self-clearing staleness note
+# bin/nightly.sh promises never clears. The nightly cannot publish itself: it
+# runs as hermes inside the container, and plow-init owns
+# $HERMES_HOME/SOUL.md as root at every boot. This job already runs on the
+# host an hour later, so the publish rides with it rather than adding a
+# schedule.
 publish_soul="$(dirname "${BASH_SOURCE[0]}")/publish-soul"
 
 [ -d "$vault" ]   || { echo "promote-vault: no vault at $vault" >&2; exit 1; }
@@ -107,7 +106,14 @@ trap 'rm -f "$scan"' EXIT
 
 if [ ! -s "$scan" ]; then
     echo "promote-vault: nothing to promote"
-    "$publish_soul" "$vault"
+    # From HEAD's own committed index.md, never $vault's mutable worktree --
+    # see the post-push call below for why. Combined with the scan cleanup:
+    # this trap replaces the one set above it, and it still removes $scan
+    # (harmless if already gone), so nothing here goes uncleaned on exit.
+    tmpvault="$(mktemp -d)"
+    trap 'rm -f "$scan"; rm -rf "$tmpvault"' EXIT
+    v show HEAD:index.md > "$tmpvault/index.md"
+    "$publish_soul" "$tmpvault"
     exit 0
 fi
 
@@ -141,4 +147,16 @@ printf 'promote-vault: pushed %s (%s files)\n' \
 # After the push, deliberately -- not before: an index that advertises pages
 # the credential scan above refused would point the agent at a corpus that
 # never left.
-"$publish_soul" "$vault"
+#
+# From HEAD's own committed index.md, not $vault/index.md: `v add -A` staged
+# what the scan above scanned, but the scan and this call are several lines
+# apart, and an overlapping long-running nightly can still be rewriting the
+# WORKTREE'S index.md in between -- publish-soul would then read bytes that
+# were never scanned and are not the commit that was just pushed. The
+# composition only ever reads index.md out of the vault directory, so a
+# directory holding just that one file, materialized from the committed tree,
+# is a complete stand-in.
+tmpvault="$(mktemp -d)"
+trap 'rm -rf "$tmpvault"' EXIT
+v show HEAD:index.md > "$tmpvault/index.md"
+"$publish_soul" "$tmpvault"
