@@ -184,9 +184,22 @@ test-wiki:
     # scripts/promote-vault does, on the host, after this container exits, so
     # the SOUL this chain reads is never tomorrow's and the nightly is correct
     # to say so every time. Every other note stays fatal.
-    ! (grep "^nightly: " /tmp/e2e-nightly.log \
-        | grep -qv "^nightly: injected index is stale until scripts/promote-vault runs$") \
-      || fail "the nightly noted a failure — see /tmp/e2e-nightly.log"
+    #
+    # notes=$(...) then [ -z ], not a `grep -qv` pipeline: `-q` lets the right
+    # grep exit as soon as it finds one match, closing the pipe's read end
+    # while the left grep may still have lines left to write. SIGPIPE kills
+    # the left grep, and under pipefail its 141 can outrank the right grep's
+    # own correct exit status, silently swallowing a genuine defect.
+    notes=$(grep "^nightly: " /tmp/e2e-nightly.log \
+              | grep -v "^nightly: injected index is stale until scripts/promote-vault runs$")
+    [ -z "$notes" ] || fail "the nightly noted a failure — see /tmp/e2e-nightly.log"
+    # The expected note must actually have fired. Without this positive check,
+    # a broken staleness predicate (bin/nightly.sh's own tail-compare silently
+    # never matching) passes the check above for the wrong reason -- nothing
+    # noted at all -- and a defect in the mechanism this recipe exists to
+    # exercise is invisible here.
+    grep -q "^nightly: injected index is stale until scripts/promote-vault runs$" /tmp/e2e-nightly.log \
+      || fail "the nightly did not note the expected injected-index staleness — see /tmp/e2e-nightly.log"
 
     echo "=== 2. it staged conversations"
     # Counted wherever they were archived to, for the same reason bin/ingest-all
