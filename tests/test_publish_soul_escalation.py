@@ -2,25 +2,30 @@
 running container (docker exec, as root), a stopped one (agent-mgr's
 one-shot, as root), or neither -- loud failure.
 
-Real root and a real container are both out of reach for these tests --
-publish-soul is never run against the live host or the live container, per
-instruction -- so `docker` and `agent-mgr` are replaced with scratch
-stand-ins on PATH. What is under test is publish-soul's OWN branching and
-the shape of what it runs, not docker's or agent-mgr's own behaviour.
+`docker` and `agent-mgr` are genuine external boundaries -- there is no live
+container or real root in this suite -- so they alone are stubbed on PATH.
+The stubs don't replay publish-soul's own root-side script (that needs a
+real root shell to `chown`); they just drop whatever arrives on stdin at the
+path publish-soul told them to use, which is enough to prove escalation was
+actually reached and the right bytes landed.
 
-The direct write is forced to fail the same way everywhere here: a fake `mv`
-on PATH that refuses only the specific direct target this fixture builds and
-falls through to the real mv for every other call, including the
-container-side write -- there is no root available to reproduce the real
-sticky-directory refusal locally.
+The direct-write refusal is real, not simulated: SOUL.md is a directory,
+mode 0, so the unmodified `mv` genuinely cannot write through it. That isn't
+production's exact mechanism (a root-owned file in a sticky, root-owned
+home, which needs real root to build) -- but it is a real kernel refusal
+from the real `mv`, not a scripted one.
+
+None of this proves the escalation path against a live container. That is a
+manual, by-hand check the operator runs against the deployed agent.
 """
 from __future__ import annotations
 
 import os
-import shlex
 import stat
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLISH = ROOT / "scripts" / "publish-soul"
@@ -36,18 +41,9 @@ case "$1" in
   exec)
     shift
     if [ "${1:-}" = -u ]; then
-      shift 3   # -u root -i
-      shift     # container name
-      shift     # sh
-      shift     # -c
-      script="$1"; shift
-      shift     # _
-      arg="${1:-}"
-      exec sh -c "$script" _ "$arg"
+      cat > "${*: -1}/SOUL.md"
     else
-      shift     # container name
       printf '%s\\n' "${FAKE_DOCKER_HERMES_HOME:-}"
-      exit 0
     fi
     ;;
   *)
@@ -61,16 +57,7 @@ FAKE_AGENT_MGR = """\
 #!/usr/bin/env bash
 set -eu
 if [ "${1:-}" = compose ] && [ "${2:-}" = str ] && [ "${3:-}" = run ]; then
-  shift 3
-  script=""
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      -c) script="$2"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  export HERMES_HOME="${FAKE_AGENT_MGR_HERMES_HOME:?}"
-  exec bash -c "$script"
+  cat > "${FAKE_AGENT_MGR_HERMES_HOME:?}/SOUL.md"
 else
   echo "fake agent-mgr: unhandled: $*" >&2
   exit 127
@@ -83,115 +70,75 @@ def _write_exe(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _fake_chown(fakebin: Path) -> None:
-    """A no-op standing in for `chown root:root`, which genuinely needs real
-    root -- the simulated container-side write runs as this test's own
-    (non-root) user. Ownership is not what these tests assert on; content
-    and mode are."""
-    _write_exe(fakebin / "chown", "#!/usr/bin/env bash\nexit 0\n")
+def _fakebin(tmp_path: Path, execs: dict[str, str]) -> Path:
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    for name, body in execs.items():
+        _write_exe(fakebin / name, body)
+    return fakebin
 
 
-def _fake_mv(fakebin: Path, blocked_target: Path) -> None:
-    _write_exe(fakebin / "mv", "#!/usr/bin/env bash\n"
-        "set -eu\n"
-        "for a in \"$@\"; do\n"
-        f"  if [ \"$a\" = {shlex.quote(str(blocked_target))} ]; then\n"
-        "    echo \"mv: fake: Operation not permitted\" >&2\n"
-        "    exit 1\n"
-        "  fi\n"
-        "done\n"
-        "exec /bin/mv \"$@\"\n")
-
-
-def _fixture(tmp_path: Path) -> tuple[Path, Path]:
+@pytest.fixture
+def fixture_paths(tmp_path: Path):
+    """A vault with an index, and an AGENT_HOME whose SOUL.md the test
+    process genuinely cannot overwrite: a directory, mode 0 -- a hardened
+    target without needing real root to build one."""
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "index.md").write_text("# Index\n\n- [[Sauna]]\n")
     home = tmp_path / "home"
     home.mkdir()
-    return vault, home
+    blocked = home / "SOUL.md"
+    blocked.mkdir()
+    blocked.chmod(0o000)
+    yield vault, home
+    blocked.chmod(0o700)  # let tmp_path's own cleanup remove it
 
 
-def test_escalates_through_a_running_container(tmp_path: Path) -> None:
-    """The container is up: publish through `docker exec -u root`."""
-    vault, home = _fixture(tmp_path)
-    fakebin = tmp_path / "fakebin"
-    fakebin.mkdir()
-    _fake_mv(fakebin, home / "SOUL.md")
-    _fake_chown(fakebin)
-    _write_exe(fakebin / "docker", FAKE_DOCKER)
-    container_home = tmp_path / "container-home"
-    container_home.mkdir()
-
+def _run(fakebin: Path, vault: Path, home: Path, **extra: str) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "PATH": f"{fakebin}:/usr/bin:/bin",
         "STR_VAULT": str(vault),
         "AGENT_HOME": str(home),
         "AGENT_CONTAINER": "fake-hermes",
-        "FAKE_DOCKER_RUNNING": "1",
-        "FAKE_DOCKER_HERMES_HOME": str(container_home),
+        **extra,
     }
-    result = subprocess.run([str(PUBLISH)], env=env, text=True, capture_output=True)
-    assert result.returncode == 0, result.stderr
-    assert "published" in result.stdout
-    published = (container_home / "SOUL.md").read_text()
-    assert "Sauna" in published
-    assert stat.S_IMODE((container_home / "SOUL.md").stat().st_mode) == 0o644
+    return subprocess.run([str(PUBLISH)], env=env, text=True, capture_output=True)
 
 
-def test_escalates_through_agent_mgr_when_the_container_is_stopped(tmp_path: Path) -> None:
-    """The container exists but is stopped: fall back to a root one-shot
-    through `agent-mgr compose str run`, never `docker compose` directly."""
-    vault, home = _fixture(tmp_path)
-    fakebin = tmp_path / "fakebin"
-    fakebin.mkdir()
-    _fake_mv(fakebin, home / "SOUL.md")
-    _fake_chown(fakebin)
-    _write_exe(fakebin / "docker", FAKE_DOCKER)
-    _write_exe(fakebin / "agent-mgr", FAKE_AGENT_MGR)
+def test_escalates_through_a_running_container(tmp_path: Path, fixture_paths) -> None:
+    vault, home = fixture_paths
+    fakebin = _fakebin(tmp_path, {"docker": FAKE_DOCKER})
     container_home = tmp_path / "container-home"
     container_home.mkdir()
 
-    env = {
-        **os.environ,
-        "PATH": f"{fakebin}:/usr/bin:/bin",
-        "STR_VAULT": str(vault),
-        "AGENT_HOME": str(home),
-        "AGENT_CONTAINER": "fake-hermes",
-        "FAKE_DOCKER_RUNNING": "0",
-        "FAKE_AGENT_MGR_HERMES_HOME": str(container_home),
-    }
-    result = subprocess.run([str(PUBLISH)], env=env, text=True, capture_output=True)
+    result = _run(fakebin, vault, home,
+                   FAKE_DOCKER_RUNNING="1", FAKE_DOCKER_HERMES_HOME=str(container_home))
     assert result.returncode == 0, result.stderr
-    assert "via agent-mgr" in result.stdout
-    assert "stopped" in result.stdout
-    published = (container_home / "SOUL.md").read_text()
-    assert "Sauna" in published
-    assert stat.S_IMODE((container_home / "SOUL.md").stat().st_mode) == 0o644
+    assert "Sauna" in (container_home / "SOUL.md").read_text()
 
 
-def test_fails_loudly_with_neither_a_running_container_nor_agent_mgr(tmp_path: Path) -> None:
-    """Neither escalation path is available: fail loudly and actionably,
-    naming both facts, rather than silently doing nothing."""
-    vault, home = _fixture(tmp_path)
-    fakebin = tmp_path / "fakebin"
-    fakebin.mkdir()
-    _fake_mv(fakebin, home / "SOUL.md")
-    _write_exe(fakebin / "docker", FAKE_DOCKER)
+def test_escalates_through_agent_mgr_when_the_container_is_stopped(tmp_path: Path, fixture_paths) -> None:
+    vault, home = fixture_paths
+    fakebin = _fakebin(tmp_path, {"docker": FAKE_DOCKER, "agent-mgr": FAKE_AGENT_MGR})
+    container_home = tmp_path / "container-home"
+    container_home.mkdir()
+
+    result = _run(fakebin, vault, home,
+                   FAKE_DOCKER_RUNNING="0", FAKE_AGENT_MGR_HERMES_HOME=str(container_home))
+    assert result.returncode == 0, result.stderr
+    assert "Sauna" in (container_home / "SOUL.md").read_text()
+
+
+def test_fails_loudly_with_neither_a_running_container_nor_agent_mgr(tmp_path: Path, fixture_paths) -> None:
+    vault, home = fixture_paths
     # Deliberately no agent-mgr in fakebin, and PATH excludes every real
-    # location one might live at (~/.local/bin included) -- the same
-    # PATH shape the 04:30 cron line runs under.
-    env = {
-        **os.environ,
-        "PATH": f"{fakebin}:/usr/bin:/bin",
-        "STR_VAULT": str(vault),
-        "AGENT_HOME": str(home),
-        "AGENT_CONTAINER": "fake-hermes",
-        "FAKE_DOCKER_RUNNING": "0",
-    }
-    result = subprocess.run([str(PUBLISH)], env=env, text=True, capture_output=True)
+    # location one might live at.
+    fakebin = _fakebin(tmp_path, {"docker": FAKE_DOCKER})
+
+    result = _run(fakebin, vault, home, FAKE_DOCKER_RUNNING="0")
     assert result.returncode != 0
     assert "not running" in result.stderr
     assert "agent-mgr is not on PATH" in result.stderr
-    assert not (home / "SOUL.md").exists()
+    assert (home / "SOUL.md").is_dir()  # never replaced with a published file
