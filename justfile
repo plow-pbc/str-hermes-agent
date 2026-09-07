@@ -160,11 +160,6 @@ test-wiki:
     # the sake of a test.
     NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; /etc/cont-init.d/03-link-wiki-skills.sh || { echo \"linking the wiki skills failed\" >&2; exit 1; }; [ -d $HH/skills/wiki-digest ] || { echo \"the link script ran but the wiki skills are not linked\" >&2; exit 1; }; exec $HH/scripts/nightly.sh"
     #
-    # SOUL_OUT off the default too. It defaults to $HERMES_HOME/SOUL.md, which is
-    # the live gateway's injected system prompt — this run would compose the
-    # scratch vault's index over it and leave production advertising pages that
-    # exist only here. The vault mount above covers the vault; this covers the
-    # one output that lands outside it.
     # Through agent-mgr, which owns the compose file list, the override and the
     # env-file. Reaching for `docker compose` directly here would restate all
     # three and drift from the deployment the gateway actually runs under.
@@ -172,7 +167,7 @@ test-wiki:
     # --entrypoint is load-bearing and agent-mgr enforces it: the image's own
     # entrypoint is the hermes CLI, so a bare path argument is swallowed as a
     # subcommand -- and s6 would boot a gateway alongside the live one.
-    agent-mgr compose str run --rm --no-deps -T -e VAULT="$CV" -e SOUL_OUT=/tmp/e2e-SOUL.md \
+    agent-mgr compose str run --rm --no-deps -T -e VAULT="$CV" \
       -v "$PWD/$V:$CV" --user "$(id -u):$(id -g)" --entrypoint bash hermes \
       -c "$NIGHTLY" > /tmp/e2e-nightly.log 2>&1 \
       || fail "nightly chain failed — see /tmp/e2e-nightly.log"
@@ -182,7 +177,15 @@ test-wiki:
     # run that noted one looks identical to a clean one, and this recipe's own
     # `ok` would print over it. One check for all of them: every note reaches
     # stderr, and every path that writes one also writes the reason above it.
-    ! grep -q "^nightly: " /tmp/e2e-nightly.log \
+    #
+    # One note is expected on every run here, and excluded by its exact text —
+    # never a substring, which would also swallow an unrelated note that happens
+    # to share a word. This run's whole contract is that it never publishes:
+    # scripts/promote-vault does, on the host, after this container exits, so
+    # the SOUL this chain reads is never tomorrow's and the nightly is correct
+    # to say so every time. Every other note stays fatal.
+    ! (grep "^nightly: " /tmp/e2e-nightly.log \
+        | grep -qv "^nightly: injected index is stale until scripts/promote-vault runs$") \
       || fail "the nightly noted a failure — see /tmp/e2e-nightly.log"
 
     echo "=== 2. it staged conversations"
