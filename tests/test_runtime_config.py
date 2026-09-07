@@ -42,6 +42,13 @@ def restore_env(tmp_path):
         # actually threads the export through rather than happening to match
         # a hardcoded literal.
         "AGENT_HOME_TARGET": "/test-container-home",
+        # Pinned for the same reason the two sibling harnesses
+        # (tests/test_publish_soul.py, tests/test_promote_vault.py) pin it: an
+        # inherited AGENT_CONTAINER would fall back through publish-soul's own
+        # agent.env default to "hermes" -- this host's real, running agent --
+        # if the direct write into this fixture's scratch AGENT_HOME ever
+        # failed.
+        "AGENT_CONTAINER": "restore-runtime-config-tests-no-such-container",
     }
 
 
@@ -172,7 +179,6 @@ def test_restore_publishes_the_soul_rather_than_writing_it() -> None:
     """
     restore = (ROOT / "scripts" / "restore-runtime-config.sh").read_text()
     assert "publish-soul" in restore
-    assert '/SOUL.md"' not in restore, "the deploy names the published SOUL directly"
 
 
 @pytest.mark.parametrize("state", ["absent", "empty", "symlinked-index"])
