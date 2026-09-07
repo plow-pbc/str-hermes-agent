@@ -155,41 +155,76 @@ running=$(docker ps -q --filter "name=^${container}$" --filter status=running) |
     echo "FATAL: could not ask docker whether ${container} is running" >&2
     exit 1
 }
-[ -n "$running" ] || {
-    echo "FATAL: could not write $target directly ($direct_err), and ${container} is not running." >&2
-    echo "  Only root can replace it. Start the agent and re-run this script." >&2
-    exit 1
-}
 
-# $HERMES_HOME read from the container rather than assumed, and guarded the
-# way bin/nightly.sh guards its own: printenv exits 0 for a set-but-empty
-# variable, and an empty value below would resolve "$1/SOUL.md" to /SOUL.md --
-# the container's filesystem root -- while still printing success.
-hermes_home=$(docker exec "$container" printenv HERMES_HOME) || {
-    echo "FATAL: could not read HERMES_HOME from ${container}" >&2
-    exit 1
-}
-hermes_home="${hermes_home:?publish-soul: HERMES_HOME is set but empty inside ${container} -- refusing to publish to its filesystem root}"
-
-# mktemp INSIDE $1 (HERMES_HOME), not the container's default tmpdir: a rename
-# is only atomic on the same filesystem, and a scratch dir elsewhere could be a
-# different mount than $HERMES_HOME. chown+chmod happen before the mv, so the
-# rename lands the file at its final identity in one atomic step rather than
-# widening permissions on the live path after it is already visible under that
-# name. The process runs as root (-u root), which is what makes the rename
-# permitted despite the sticky bit -- root can always replace a file in a
-# sticky directory, regardless of who owns it.
-docker exec -u root -i "$container" sh -c '
+# The write sequence, shared by both root paths below: mktemp INSIDE the
+# home directory (never a container's default tmpdir), so the mv that
+# follows is a same-filesystem rename and therefore atomic; chown+chmod
+# happen before that mv, so the rename lands the file at its final identity
+# in one step rather than widening permissions on a path already visible
+# under its live name. Root permits the rename despite the sticky bit
+# regardless of who owns the file today.
+#
+# $1 if given -- the running-container path below already queried it from
+# the very container it is about to exec back into. Otherwise $HERMES_HOME
+# resolved natively: the stopped-container path boots a fresh container from
+# the same image, which already has it set, with no running instance to
+# query first.
+publish_as_root='
     set -eu
-    home="$1"
+    home="${1:-${HERMES_HOME:?publish-soul: HERMES_HOME is empty inside the container -- refusing to publish to its filesystem root}}"
     tmp=$(mktemp "$home/SOUL.md.XXXXXX")
     trap "rm -f \"$tmp\"" EXIT
     cat > "$tmp"
     chown root:root "$tmp"
     chmod 644 "$tmp"
     mv "$tmp" "$home/SOUL.md"
-' _ "$hermes_home" < "$staged" || {
-    echo "FATAL: could not publish the SOUL into ${container} ($hermes_home)" >&2
-    exit 1
-}
-echo "publish-soul: published $target as root:root 0644"
+'
+
+if [ -n "$running" ]; then
+    # $HERMES_HOME read from the container rather than assumed, and guarded
+    # the way bin/nightly.sh guards its own: printenv exits 0 for a
+    # set-but-empty variable, and an empty value below would resolve
+    # "$1/SOUL.md" to /SOUL.md -- the container's filesystem root -- while
+    # still printing success.
+    hermes_home=$(docker exec "$container" printenv HERMES_HOME) || {
+        echo "FATAL: could not read HERMES_HOME from ${container}" >&2
+        exit 1
+    }
+    hermes_home="${hermes_home:?publish-soul: HERMES_HOME is set but empty inside ${container} -- refusing to publish to its filesystem root}"
+
+    docker exec -u root -i "$container" sh -c "$publish_as_root" _ "$hermes_home" < "$staged" || {
+        echo "FATAL: could not publish the SOUL into ${container} ($hermes_home)" >&2
+        exit 1
+    }
+    echo "publish-soul: published $target as root:root 0644"
+    exit 0
+fi
+
+# ${container} exists but is stopped -- cron cannot start it (the 04:30
+# promote's crontab line has no agent-mgr on PATH at all, verified: `env -i
+# PATH=/usr/bin:/bin sh -c 'command -v agent-mgr'` finds nothing there), so
+# this branch is for the deploy/interactive path's recovery, where a
+# previously-booted-then-stopped agent still has a hardened target only root
+# can replace and there is no running container left to exec into.
+#
+# `agent-mgr compose ... run --rm`, never `docker compose` directly: it owns
+# the compose file list, the override and the env-file, and reaching for
+# `docker compose` here would restate all three and drift from the real
+# deployment -- the exact form justfile's test-wiki recipe already uses for
+# the same reason. Boots a throwaway container from the same image and
+# config, runs the shared write sequence above as root inside it (--user
+# 0:0), and exits -- one-shot, no lasting side effect beyond the file it
+# wrote.
+if command -v agent-mgr >/dev/null 2>&1; then
+    agent-mgr compose str run --rm --no-deps -T --user 0:0 \
+        --entrypoint bash hermes -c "$publish_as_root" < "$staged" || {
+        echo "FATAL: could not publish the SOUL through agent-mgr (${container} is stopped)" >&2
+        exit 1
+    }
+    echo "publish-soul: published $target as root:root 0644 (via agent-mgr, ${container} was stopped)"
+    exit 0
+fi
+
+echo "FATAL: could not write $target directly ($direct_err), ${container} is not running, and agent-mgr is not on PATH." >&2
+echo "  Start the agent and re-run this script, or run this through agent-mgr, or start it interactively." >&2
+exit 1
