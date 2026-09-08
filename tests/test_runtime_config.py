@@ -292,9 +292,15 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     # compose time, not silently mount at the literal `/repo/vault` an unset
     # variable would produce.
     home = r"\$\{AGENT_HOME_TARGET(?::\?[^}]*)?\}"
-    for suffix in ("bin:" + home + "/scripts:ro", "mcp-seam:" + home + "/mcp-seam:ro",
-                   "runtime:" + home + "/repo/runtime:ro"):
+    for suffix in ("bin:" + home + "/scripts:ro", "mcp-seam:" + home + "/mcp-seam:ro"):
         assert re.search(rf"^\s*- \$\{{STR_REPO\}}/{suffix}$", compose, re.M), suffix
+    # runtime/ is deliberately NOT mounted. Its only in-container reader was
+    # build-soul, reading the persona to compose the SOUL; that is gone, and
+    # both files it exposed now reach $HERMES_HOME from the host instead --
+    # SOUL.md through publish-soul, config.yaml through agent-mgr. Re-adding
+    # the mount would hand the agent read access to its own persona for
+    # nothing.
+    assert "/repo/runtime" not in compose, "the dead runtime/ mount came back"
     assert re.search(rf"^\s*- \$\{{STR_VAULT:\?\}}:{home}/repo/vault$", compose, re.M)
 
     # Everything that reaches the vault (or mcp-seam) from INSIDE the
