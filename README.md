@@ -81,7 +81,7 @@ unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
 |---|---|
 | Read Hostex conversations | **Working** — Hostex hosted MCP, narrow tool allowlist (§ Hostex). Reactive: it reads when an owner asks. |
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/lint/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the vault holding pages the manifest never recorded; #71 |
-| Draft a reply grounded in that wiki | **Working** — `SOUL.md` is composed from the operator persona plus the vault index and injected into every turn (#56), so a turn opens the page it needs rather than answering from the summary |
+| Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `$HERMES_HOME/repo/vault/index.md`, and a turn reads that to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
@@ -100,8 +100,8 @@ fact-check it against their own memory anyway.
 
 **2. Grounded drafting.** Landed: the wiki is reachable from the running
 gateway, and the agent has an operator persona that knows it manages these
-properties. Both arrive the same way — `bin/build-soul` composes the persona
-with the vault index into `SOUL.md`, which Hermes injects into every turn, so
+properties. Both arrive the same way — `SOUL.md` is the persona, which Hermes
+injects into every turn and which points at the vault's `index.md`, so
 "consult the wiki" is a standing instruction the agent carries rather than a
 step any one caller has to remember to add.
 
@@ -183,7 +183,8 @@ between the two; #46 records why the allowlist never was.
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
 | `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `~/.hermes` |
 | `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`, installed into the runtime vault at deploy. The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
-| `scripts/restore-runtime-config.sh` | This agent's deploy hook, run **by** `agent-mgr deploy str` (declared as `AGENT_DEPLOY_HOOK`): seeds the runtime vault from `runtime/vault-seed/`, rebuilds the property hubs, composes `SOUL.md`, and refuses without a vault at `~/hermes-vault`. Not a standalone entry point. |
+| `scripts/restore-runtime-config.sh` | This agent's deploy hook, run **by** `agent-mgr deploy str` (declared as `AGENT_DEPLOY_HOOK`): seeds the runtime vault from `runtime/vault-seed/`, rebuilds the property hubs, publishes `SOUL.md` (via `scripts/publish-soul`), and refuses without a vault at `~/hermes-vault`. Not a standalone entry point. |
+| `scripts/publish-soul` | Installs `runtime/SOUL.md` verbatim as `~/.hermes/SOUL.md`, from the HOST, at deploy. Composes nothing. Before the agent's first boot this is a plain write; afterwards `plow-init` owns the file as root, so it escalates through the running container. Nothing else writes the SOUL — the nightly does not. |
 | `.env.example` | The environment-key contract, with no values |
 | [`.claude/skills/deploy-str-hermes/`](.claude/skills/deploy-str-hermes/SKILL.md) | Redeploy to `wakeup` — reseat, deploy, force-recreate |
 | [`.claude/skills/smoke-str-hermes/`](.claude/skills/smoke-str-hermes/SKILL.md) | Prove the deployed container answers, and what that does not prove |
@@ -197,7 +198,7 @@ between the two; #46 records why the allowlist never was.
 | `~/.hermes/.env` | Hostex and Plow secrets plus chat IDs | no |
 | `~/.hermes/auth.json` | OpenAI/Codex OAuth | no |
 | `~/.hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
-| `~/.hermes/SOUL.md` | system prompt; **composed at deploy time**, so edits here are lost | no — edit `runtime/SOUL.md` |
+| `~/.hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
 | `~/.hermes/skills/` | bundled + boot-linked skills, plus any Hermes wrote itself | only the ones Hermes wrote — see below |
 | remaining `~/.hermes` state | sessions, databases, logs, caches | no |
 
@@ -315,7 +316,7 @@ agent-mgr deploy str
 
 `deploy` returns before the gateway is serving, and there is no healthcheck
 to wait on, so watch `agent-mgr logs str` until it lists its
-platforms. `agent-mgr deploy` installs `config.yaml`, and the script composes `SOUL.md`; it
+platforms. `agent-mgr deploy` installs `config.yaml`, and the script publishes `SOUL.md`; it
 never touches `~/.hermes/.env`, so the home target survives.
 
 Skip the `hermes auth add openai-codex` step only when a valid
@@ -324,12 +325,19 @@ runtime restoration script copies the tracked configuration and composes
 `SOUL.md`; it does not create secrets, OAuth, sessions, or derived gateway
 state.
 
-`SOUL.md` is **composed, not preserved**. `bin/build-soul` concatenates the
-tracked persona in `runtime/SOUL.md` with the vault's `index.md`, and both the
-restore script and the nightly chain overwrite `~/.hermes/SOUL.md` with the
-result. So the agent knows on every turn what operational facts exist — but a
-host-side edit to that file is lost at the next deploy or the next nightly.
-Edit `runtime/SOUL.md` instead.
+`SOUL.md` is **installed, not preserved, and not composed**. It is
+`runtime/SOUL.md` byte for byte; `scripts/publish-soul` writes it at deploy and
+nothing else writes it. A host-side edit is lost at the next deploy — edit
+`runtime/SOUL.md` instead.
+
+The vault index is deliberately **not** in it. The base image treats `SOUL.md`
+as provisioned identity: `plow-init` seeds it only when absent, then chowns it
+`root:root` and chmods it `0644` inside a home it owns and marks sticky, at
+every container start. Pushing a nightly-changing corpus through that freeze
+takes root escalation and a schedule; naming the file does not. So the persona
+carries the path — `$HERMES_HOME/repo/vault/index.md` — and the nightly keeps
+that file current in the vault the agent already reads. Identity stays frozen,
+knowledge stays live.
 
 ## Before you write code here
 
