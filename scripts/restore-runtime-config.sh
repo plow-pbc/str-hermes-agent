@@ -10,21 +10,25 @@ vault="${STR_VAULT:?agent-mgr did not export STR_VAULT -- run me through 'agent-
 # The corpus is not created here, and not synthesized. It arrives by cloning the
 # data repo. An empty vault would bring the agent up with the schema and no
 # facts, which reads exactly like a healthy deploy — the quietest failure this
-# repo can ship, and the one build-soul's own guard exists to prevent. Checked
-# before this script writes anything, so a refusal leaves the vault and the
-# composed SOUL untouched.
+# repo can ship. Checked before this script writes anything, so a refusal leaves
+# the vault untouched.
 
 # Keyed on index.md, not on the directory. `docker compose up -d` creates a
 # missing bind source as an empty root-owned directory, so a bare `-d` passes on
-# a vault with no corpus in it — restore would then install the seed and only
-# fail later at build-soul, after mutating the vault. index.md is what the SOUL
-# is composed from, so a present-but-empty one fails exactly like none at all —
-# hence -s, not -f. A symlinked index fails here too: `build-soul` refuses to
-# dereference one, and catching it before the seed install is what keeps a
-# refusal from leaving the vault half-written.
-if [ -L "$vault/index.md" ] || [ ! -s "$vault/index.md" ]; then
+# a vault with no corpus in it, and restore would install the seed over it.
+# index.md is what the persona sends the agent to read, so a present-but-empty
+# one fails exactly like none at all — hence -s, not -f.
+#
+# No symlink guard: nothing on the host reads index.md any more, so a link
+# out of the vault is no longer a host-file-read crossing -- the agent opens
+# the file itself, inside the container. -s already refuses a dangling link
+# (it follows the link and finds nothing), so the only case a symlink check
+# used to add -- a link to a real, non-empty file -- is harmless now. What -s
+# alone still buys is a legible refusal at deploy, not an agent brought up
+# pointing at a file that is not the corpus.
+if [ ! -s "$vault/index.md" ]; then
   {
-    echo "restore: no usable runtime vault at $vault (index.md missing, empty, or a symlink)"
+    echo "restore: no usable runtime vault at $vault (index.md missing or empty)"
     echo "  clone it first — README § Restoring runtime config has the sequence."
     echo "  NOT a plain \`git clone\`: that puts .git inside the vault worktree,"
     echo "  which is #89 again. The external-git-dir form is there for that reason."
@@ -99,14 +103,17 @@ sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$container_vault|" "$vault
 #
 # Under `set -e`, so a vault build-hubs cannot derive — a model-authored
 # `title:` that does not carry its hub's — stops the restore here, before the
-# SOUL is rebuilt. build-hubs derives every hub before writing any, so the
+# SOUL is installed. build-hubs derives every hub before writing any, so the
 # recovery is to fix that page's `title:` and re-run this script.
 "$repo_root/bin/build-hubs" "$vault"
 
-# The injected SOUL, composed from the persona and whatever the RUNTIME vault's
-# index says today — that is the vault the agent actually reads. Under `set -e`,
-# so a failed build aborts the restore rather than leaving last deploy's index
-# beside this deploy's config.
-"$repo_root/bin/build-soul" "$vault" "$repo_root/runtime/SOUL.md" "$hermes_home/SOUL.md"
+# The agent's identity, installed verbatim from the tracked persona. Composed
+# from nothing: the vault index the agent reads lives in the vault, and the
+# persona points at it. Through publish-soul because after the agent's first
+# boot plow-init owns $hermes_home/SOUL.md as root inside a sticky home, where
+# this script's own user can neither rename over it nor write it. Under
+# `set -e`, so a failed publish aborts the restore rather than leaving last
+# deploy's persona beside this deploy's config.
+"$repo_root/scripts/publish-soul"
 
 printf 'Restored tracked Hermes configuration to %s and seeded %s\n' "$hermes_home" "$vault"

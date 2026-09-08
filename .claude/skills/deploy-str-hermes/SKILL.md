@@ -60,7 +60,7 @@ skill maps the host — rather than piping these through `ssh` inline.
 - **Pull `--ff-only`, on `main` only.** A non-fast-forward means prod diverged; stop and investigate.
 - **Never** force-push, `--no-verify`, `git stash`, `git reset --hard`, `git clean`, or `git checkout -- <path>`.
 - **Never print secret values.** `~/.hermes/.env` holds the Hostex, Seam, and Plow credentials; check presence or last 3 chars, never `cat` it.
-- **Restore replaces `~/.hermes/config.yaml` and `~/.hermes/SOUL.md` wholesale** — the SOUL is composed from `runtime/SOUL.md` plus the vault index, so a host-side edit to it is lost; edit `runtime/SOUL.md` instead. It also overlays the deploy-owned seed into the runtime vault — `AGENTS.md` and `.env` — so an edit made to those *in the vault* is lost on the next deploy; edit `runtime/vault-seed/` instead. The property hubs under `properties/` are the vault's own: edit their prose there, it survives a deploy. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages immediately after the overlay, and again on every nightly. Rename the page, don't edit the link. `agent-mgr deploy str` installs the pinned Plow Chat plugin as part of the same command, so it is the whole of "apply `runtime/`". What it does not touch is the agent's `.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a redeploy does not unbind the home chat.
+- **Restore replaces `~/.hermes/config.yaml` and `~/.hermes/SOUL.md` wholesale** — the SOUL is installed verbatim from `runtime/SOUL.md` (it only names the vault's `index.md`, it does not contain it), so a host-side edit to it is lost; edit `runtime/SOUL.md` instead. It also overlays the deploy-owned seed into the runtime vault — `AGENTS.md` and `.env` — so an edit made to those *in the vault* is lost on the next deploy; edit `runtime/vault-seed/` instead. The property hubs under `properties/` are the vault's own: edit their prose there, it survives a deploy. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages immediately after the overlay, and again on every nightly. Rename the page, don't edit the link. `agent-mgr deploy str` installs the pinned Plow Chat plugin as part of the same command, so it is the whole of "apply `runtime/`". What it does not touch is the agent's `.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a redeploy does not unbind the home chat.
 
 ## 1. Confirm the checkout is deployable
 
@@ -207,7 +207,7 @@ One command, because `agent-mgr` owns the deploy end to end: it creates the
 home, installs `runtime/config.yaml` (named by `AGENT_CONFIG` in `agent.env`)
 and the pinned plugin, then runs this repo's own deploy hook
 (`AGENT_DEPLOY_HOOK` → `scripts/restore-runtime-config.sh`) for the vault seed,
-the hub rebuild and the composed SOUL — and reloads the gateway once at the end.
+the hub rebuild and the installed SOUL — and reloads the gateway once at the end.
 A failing hook fails the deploy, so a refusal cannot read as a landed deploy.
 
 It used to be the other way round: the script hardcoded the home and
@@ -264,7 +264,7 @@ own separate step.
 
 No `/sethome` afterwards. Hermes persists the home target to `~/.hermes/.env`
 (`PLOW_CHAT_HOME_CHANNEL`, `PLOW_CHAT_HOME_CHANNEL_THREAD_ID`), and step 3
-installs `config.yaml` and the composed `SOUL.md`, never `.env` — so the
+installs `config.yaml` and the installed `SOUL.md`, never `.env` — so the
 binding survives a redeploy untouched.
 
 ## 4.5 End the group's per-member sessions, once

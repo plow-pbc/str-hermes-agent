@@ -3,9 +3,9 @@
 # checkout. See README § Compiling the wiki nightly.
 set -euo pipefail
 
-# Refuse a second job. The chain ingests into the vault and rebuilds SOUL.md,
-# so two of them race the same pages and the same SOUL — the same shared-state
-# argument the poller's enabler makes about its cursor.
+# Refuse a second job. The chain ingests into the vault, so two of them race
+# the same pages — the same shared-state argument the poller's enabler makes
+# about its cursor.
 # Captured, not piped, so a docker error aborts under `set -e` rather than
 # reading as "no job".
 existing=$(agent-mgr compose str exec -T hermes hermes cron list)
