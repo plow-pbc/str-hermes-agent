@@ -102,7 +102,7 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     env = restore_env
     # agent-mgr's half runs first, as the deploy skill and README sequence it.
     # Stubbed here to the one thing this script depends on downstream: a home
-    # for build-soul to write into.
+    # for publish-soul to write into.
     (tmp_path / ".hermes").mkdir(exist_ok=True)
     result = subprocess.run(
         [ROOT / "scripts/restore-runtime-config.sh"],
@@ -118,17 +118,21 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     # It asks agent-mgr where the home is and does not otherwise touch
     # deployment -- no config install, no plugin install, no ordering.
     assert str(home) in result.stdout
-    # The composed SOUL, injected into every turn: the persona's reading rules
-    # plus the vault index — the fake runtime vault's, not the checkout's,
-    # since the restore now refuses to run without one.
+    # The SOUL, injected into every turn, is the tracked persona VERBATIM --
+    # composed from nothing. The vault index is not in it and must not be: it
+    # changes nightly, and the base image freezes this file at every boot.
+    # What the persona carries instead is the path to read.
     soul = home / "SOUL.md"
-    assert "^[ambiguous]" in soul.read_text()
-    assert "Sauna" in soul.read_text()
-    assert stat.S_IMODE(soul.stat().st_mode) == 0o600
+    assert soul.read_bytes() == (ROOT / "runtime/SOUL.md").read_bytes()
+    assert "index.md" in soul.read_text(), "the persona stopped naming the index"
+    assert "Sauna" not in soul.read_text(), "the vault index leaked back into the SOUL"
+    # 0644, the mode plow-init sets at every container start, so its hardening
+    # is a no-op rather than a change it has to make back.
+    assert stat.S_IMODE(soul.stat().st_mode) == 0o644
     # This script writes no dotenv of its own, and the check stays rather than
     # becoming a comment: it is what proves the sentence two docs assert -- the
     # /sethome target lives in that file as PLOW_CHAT_HOME_CHANNEL, so a seed
-    # copy or a build-soul that grew into it would clobber the host's real
+    # copy or a publish-soul that grew into it would clobber the host's real
     # tokens with nothing red. Non-vacuous under the stub, which only mkdirs.
     assert not (home / ".env").exists()
     assert not (home / "channel_directory.json").exists()
@@ -167,12 +171,13 @@ def test_restore_refuses_a_box_without_a_usable_runtime_vault(tmp_path, state, r
     The empty row is not hypothetical: `docker compose up -d` creates a missing
     bind source as an empty directory, so the vault exists and holds nothing.
     A readiness check on the directory passed that, installed the seed, and only
-    failed later at build-soul — after mutating the vault.
+    failed later — after mutating the vault.
 
-    The symlinked row is the read-side of the same boundary: the index feeds
-    build-soul, whose output is injected into every turn, so a link there reads
-    a host file into the agent's context. `../.ssh/id_ed25519` resolves to
-    nothing in the container and to the operator's private key on the host.
+    The symlinked row no longer guards a host read: nothing on the host reads
+    the index any more, since the SOUL is the persona verbatim and the agent
+    opens the index itself, in the container, where a link out of the vault
+    resolves to nothing. What it still buys is a legible refusal at deploy
+    rather than an agent brought up pointing at a file that is not the corpus.
 
     Keyed on index.md, every row refuses before anything is written — which is
     what `assert not .hermes.exists()` below pins for all three at once.
@@ -181,10 +186,9 @@ def test_restore_refuses_a_box_without_a_usable_runtime_vault(tmp_path, state, r
     if state != "absent":
         vault.mkdir()
     if state == "symlinked-index":
-        # The index is read by build-soul and its output is injected into every
-        # turn, so a link here reads a host file into the agent's context —
-        # `../.ssh/id_ed25519` resolves to nothing in the container and to the
-        # operator's private key on the host.
+        # A link where the corpus index should be. Harmless to the host now --
+        # nothing there reads it -- but it is not the corpus, and coming up
+        # pointed at it is the failure this refuses.
         (tmp_path / ".ssh").mkdir()
         (tmp_path / ".ssh" / "id_ed25519").write_text("PRIVATE KEY MATERIAL\n")
         (vault / "index.md").symlink_to("../.ssh/id_ed25519")
@@ -312,8 +316,6 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     # of them stopped agreeing with the others.
     for path, literal in (
         ("bin/nightly.sh", 'VAULT="${VAULT:-$HERMES_HOME/repo/vault}"'),
-        ("bin/nightly.sh", 'SOUL_OUT="${SOUL_OUT:-$HERMES_HOME/SOUL.md}"'),
-        ("bin/nightly.sh", '"$HERMES_HOME/repo/runtime/SOUL.md"'),
         ("bin/checkin-watch.py", 'hermes_home() / "repo/vault"'),
         ("scripts/enable-checkin-watch.sh", '${VAULT:-$state/repo/vault}'),
         ("runtime/config.yaml", '${HERMES_HOME}/mcp-seam/server.py'),
@@ -360,13 +362,12 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     assert "AGENT_HOME_TARGET:?" in restore
     assert "OBSIDIAN_VAULT_PATH=" in restore
 
-    # runtime/SOUL.md's mention is prose, concatenated verbatim by build-soul
-    # (`cat "$PERSONA"`) into the agent's own injected system prompt -- so
-    # unlike the .env above, the fix is to name a real shell variable the
-    # agent already has in its own tool-execution environment, not to derive
-    # a value from either of build-soul's two callers (which pass genuinely
-    # different $VAULT arguments -- see build-soul's own comment for why that
-    # broke this before).
+    # runtime/SOUL.md's mention is prose, installed verbatim as the agent's own
+    # injected system prompt -- so unlike the .env above, the fix is to name a
+    # real shell variable the agent already has in its own tool-execution
+    # environment rather than a host path. It is now load-bearing twice over:
+    # this is also how the agent finds the index, which is no longer pasted in
+    # underneath it.
     assert "$HERMES_HOME/repo/vault" in (ROOT / "runtime/SOUL.md").read_text()
 
     # The host-side vault path has ONE owner now: agent.env declares

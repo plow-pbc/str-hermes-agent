@@ -1,42 +1,62 @@
-"""What the nightly must do with the vault ingest just grew.
+"""What the nightly does with the vault ingest -- and what it must NOT do.
 
 Structural: bin/nightly.sh runs inside the container and calls `hermes chat`,
-so exercising it end to end costs more than this class of bug is worth. What
-this pins is that tonight's pages reach tomorrow's injected index — a nightly
-that ingests new pages but leaves the SOUL describing last week's fails
-silently — and that the corpus checks over those pages are acted on rather
-than merely run.
+so exercising it end to end costs more than this class of bug is worth.
 
-The deploy caller is not pinned here: tests/test_runtime_config.py already
-drives `restore-runtime-config.sh` as a subprocess and asserts on the SOUL it
-produces, which is the behavioural seam this file could only approximate.
+The contract inverted here. The chain used to recompose SOUL.md from the vault
+index every night, and this file pinned that it did. It cannot any more, and
+should not: the base image treats SOUL.md as provisioned identity -- plow-init
+chowns it root:root inside a root-owned sticky home at every container start,
+so the chain (running as hermes) cannot replace it, and the machinery to push
+nightly content through that freeze is exactly what this repo removed. The
+index lives in the vault the agent already reads, and the persona points at it.
+
+So what is pinned now is the absence: no SOUL write from in-container code, and
+a persona that still names the index, because the two together are what keep
+tonight's pages reachable tomorrow.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-NIGHTLY = (Path(__file__).resolve().parents[1] / "bin" / "nightly.sh").read_text()
+ROOT = Path(__file__).resolve().parents[1]
+NIGHTLY = (ROOT / "bin" / "nightly.sh").read_text()
+PERSONA = (ROOT / "runtime" / "SOUL.md").read_text()
+RESTORE = (ROOT / "scripts" / "restore-runtime-config.sh").read_text()
 
 
-def test_nightly_rebuilds_the_soul_after_ingest() -> None:
-    """Tonight's pages must be in tomorrow's injected index."""
-    assert "build-soul" in NIGHTLY
-    ingest = NIGHTLY.index("ingest-all")
-    build = NIGHTLY.index("build-soul")
-    assert build > ingest, "build-soul must run after ingest, not before"
-    # And it must land where the gateway injects from. The destination is
-    # overridable so `just test-wiki` can point it at scratch — which means the
-    # e2e exercises every SOUL path except the production one. A wrong default
-    # here exits 0 into a path nothing reads: no note, digest says ok, e2e green,
-    # and the injected index quietly stops tracking the pages the run just wrote.
-    assert 'SOUL_OUT:-$HERMES_HOME/SOUL.md' in NIGHTLY
-    assert '"$SOUL_OUT"' in NIGHTLY
+def test_the_nightly_does_not_write_the_soul() -> None:
+    """In-container code cannot publish the identity, so it must not try.
+
+    It ran as hermes against a root-owned target and failed with EPERM once a
+    night, note-and-continued, and surfaced only as a line in the digest.
+    """
+    assert "build-soul" not in NIGHTLY
+    assert "SOUL_OUT" not in NIGHTLY
+    assert "SOUL.md" not in NIGHTLY
 
 
-def test_nightly_reports_a_failed_soul_build() -> None:
-    """Every nightly path reports; a silent SOUL failure breaks that contract."""
-    tail = NIGHTLY[NIGHTLY.index("build-soul"):]
-    assert "note " in tail or "notify " in tail
+def test_the_persona_sends_the_agent_to_the_index() -> None:
+    """The pointer is now the whole mechanism, so it is the thing to pin.
+
+    Nothing pastes the index into the prompt any more. If the persona stops
+    naming the file, the corpus is still compiled nightly and simply never
+    read -- an agent answering from priors about properties it has pages for,
+    with nothing anywhere reading as broken.
+    """
+    assert "index.md" in PERSONA
+    assert "$HERMES_HOME/repo/vault" in PERSONA
+
+
+def test_the_deploy_publishes_the_persona_through_the_publisher() -> None:
+    """The one writer of SOUL.md is the host, at deploy, and it composes nothing.
+
+    Direct is what broke: after the first boot the target is root-owned inside
+    a sticky home, where the deploy user can neither rename over it nor write
+    it. publish-soul is what knows to escalate.
+    """
+    assert "publish-soul" in RESTORE
+    assert "build-soul" not in RESTORE
 
 
 def test_nightly_runs_the_vault_suite_after_ingest_and_reports_failure() -> None:

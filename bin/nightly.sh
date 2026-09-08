@@ -25,17 +25,12 @@
 set -uo pipefail
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
-# here, rather than hardcoding the literal, keeps VAULT and SOUL_OUT correct
-# across base images.
+# here, rather than hardcoding the literal, keeps VAULT correct across base
+# images.
 # Required, not defaulted: a container that has lost the variable must fail
-# here, not silently resolve a vault or SOUL that is not actually mounted.
+# here, not silently resolve a vault that is not actually mounted.
 HERMES_HOME="${HERMES_HOME:?nightly.sh: HERMES_HOME is unset in the container}"
 VAULT="${VAULT:-$HERMES_HOME/repo/vault}"
-# The composed SOUL's destination. Overridable for the same reason $VAULT is:
-# `just test-wiki` points both at scratch, and this one is the live gateway's
-# injected system prompt — a run that composed a scratch vault's index over it
-# would leave production advertising pages that exist nowhere but the test.
-SOUL_OUT="${SOUL_OUT:-$HERMES_HOME/SOUL.md}"
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS=""
 
@@ -92,10 +87,10 @@ fi
 # so the set varies run to run. The vault's suite is the deterministic half of
 # the same signal — it is what caught the 15 — so the chain runs that instead.
 #
-# Note-and-continue, like the SOUL rebuild below: the digest is this run's
-# liveness signal, so a vault that failed its checks has to be reported through
-# it rather than silenced by an abort. The pages are already written by now;
-# aborting would not unwrite them, it would only withhold the news.
+# Note-and-continue: the digest below is this run's liveness signal, so a
+# defect here has to be reported through it rather than silenced by an abort.
+# The pages are already written by now; aborting would not unwrite them, it
+# would only withhold the news.
 #
 # Spelled out rather than `just test` in the vault: `just` is not installed in
 # this image, so delegating would have failed every night and reported it as a
@@ -108,8 +103,10 @@ fi
 # Tonight's pages belong in tonight's hub lists, and the suite below asserts
 # exactly that — so this runs before the gate rather than after it, and a deploy
 # that reverted a hub heals inside the run that would otherwise report it.
-# Note-and-continue like the SOUL rebuild: the pages are already written, and
-# aborting would withhold the news rather than unwrite them.
+# Note-and-continue: the digest below is this run's liveness signal, so a
+# defect here has to be reported through it rather than silenced by an abort.
+# The pages are already written by now; aborting would not unwrite them, it
+# would only withhold the news.
 if ! "$BIN/build-hubs" "$VAULT"; then
   note "hub rebuild failed; property hubs may not list tonight's pages"
 fi
@@ -120,16 +117,6 @@ if [ "$rc" -eq 1 ]; then
   note "vault integrity FAILED; see the cron log"
 elif [ "$rc" -ne 0 ]; then
   note "vault checks could not run (rc=$rc); see the cron log"
-fi
-
-# Tonight's pages belong in tomorrow's injected index. Note-and-continue rather
-# than abort: the digest below is this run's liveness signal, so a stale SOUL
-# must be reported through it, not made silent by skipping the message that
-# would have said so.
-# $SOUL_OUT defaults to $HERMES_HOME/SOUL.md, which is ~/.hermes/SOUL.md on
-# the host — the same file the deploy path writes, through the compose mount.
-if ! "$BIN/build-soul" "$VAULT" "$HERMES_HOME/repo/runtime/SOUL.md" "$SOUL_OUT"; then
-  note "SOUL rebuild failed; the injected index is stale"
 fi
 
 # Bounded for the same reason the aborts are, with room for the real work it
