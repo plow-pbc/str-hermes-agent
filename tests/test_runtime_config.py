@@ -124,7 +124,6 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     # What the persona carries instead is the path to read.
     soul = home / "SOUL.md"
     assert soul.read_bytes() == (ROOT / "runtime/SOUL.md").read_bytes()
-    assert "index.md" in soul.read_text(), "the persona stopped naming the index"
     assert "Sauna" not in soul.read_text(), "the vault index leaked back into the SOUL"
     # 0644, the mode plow-init sets at every container start, so its hardening
     # is a no-op rather than a change it has to make back.

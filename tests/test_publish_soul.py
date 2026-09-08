@@ -53,6 +53,13 @@ def test_carries_the_index_path_and_not_the_index(tmp_path: Path) -> None:
     pipeline through a file the platform freezes. The persona sends the agent
     to the file instead; if the published SOUL ever grows the corpus itself,
     that pipeline is back.
+
+    This is the sole behavioural owner of this PR's whole point. A
+    byte-equality check against runtime/SOUL.md (above) cannot catch a persona
+    edit that drops the pointer while leaving everything else untouched --
+    equality would stay green on the edited file either way. Only an assertion
+    against the published artifact's actual content, like this one, catches
+    that. Do not delete this in favor of the byte-equality check.
     """
     home = tmp_path / "home"
     home.mkdir()
