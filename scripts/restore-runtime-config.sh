@@ -103,7 +103,7 @@ sed -i "s|^OBSIDIAN_VAULT_PATH=.*|OBSIDIAN_VAULT_PATH=$container_vault|" "$vault
 #
 # Under `set -e`, so a vault build-hubs cannot derive — a model-authored
 # `title:` that does not carry its hub's — stops the restore here, before the
-# SOUL is rebuilt. build-hubs derives every hub before writing any, so the
+# SOUL is installed. build-hubs derives every hub before writing any, so the
 # recovery is to fix that page's `title:` and re-run this script.
 "$repo_root/bin/build-hubs" "$vault"
 
