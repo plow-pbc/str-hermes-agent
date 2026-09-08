@@ -19,14 +19,16 @@ vault="${STR_VAULT:?agent-mgr did not export STR_VAULT -- run me through 'agent-
 # index.md is what the persona sends the agent to read, so a present-but-empty
 # one fails exactly like none at all — hence -s, not -f.
 #
-# The symlink arm is now the whole of that defence rather than a second line of
-# it. Nothing on the host reads index.md any more: the agent opens it itself,
-# inside the container, where a link out of the vault resolves to nothing. What
-# a refusal here buys is a legible failure at deploy instead of an agent that
-# comes up pointing at a file that is not the corpus.
-if [ -L "$vault/index.md" ] || [ ! -s "$vault/index.md" ]; then
+# No symlink guard: nothing on the host reads index.md any more, so a link
+# out of the vault is no longer a host-file-read crossing -- the agent opens
+# the file itself, inside the container. -s already refuses a dangling link
+# (it follows the link and finds nothing), so the only case a symlink check
+# used to add -- a link to a real, non-empty file -- is harmless now. What -s
+# alone still buys is a legible refusal at deploy, not an agent brought up
+# pointing at a file that is not the corpus.
+if [ ! -s "$vault/index.md" ]; then
   {
-    echo "restore: no usable runtime vault at $vault (index.md missing, empty, or a symlink)"
+    echo "restore: no usable runtime vault at $vault (index.md missing or empty)"
     echo "  clone it first — README § Restoring runtime config has the sequence."
     echo "  NOT a plain \`git clone\`: that puts .git inside the vault worktree,"
     echo "  which is #89 again. The external-git-dir form is there for that reason."

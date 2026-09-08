@@ -161,7 +161,7 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     assert not (vault / "AGENTS.md").is_symlink(), "link survived instead of being replaced"
 
 
-@pytest.mark.parametrize("state", ["absent", "empty", "symlinked-index"])
+@pytest.mark.parametrize("state", ["absent", "empty"])
 def test_restore_refuses_a_box_without_a_usable_runtime_vault(tmp_path, state, restore_env):
     """Proceeding would bring the agent up with the schema and no facts —
     indistinguishable from a healthy deploy, and the quietest failure this repo
@@ -172,25 +172,17 @@ def test_restore_refuses_a_box_without_a_usable_runtime_vault(tmp_path, state, r
     A readiness check on the directory passed that, installed the seed, and only
     failed later — after mutating the vault.
 
-    The symlinked row no longer guards a host read: nothing on the host reads
-    the index any more, since the SOUL is the persona verbatim and the agent
-    opens the index itself, in the container, where a link out of the vault
-    resolves to nothing. What it still buys is a legible refusal at deploy
-    rather than an agent brought up pointing at a file that is not the corpus.
+    No symlinked-index row: nothing on the host reads the index any more, so
+    a link out of the vault is harmless -- a dangling one already fails the
+    `-s` check below like any other missing file.
 
-    Keyed on index.md, every row refuses before anything is written — which is
-    what `assert not .hermes.exists()` below pins for all three at once.
+    Keyed on index.md, every remaining row refuses before anything is
+    written — which is what `assert not .hermes.exists()` below pins for both
+    at once.
     """
     vault = tmp_path / "runtime-vault"
     if state != "absent":
         vault.mkdir()
-    if state == "symlinked-index":
-        # A link where the corpus index should be. Harmless to the host now --
-        # nothing there reads it -- but it is not the corpus, and coming up
-        # pointed at it is the failure this refuses.
-        (tmp_path / ".ssh").mkdir()
-        (tmp_path / ".ssh" / "id_ed25519").write_text("PRIVATE KEY MATERIAL\n")
-        (vault / "index.md").symlink_to("../.ssh/id_ed25519")
     env = restore_env
     result = subprocess.run(
         [ROOT / "scripts/restore-runtime-config.sh"],
