@@ -68,45 +68,31 @@ fi
 
 # Otherwise plow-init has taken the file and only root can replace it. Root is
 # reachable through the agent's own container without a host password, and
-# agent-mgr resolved which container that is. Same not-running-is-established-
-# first shape as scripts/no-nightly-running: "it is not up" and "the check could
-# not run" are the same non-zero status from exec, and only one is safe.
+# agent-mgr resolved which container that is. One escalated exec does the
+# rest, no `docker ps` preflight: unlike scripts/no-nightly-running, where
+# not-running is a pass that must be told apart from "the check could not
+# run", here not-running is a failure either way, and `docker exec` already
+# fails non-zero with Docker's own stderr saying so. It also inherits the
+# container's environment, so the inner shell reads HERMES_HOME directly --
+# no separate `printenv` round trip.
 container="${AGENT_CONTAINER:?publish-soul: could not write $target directly ($direct_err), and AGENT_CONTAINER is unset -- run me through 'agent-mgr deploy str'}"
-running=$(docker ps -q --filter "name=^${container}$" --filter status=running) || {
-    echo "FATAL: could not ask docker whether ${container} is running" >&2
-    exit 1
-}
-[ -n "$running" ] || {
-    echo "FATAL: $target is root-owned (plow-init hardened it) and ${container} is not running." >&2
-    echo "  Only root can replace it. Start the agent and re-run the deploy." >&2
-    exit 1
-}
-
-# HERMES_HOME from the image rather than assumed: it is /var/lib/hermes on the
-# Plow base and /opt/data upstream, and it is the same directory as $home
-# through the compose mount. Required non-empty -- printenv exits 0 for a set
-# but empty variable, which would publish to the container's filesystem root.
-hermes_home=$(docker exec "$container" printenv HERMES_HOME) || {
-    echo "FATAL: could not read HERMES_HOME from ${container}" >&2
-    exit 1
-}
-hermes_home="${hermes_home:?publish-soul: HERMES_HOME is set but empty inside ${container}}"
 
 # mktemp inside $HERMES_HOME, not the container's default tmpdir: a rename is
-# only atomic within one filesystem. chown and chmod before the mv, so the file
-# arrives at its final identity in one step rather than being widened after it
-# is already live under that name.
+# only atomic within one filesystem. `:?` on HERMES_HOME -- unset or empty
+# would otherwise publish to the container's filesystem root. chown and chmod
+# before the mv, so the file arrives at its final identity in one step rather
+# than being widened after it is already live under that name.
 docker exec -u root -i "$container" sh -c '
     set -eu
-    home="$1"
+    home="${HERMES_HOME:?publish-soul: HERMES_HOME is unset or empty inside the container}"
     tmp=$(mktemp "$home/SOUL.md.XXXXXX")
     trap "rm -f \"$tmp\"" EXIT
     cat > "$tmp"
     chown root:root "$tmp"
     chmod 644 "$tmp"
     mv "$tmp" "$home/SOUL.md"
-' _ "$hermes_home" < "$staged" || {
-    echo "FATAL: could not publish the SOUL into ${container} ($hermes_home)" >&2
+' < "$staged" || {
+    echo "FATAL: could not publish the SOUL into ${container}" >&2
     exit 1
 }
 echo "publish-soul: published $target as root:root 0644"
