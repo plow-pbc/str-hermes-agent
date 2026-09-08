@@ -77,8 +77,7 @@ def open_hub(dfd: int, hub: Path) -> int:
     read above and this open. `properties/x.md -> ../.ssh/authorized_keys`
     resolves to nothing inside the container and to the operator's own
     authorized_keys on the host, and following it locks them out. The same
-    crossing `build-soul` refuses on its index read and
-    `restore-runtime-config.sh` refuses with `--remove-destination`.
+    crossing `restore-runtime-config.sh` refuses with `--remove-destination`.
 
     O_NOFOLLOW rather than an `is_symlink()` check because the probe is a race:
     checking and then opening are two steps with the agent running between
@@ -108,7 +107,7 @@ def main() -> None:
     # glob on a missing directory returns empty without raising, so a wrong
     # vault path would rewrite every hub with an empty list, or silently do
     # nothing at all, and exit 0 either way — the drift this script exists to
-    # remove, arriving by its own hand. Refused at the open, like build-soul.
+    # remove, arriving by its own hand. Refused at the open.
     # properties/ is opened once, as a directory and never through a link, and
     # held for the whole run: every hub read and write below is relative to
     # that descriptor, so the directory the agent can swap is not the one

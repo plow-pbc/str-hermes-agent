@@ -35,7 +35,11 @@ services:
       # Seam smart-lock MCP server, mounted rather than baked in so the pinned
       # upstream image stays swappable. Hermes launches it over stdio.
       - ${STR_REPO}/mcp-seam:${AGENT_HOME_TARGET}/mcp-seam:ro
-      # The persona half of the SOUL the nightly rebuilds. A directory rather
-      # than the file, so a deploy fast-forward that replaces the inode does not
-      # leave the container reading the old one.
+      # Read-only visibility into the tracked runtime/ config -- config.yaml
+      # and the SOUL persona -- inside the container. Nothing in-container
+      # reads either through this path any more: publish-soul installs
+      # SOUL.md straight to $HERMES_HOME from the HOST, and agent-mgr installs
+      # config.yaml the same way. A directory rather than the file, so a
+      # deploy fast-forward that replaces the inode does not leave the
+      # container reading the old one.
       - ${STR_REPO}/runtime:${AGENT_HOME_TARGET}/repo/runtime:ro

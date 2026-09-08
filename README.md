@@ -321,9 +321,9 @@ never touches `~/.hermes/.env`, so the home target survives.
 
 Skip the `hermes auth add openai-codex` step only when a valid
 `~/.hermes/auth.json` was restored through a separate secure backup. The
-runtime restoration script copies the tracked configuration and composes
-`SOUL.md`; it does not create secrets, OAuth, sessions, or derived gateway
-state.
+runtime restoration script copies the tracked configuration and publishes
+`SOUL.md` verbatim; it does not create secrets, OAuth, sessions, or derived
+gateway state.
 
 `SOUL.md` is **installed, not preserved, and not composed**. It is
 `runtime/SOUL.md` byte for byte; `scripts/publish-soul` writes it at deploy and

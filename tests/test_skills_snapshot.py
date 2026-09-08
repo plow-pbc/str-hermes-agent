@@ -4,7 +4,7 @@ Loaded by path because bin/ is not an importable package and the script's name
 is not a valid module identifier — the same approach tests/test_hostex_poll.py
 uses for the poller. The `.py` suffix is what makes that loadable at all, which
 is why the scripts tests import carry one and the ones they shell out to
-(`build-soul`, `ingest-all`) do not.
+(`build-hubs`, `ingest-all`) do not.
 """
 import importlib.util
 import pathlib
