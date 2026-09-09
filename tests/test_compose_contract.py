@@ -1,8 +1,8 @@
-"""This repo's own runtime surface, now that it has one.
+"""This repo's own runtime surface, which is now the only one.
 
-`compose.yml` lands beside agent-mgr's `compose.override.yml` rather than
-replacing it: agent-mgr stays the live path until the cutover, and both existing
-at once is what keeps it available as the rollback.
+`compose.yml` used to land beside agent-mgr's `compose.override.yml`, which kept
+the outgoing path available as the rollback through the cutover. The cutover
+held, so the deploy path it rolled back to is gone.
 """
 import pathlib
 import re
@@ -44,6 +44,10 @@ def test_every_transition_recipe_runs_the_nightly_veto():
             f"`just {recipe}` can stop the container without the veto"
         assert body.index("no-nightly-running") < body.index("docker compose"), \
             f"`just {recipe}` transitions before it asks"
+    # agent.env used to declare it as AGENT_PRE_TRANSITION and agent-mgr ran it.
+    # The recipes invoke it as a path now, so the bit is what makes it runnable.
+    guard = ROOT / "scripts" / "no-nightly-running"
+    assert guard.is_file() and guard.stat().st_mode & 0o111, "the veto is not executable"
 
 
 def test_no_transition_reaches_docker_compose_outside_a_vetoed_recipe():
@@ -91,3 +95,24 @@ def test_the_home_is_a_volume_and_the_vault_is_a_bind():
     vols = COMPOSE["volumes"]
     assert any(v.startswith("agent-home:/var/lib/hermes") for v in vols)
     assert any(v.endswith("/repo/vault") and v.startswith("${HOME}") for v in vols)
+
+
+# What agent-mgr's deploy path owned. Each is superseded rather than dropped:
+# the descriptor and its override by `compose.yml`, and restore-runtime-config's
+# two jobs by the image -- the SOUL/config install by
+# docker/cont-init.d/05-install-agent-payload.sh, the vault-corpus rule by
+# 04-require-vault-corpus.sh. The operator diagnostics under scripts/ are a
+# separate concern: they only borrow agent-mgr as a transport.
+RETIRED = (
+    "compose.override.yml",
+    "agent.env",
+    "scripts/restore-runtime-config.sh",
+)
+
+
+def test_the_agent_mgr_deploy_path_stays_deleted():
+    """A file back in the tree is a second owner of a lifecycle the image now
+    owns alone -- and `compose.override.yml` specifically would auto-load beside
+    compose.yml and fail every recipe on a variable nothing here exports."""
+    survivors = [name for name in RETIRED if (ROOT / name).exists()]
+    assert not survivors, f"agent-mgr deploy surface is back: {survivors}"

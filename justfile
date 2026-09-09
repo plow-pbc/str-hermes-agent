@@ -1,19 +1,13 @@
-# Short-term-rental operations agent -- DOMAIN recipes only.
+# Short-term-rental operations agent.
 #
-# Deployment lives in plow-pbc/agent-mgr, which owns the compose service, the
-# bring-up, the pins and the contract tests for every agent on this host:
+# Deployment is this repo's own, in compose.yml -- the shape plow-agents'
+# compose.example.yml defines. It used to live in plow-pbc/agent-mgr, which is
+# deprecated.
 #
-#   agent-mgr up str          agent-mgr logs str
-#   agent-mgr agent str "..." agent-mgr deploy str
-#
-# `agent-mgr agent` replaced this repo's `just agent`, which used
-# `docker compose run`. The image's s6 entrypoint starts a gateway whatever
-# command you pass it, so each of those turns booted a SECOND gateway against
-# ~/.hermes, evicted the live one from its chat websockets, and on exit posted a
-# shutdown notice into the owners' channel.
-#
-# What stays here is what only this agent has: the wiki vault pipeline and the
-# skills it writes for itself.
+# Never boot a second gateway to ask the agent something. The image's s6
+# entrypoint starts one whatever command you pass it, so a `docker compose run`
+# turn evicts the live gateway from its chat websockets and on exit posts a
+# shutdown notice into the owners' channel. Talk to the running one.
 
 # The container compose.yml declares. scripts/no-nightly-running asks docker
 # about it by name and refuses to guess one, so the two have to agree;
@@ -26,27 +20,20 @@ export AGENT_CONTAINER := "hermes"
 # Never reach for `docker compose` directly to stop or replace the container --
 # that is the bypass the veto exists to prevent.
 #
-# `-f compose.yml` is load-bearing, not tidiness: compose auto-loads
-# compose.override.yml whenever it sits beside compose.yml, and that override is
-# agent-mgr's -- it interpolates STR_REPO, STR_VAULT, AGENT_IMAGE and
-# AGENT_HOME_TARGET, which agent-mgr exports and nothing here does. Merged in,
-# every recipe below fails on a missing variable. Naming the one file is what
-# lets the outgoing path stay in the tree as the rollback.
-#
 # Why it refuses: a transition landing between a page write and its manifest
 # entry leaves the vault holding a page nothing recorded, and the next run
 # appends its facts a second time with nothing reporting it.
 up:
     ./scripts/no-nightly-running
-    docker compose -f compose.yml up -d
+    docker compose up -d
 
 down:
     ./scripts/no-nightly-running
-    docker compose -f compose.yml down
+    docker compose down
 
 restart:
     ./scripts/no-nightly-running
-    docker compose -f compose.yml up -d --force-recreate
+    docker compose up -d --force-recreate
 
 # The image first: tests/test_image_contents.py and tests/test_vault_guard.py
 # assert against this exact tag, and without it 16 of them fail from a clean

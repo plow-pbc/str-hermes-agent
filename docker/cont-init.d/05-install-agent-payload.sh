@@ -52,10 +52,10 @@ link_payload /opt/plow/str/bin scripts
 link_payload /opt/plow/str/mcp-seam mcp-seam
 
 # Only on a home this image manages, and the link above is that signal:
-# link_payload made it, and leaves a directory someone else mounted alone. While
-# agent-mgr owns the lifecycle it stages SOUL and config into the bind-mounted
-# home on every deploy, and restoring the image's copies over those would revert
-# a deploy on the next recreate -- the mirror of the staleness this seam fixes.
+# link_payload made it, and leaves a directory someone else mounted alone. The
+# agent-mgr deploy that staged SOUL and config into a bind-mounted home is gone,
+# but the guard is what makes that true rather than assumed: on any home this
+# image did not lay out, restoring its copies would revert whatever did.
 #
 # Unconditional on that path: overwriting the stale copy a volume kept is the
 # entire point (#58). Root-owned 0644, which harden_home() re-asserts on SOUL.md
