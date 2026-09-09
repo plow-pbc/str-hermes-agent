@@ -40,6 +40,13 @@ SEAM_CLAIMS = [
      "grep -qF /opt/plow/str/mcp-seam/server.py /tmp/h/config.yaml && echo yes", "yes"),
     ("the persona is root-owned and read-only to the agent", MIGRATED,
      "stat -c '%U %a' /tmp/h/SOUL.md", "root 644"),
+    # The opposite of the line above, and the reason they are two installs.
+    # plow-init rewrites config.yaml AS THE AGENT, and $HERMES_HOME carries the
+    # sticky bit -- so a root-owned one is a file the agent cannot replace, and
+    # the boot parks on `os.replace(config.yaml.tmp -> config.yaml)` EPERM.
+    # cont-init has already reported exit 0 by then, which is what hid it.
+    ("the config belongs to the agent that rewrites it", MIGRATED,
+     "stat -c '%U %a' /tmp/h/config.yaml", "hermes 640"),
     # Replacing a mount point fails the boot, and at FAILS=2 that is the whole
     # container -- this repo must not break the shape it is migrating away from.
     ("a populated host directory is retained", HOSTED,
