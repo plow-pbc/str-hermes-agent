@@ -93,3 +93,18 @@ RUN chown -R root:root /opt/plow \
  && find /opt/plow -type d -exec chmod 0755 {} + \
  && find /opt/plow -type f -exec chmod 0644 {} + \
  && find /opt/plow/str/bin -type f -exec chmod 0755 {} +
+
+# The vault's corpus check, moved off the host. `docker compose up -d` creates a
+# missing bind source as an empty root-owned directory, so this is what stands
+# between a typo'd vault path and an agent that comes up looking healthy while
+# knowing nothing.
+#
+# S6_BEHAVIOUR_IF_STAGE2_FAILS is what makes it a refusal rather than a note.
+# The base ships 1, at which a cont-init script exiting non-zero prints one
+# warning and the boot carries on and starts the gateway anyway -- which is how
+# 03-link-wiki-skills.sh failed on every boot for months without anyone
+# noticing. At 2, rc.init stops the container. Measured on the base with a probe
+# cont-init, both ways round. Nothing else here fails: on the live agent's own
+# boot log all three of the base's cont-init scripts exit 0.
+COPY --chmod=0755 docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
+ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
