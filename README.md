@@ -195,7 +195,7 @@ between the two; #46 records why the allowlist never was.
 | Location | Contents | Backed up in git? |
 |---|---|---|
 | repository `runtime/` | declarative config | yes |
-| `~/.hermes/.env` | Hostex and Plow secrets plus chat IDs | no |
+| `~/.hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
 | `~/.hermes/auth.json` | OpenAI/Codex OAuth | no |
 | `~/.hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
 | `~/.hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
@@ -282,9 +282,10 @@ agent-mgr compose str build
 agent-mgr deploy str
 # No dotenv install here: `agent-mgr deploy` seeds one from THIS repo's
 # .env.example (it prefers an instance's own over the fleet template), so the
-# home gets all six keys below at mode 600 — verified, not assumed. It never
+# home gets all five keys below at mode 600 — verified, not assumed. It never
 # clobbers an existing one. Fill HOSTEX_TOKEN and SEAM_API_KEY from 1Password.
-# Activation replaces the blank PLOW_CHAT_* placeholders in place.
+# Activation replaces the blank PLOW_CHAT_CHAT_UID in place; the credential
+# itself lands in ~/.plow-credentials-str, not the dotenv.
 # Activate BEFORE up: this image boots through plow-init, which needs the
 # credential activation writes (PLOW_AGENT_TOKEN and PLOW_API_BASE) before
 # agent-mgr will create the container at all. Activation runs on the host and

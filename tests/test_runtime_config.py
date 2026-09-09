@@ -11,7 +11,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_ENV = {
     "HOSTEX_TOKEN",
-    "PLOW_CHAT_TOKEN",
     "SEAM_API_KEY",
     "PLOW_CHAT_CHAT_UID",
     "PLOW_CHAT_APPROVAL_GROUP",
