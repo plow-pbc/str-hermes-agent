@@ -9,41 +9,49 @@ The rule was `scripts/restore-runtime-config.sh`'s, which agent-mgr invoked as
 AGENT_DEPLOY_HOOK. A boot check is strictly better than a deploy check: it runs
 every time rather than only on deploy, and it parks rather than coming up wrong,
 which is the posture plow-init already takes.
+
+Every shape below is built INSIDE the container, under an overridden HERMES_HOME.
+Binding a client-side temp directory assumes the daemon shares this filesystem;
+against a remote or dind daemon it does not, and the mount silently arrives as an
+empty directory — which is itself one of the cases under test, so the suite would
+go green having tested one shape five times.
 """
-import pathlib
 import subprocess
-import tempfile
 
 import pytest
 
 IMAGE = "sams-str-hermes-agent:local"
 GUARD = "/etc/cont-init.d/04-require-vault-corpus.sh"
-VAULT = "/var/lib/hermes/repo/vault"
+VAULT = "/tmp/scratch-home/repo/vault"
+CORPUS = f"printf '# index\\nreal content\\n' > {VAULT}/index.md"
+
+VAULT_SHAPES = [
+    ("no vault directory at all", "", "no corpus"),
+    # What `docker compose up -d` leaves when the bind source does not exist.
+    ("an empty directory", f"mkdir -p {VAULT}", "no corpus"),
+    # `-s`, not `-f`: index.md is what the persona sends the agent to read, so a
+    # zero-byte one fails exactly like none at all.
+    ("a present but zero-byte index", f"mkdir -p {VAULT} && : > {VAULT}/index.md",
+     "no corpus"),
+    # #89: an ingest turn ran `git restore --source=HEAD` over pages it judged
+    # missing. The vault's history belongs outside the worktree.
+    ("a corpus inside a git worktree",
+     f"mkdir -p {VAULT}/.git && {CORPUS}", "must not be a git repository"),
+    ("a real corpus", f"mkdir -p {VAULT} && {CORPUS}", None),
+]
 
 
-@pytest.mark.parametrize(("index", "accepted"), [
-    # No index.md at all: the empty directory `docker compose up -d` leaves
-    # behind when the bind source does not exist.
-    pytest.param(None, False, id="no-corpus"),
-    # Present but empty. `-s`, not `-f`: index.md is what the persona sends the
-    # agent to read, so a zero-byte one fails exactly like none at all.
-    pytest.param("", False, id="empty-index"),
-    pytest.param("# index\nreal content\n", True, id="real-corpus"),
-])
-def test_the_guard_admits_only_a_vault_with_a_corpus(index, accepted):
-    with tempfile.TemporaryDirectory() as vault:
-        if index is not None:
-            (pathlib.Path(vault) / "index.md").write_text(index)
-        run = subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{vault}:{VAULT}",
-             "--entrypoint", "sh", IMAGE, "-c", GUARD],
-            capture_output=True, text=True,
-        )
-    assert (run.returncode == 0) is accepted, run.stderr
-    if not accepted:
-        # The refusal's own words. "vault" alone matches the guard's path, so
-        # `sh: not found` passed this assertion when the script did not exist.
-        assert "no corpus" in run.stderr + run.stdout
+@pytest.mark.parametrize(("case", "shape", "refusal"), VAULT_SHAPES,
+                         ids=[c[0] for c in VAULT_SHAPES])
+def test_the_guard_admits_only_a_vault_with_a_corpus(case, shape, refusal):
+    run = subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "sh", IMAGE, "-c",
+         f"export HERMES_HOME=/tmp/scratch-home; {shape or 'true'}; {GUARD}"],
+        capture_output=True, text=True,
+    )
+    assert (run.returncode == 0) is (refusal is None), run.stderr or case
+    if refusal:
+        assert refusal in run.stderr + run.stdout, case
 
 
 def test_a_failing_cont_init_stops_the_container_rather_than_warning():
@@ -61,24 +69,3 @@ def test_a_failing_cont_init_stops_the_container_rather_than_warning():
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
     assert "S6_BEHAVIOUR_IF_STAGE2_FAILS=2" in env, env
-
-
-def test_a_vault_that_is_a_git_repository_is_refused():
-    """#89: an ingest turn ran `git restore --source=HEAD` over pages it judged
-    missing and destroyed them. The vault's history belongs outside the
-    worktree, so a reachable .git means the clone instructions were not
-    followed -- and nothing else would say so.
-
-    Carried over from scripts/restore-runtime-config.sh, which enforced it at
-    deploy time through agent-mgr. That lifecycle is the one being retired, and
-    the guard had no home in the compose path."""
-    with tempfile.TemporaryDirectory() as vault:
-        (pathlib.Path(vault) / "index.md").write_text("# index\nreal content\n")
-        (pathlib.Path(vault) / ".git").mkdir()
-        run = subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{vault}:{VAULT}",
-             "--entrypoint", "sh", IMAGE, "-c", GUARD],
-            capture_output=True, text=True,
-        )
-    assert run.returncode != 0
-    assert "must not be a git repository" in run.stderr + run.stdout
