@@ -233,11 +233,14 @@ def test_every_first_party_mcp_server_is_in_the_restorable_config():
     config = (ROOT / "runtime/config.yaml").read_text()
     servers = sorted(p.name for p in ROOT.glob("mcp-*") if p.is_dir())
     assert servers, "precondition: the repo ships at least one first-party MCP server"
-    # ${HERMES_HOME}, not a literal /opt/data: Hermes' own config loader
-    # interpolates it from the container's env, so this is the one path that
-    # is correct whether or not this agent has opted into agent-mgr's boot
-    # contract -- see the comment above the seam server's own entry.
-    missing = [s for s in servers if f"${{HERMES_HOME}}/{s}/server.py" not in config]
+    # The image's own authoritative path, not one under the home. These servers
+    # used to arrive as bind mounts from the deploy clone, so the reference had
+    # to follow wherever the home mounted; the image carries them now, root-owned
+    # under /opt/plow, so no host has to supply one and the agent cannot rewrite
+    # a server holding its lock credentials. What this test is about is
+    # unchanged: a config omitting a shipped server restores an agent that can
+    # read Hostex but not touch a door, and the restore still succeeds.
+    missing = [s for s in servers if f"/opt/plow/str/{s}/server.py" not in config]
     assert not missing, f"first-party MCP servers absent from runtime/config.yaml: {missing}"
 
 
@@ -310,11 +313,19 @@ def test_the_agent_reaches_the_vault_and_not_the_checkout_around_it():
     # embeds the reference in a longer expression (a bash default, a Python
     # call, a YAML scalar), and the literal is what would go stale if any one
     # of them stopped agreeing with the others.
+    #
+    # mcp-seam is deliberately NOT in this list any more. It reached the
+    # container as a bind mount from the deploy clone, so it had to be named
+    # relative to wherever the home mounted; the image carries it now, at an
+    # authoritative root-owned path with no host involved. Asserted below on
+    # that path instead, because "resolves through $HERMES_HOME" and "does not
+    # depend on the host" were the same requirement only while the host
+    # supplied it.
     for path, literal in (
         ("bin/nightly.sh", 'VAULT="${VAULT:-$HERMES_HOME/repo/vault}"'),
         ("bin/checkin-watch.py", 'hermes_home() / "repo/vault"'),
         ("scripts/enable-checkin-watch.sh", '${VAULT:-$state/repo/vault}'),
-        ("runtime/config.yaml", '${HERMES_HOME}/mcp-seam/server.py'),
+        ("runtime/config.yaml", '/opt/plow/str/mcp-seam/server.py'),
     ):
         assert literal in (ROOT / path).read_text(), f"{path} no longer contains: {literal}"
 

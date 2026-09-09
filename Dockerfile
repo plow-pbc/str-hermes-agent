@@ -66,8 +66,19 @@ RUN set -eu; \
 # model.*, display, agent.api_max_retries, cron.model_drift_guard,
 # tools.tool_search -- is re-asserted by plow-init on every boot, so declaring
 # one here could only drift from what actually runs.
-COPY runtime/SOUL.md runtime/config.yaml /var/lib/hermes/
-RUN chmod 0644 /var/lib/hermes/SOUL.md /var/lib/hermes/config.yaml
+# The authoritative copy lives outside the home, because the home is a volume
+# and a volume seeds from the image only while it is EMPTY -- so a migrated home
+# shadows every later revision of these two files (plow-hermes-agent#58).
+# 05-install-agent-payload.sh reinstalls them from here on every boot, which is
+# what makes an image update reach a pre-populated home at all.
+#
+# The copies under /var/lib/hermes are derived from that one, not a second
+# source: they are what an EMPTY volume initialises from, and what
+# `docker run <tag> cat /var/lib/hermes/SOUL.md` shows an operator checking a
+# published image.
+COPY runtime/SOUL.md runtime/config.yaml /opt/plow/str/home/
+RUN install -m 0644 -t /var/lib/hermes/ \
+      /opt/plow/str/home/SOUL.md /opt/plow/str/home/config.yaml
 
 # This agent's own skill, under the base's bundled root rather than in the home.
 # tools/skills_sync.py rglobs /opt/hermes/skills for SKILL.md and reconciles
@@ -107,4 +118,13 @@ RUN chown -R root:root /opt/plow \
 # cont-init, both ways round. Nothing else here fails: on the live agent's own
 # boot log all three of the base's cont-init scripts exit 0.
 COPY --chmod=0755 docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
+
+# The one image-to-home seam. Everything above is authoritative under /opt/plow
+# and unreachable from where its consumers look: hermes cron refuses a script
+# resolving outside $HERMES_HOME/scripts (hermes_cli/cron.py:652), the Seam
+# server is launched by a path in config.yaml, and a pre-populated volume never
+# receives the image's SOUL or config at all. One script closes all three rather
+# than three copies of the payload closing one each.
+COPY --chmod=0755 docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
+
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2

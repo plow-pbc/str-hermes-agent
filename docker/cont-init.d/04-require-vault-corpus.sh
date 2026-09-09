@@ -28,3 +28,17 @@ if [ ! -s "$vault/index.md" ]; then
   echo "str: clone it from the data repo; an empty vault reads exactly like a healthy deploy." >&2
   exit 1
 fi
+
+# The vault must never be a git repository. A reachable .git inside the worktree
+# is #89 again, where an ingest turn ran `git restore --source=HEAD` over pages
+# it judged missing and destroyed them. Its history belongs outside the
+# worktree, which is why the clone instructions use the external-git-dir form; a
+# plain `git clone` here means they were not followed, and nothing else would
+# say so. Carried over from scripts/restore-runtime-config.sh, which enforced it
+# at deploy time -- agent-mgr's lifecycle is the one being retired, and this
+# guard had no home in the compose path.
+if [ -e "$vault/.git" ]; then
+  echo "str: $vault/.git exists -- the vault must not be a git repository (#89)." >&2
+  echo "str: re-clone with the external-git-dir form; README has the sequence." >&2
+  exit 1
+fi

@@ -12,6 +12,7 @@
 *
 !Dockerfile
 !docker/cont-init.d/04-require-vault-corpus.sh
+!docker/cont-init.d/05-install-agent-payload.sh
 !runtime/SOUL.md
 !runtime/config.yaml
 !runtime/vault-seed

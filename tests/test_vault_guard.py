@@ -61,3 +61,24 @@ def test_a_failing_cont_init_stops_the_container_rather_than_warning():
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
     assert "S6_BEHAVIOUR_IF_STAGE2_FAILS=2" in env, env
+
+
+def test_a_vault_that_is_a_git_repository_is_refused():
+    """#89: an ingest turn ran `git restore --source=HEAD` over pages it judged
+    missing and destroyed them. The vault's history belongs outside the
+    worktree, so a reachable .git means the clone instructions were not
+    followed -- and nothing else would say so.
+
+    Carried over from scripts/restore-runtime-config.sh, which enforced it at
+    deploy time through agent-mgr. That lifecycle is the one being retired, and
+    the guard had no home in the compose path."""
+    with tempfile.TemporaryDirectory() as vault:
+        (pathlib.Path(vault) / "index.md").write_text("# index\nreal content\n")
+        (pathlib.Path(vault) / ".git").mkdir()
+        run = subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{vault}:{VAULT}",
+             "--entrypoint", "sh", IMAGE, "-c", GUARD],
+            capture_output=True, text=True,
+        )
+    assert run.returncode != 0
+    assert "must not be a git repository" in run.stderr + run.stdout

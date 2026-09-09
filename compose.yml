@@ -20,9 +20,19 @@ services:
     # predates that convention and renaming it would mean moving live state.
     container_name: hermes
     restart: unless-stopped
+    # Never pull. This tag names only what the build above produces, so a
+    # registry copy must never win: the default and `missing` both PULL when the
+    # local tag is absent, which would run a different image under this agent's
+    # credentials than the one anyone inspected.
+    pull_policy: never
     environment:
       # Who this agent is in the agent index.
       AGENT_ID: str
+      # Every schedule in this repo is a Pacific wall-clock expression. The base
+      # sets no timezone, and under UTC `0 3 * * *` fires at 8 PM Pacific --
+      # peak guest messaging, the one window the nightly chain exists to avoid.
+      # Stated here rather than inherited from agent.env, which is being retired.
+      TZ: America/Los_Angeles
     volumes:
       # `.host`, not the path the agent reads: a bind carries this machine's
       # ownership in, and a root cont-init step in the image copies the file
@@ -46,9 +56,12 @@ services:
       # container; `docker inspect` cannot tell you.
       - ${HOME}/hermes-vault:/var/lib/hermes/repo/vault
     # Hermes interrupts in-flight work on SIGTERM, then checkpoints the session
-    # and releases any compression lease before exiting; its supervisor allows
-    # 30s. Docker's outer deadline has to sit beyond that so s6 stays the owner
-    # of escalation.
+    # and releases any compression lease before exiting. s6 allows it 30s --
+    # S6_SERVICES_GRACETIME=30000, baked into the base image and inherited here,
+    # verified with `docker image inspect`. Docker's outer deadline sits beyond
+    # that so s6 stays the owner of escalation; equal or lower and Docker kills
+    # the container mid-checkpoint, and the replacement gateway cannot append to
+    # that transcript until the orphaned lease expires.
     stop_grace_period: 35s
     # No ports. The dashboard stays off: publishing it means binding 0.0.0.0
     # inside the container, which Hermes refuses without an auth provider
