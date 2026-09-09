@@ -195,7 +195,7 @@ between the two; #46 records why the allowlist never was.
 | Location | Contents | Backed up in git? |
 |---|---|---|
 | repository `runtime/` | declarative config | yes |
-| `~/.hermes/.env` | Hostex and Plow secrets plus chat IDs | no |
+| `~/.hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
 | `~/.hermes/auth.json` | OpenAI/Codex OAuth | no |
 | `~/.hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
 | `~/.hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
