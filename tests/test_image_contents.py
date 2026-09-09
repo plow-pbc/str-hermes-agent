@@ -24,39 +24,46 @@ def _sh(cmd: str) -> str:
     ).stdout
 
 
-@pytest.mark.parametrize("path", [
-    # Under the base's bundled root, not the home: tools/skills_sync.py
-    # reconciles this root into $HERMES_HOME/skills on every boot, preserving
-    # the category path, so a volume home still receives it.
-    "/opt/hermes/skills/productivity/property-guest-messaging/SKILL.md",
-    # The three the host used to hand in — the scheduler's scripts, the Seam
-    # stdio server, and the vault schema a deploy installs.
-    "/opt/plow/str/bin/nightly.sh",
-    "/opt/plow/str/mcp-seam/server.py",
-    "/opt/plow/str/vault-seed/AGENTS.md",
-    # The declarative half of the home, which a named-volume home seeds from.
-    "/var/lib/hermes/config.yaml",
-])
-def test_the_image_carries_what_the_host_used_to_supply(path):
-    assert _sh(f"test -s {path} && echo present").strip() == "present"
+# One table, one shape: `(case, command, expected)`. Every row asks the image a
+# question with a single-line answer, so a new claim about what the image
+# carries is a row rather than another function.
+#
+# `|| echo missing` on the presence rows so a real absence reads as an
+# assertion diff naming the case, while a docker that could not run at all
+# still raises through _sh's check=True.
+def _present(path):
+    return f"test -s {path} && echo present || echo missing", "present"
 
 
-def test_the_persona_ships_at_the_path_the_boot_hardens():
-    """COPY'd, never mounted: harden_home() fchown()s this exact path on every
-    boot, so a read-only mount here fails EROFS and no gateway starts.
+# Where each path goes and why is the Dockerfile's to explain; these are the
+# claims, not a second copy of the reasoning.
+IMAGE_CLAIMS = [
+    ("the agent's own skill",
+     *_present("/opt/hermes/skills/productivity/property-guest-messaging/SKILL.md")),
+    ("the scheduler's scripts", *_present("/opt/plow/str/bin/nightly.sh")),
+    ("the seam mcp server", *_present("/opt/plow/str/mcp-seam/server.py")),
+    ("the vault schema", *_present("/opt/plow/str/vault-seed/AGENTS.md")),
+    *((f"wiki skill {name}", *_present(f"/opt/hermes/skills/{name}/SKILL.md"))
+      for name in ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest")),
+    # Not installed from the wheel; a second copy never reaches the agent.
+    ("the theory skill, from the base",
+     *_present("/opt/hermes/skills/research/llm-wiki/SKILL.md")),
+    # Persona and config on CONTENT, not size: the base ships its own at both
+    # paths, so an existence check passes on an image carrying the generic
+    # persona -- an agent that boots and answers as someone else.
+    ("the persona is this agent's own",
+     "grep -qF 'short-term rentals' /var/lib/hermes/SOUL.md && echo yes", "yes"),
+    ("the persona is readable by the agent",
+     "stat -c %a /var/lib/hermes/SOUL.md", "644"),
+    ("the config is this agent's own",
+     "grep -qF hostex /var/lib/hermes/config.yaml && echo yes", "yes"),
+]
 
-    Asserted on content, not on size: the base ships its own SOUL.md at this
-    path, so a size check passes on an image carrying the generic persona
-    instead of this agent's -- an agent that boots and answers as someone else.
-    """
-    assert "short-term rentals" in _sh("cat /var/lib/hermes/SOUL.md")
-    assert _sh("stat -c %a /var/lib/hermes/SOUL.md").strip() == "644"
 
-
-def test_the_config_in_the_image_is_this_agents_own():
-    """Same reason as the persona above -- the base ships a config.yaml here,
-    so only its content distinguishes a baked one from the base's."""
-    assert "hostex" in _sh("cat /var/lib/hermes/config.yaml")
+@pytest.mark.parametrize(("case", "command", "expected"), IMAGE_CLAIMS,
+                         ids=[c[0] for c in IMAGE_CLAIMS])
+def test_the_image_carries_what_the_host_used_to_supply(case, command, expected):
+    assert _sh(command).strip() == expected, case
 
 
 def test_no_vault_content_is_baked():
@@ -95,26 +102,3 @@ def test_no_vault_content_is_baked():
     ).strip()
     assert hits == "", f"property data found in the image: {hits}"
 
-
-# The wheel ships 37 wiki skills; these five are what this agent uses. The read
-# side is named first because for three weeks it was missing entirely -- the
-# enabled set was four write-side skills, so the vault was compiled nightly and
-# the agent had no retrieval tool at all.
-ENABLED_WIKI_SKILLS = ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest")
-
-
-@pytest.mark.parametrize("skill", ENABLED_WIKI_SKILLS)
-def test_the_wiki_skills_the_agent_uses_ship_in_the_image(skill):
-    """Installed at build time into the root the runtime reconciles from, rather
-    than copied into the home by a cont-init script that exited 1 on every boot.
-    Flat, as siblings under the root, because skills_sync preserves the path it
-    finds a skill at and that is where the old script put them."""
-    assert _sh(f"test -s /opt/hermes/skills/{skill}/SKILL.md && echo present").strip() == "present"
-
-
-def test_the_theory_skill_comes_from_the_base_rather_than_the_wheel():
-    """llm-wiki is in the enabled set the agent uses but not in the list above:
-    a second copy under the bundled root never reaches the agent, for the reason
-    the Dockerfile records. The base's is the one that lands, so this asserts the
-    agent still gets it."""
-    assert _sh("test -s /opt/hermes/skills/research/llm-wiki/SKILL.md && echo present").strip() == "present"
