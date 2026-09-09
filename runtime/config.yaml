@@ -197,13 +197,16 @@ mcp_servers:
     - --with
     - fastmcp==3.4.5
     - python
-    # Interpolated by Hermes' own config loader (agent/secret_scope, falling
-    # back to os.environ) -- the same mechanism the SEAM_API_KEY entry below
-    # already relies on, verified to recurse into `args` too. HERMES_HOME is
-    # the image's own env var (/var/lib/hermes on the Plow base) -- matching
-    # wherever compose actually mounts mcp-seam, with no compose-level variable
-    # reaching into this file.
-    - ${HERMES_HOME}/mcp-seam/server.py
+    # The image's own authoritative copy, not a path in the home. mcp-seam used
+    # to arrive as a bind mount from the deploy clone at $HERMES_HOME/mcp-seam;
+    # a published image has no deploy clone, and a home migrated from that shape
+    # brings an empty directory where the mount used to be. Naming /opt/plow
+    # directly is what makes the server reachable with no host involved -- and
+    # it is root-owned there, so the agent cannot rewrite the server that holds
+    # its lock credentials. 05-install-agent-payload.sh still links
+    # $HERMES_HOME/mcp-seam at it, so a home carrying the old spelling keeps
+    # working across the cutover.
+    - /opt/plow/str/mcp-seam/server.py
     env:
       SEAM_API_KEY: ${SEAM_API_KEY}
     enabled: true

@@ -59,9 +59,11 @@ else
   # owners' channel. That shape ran here for months; agent-mgr now refuses
   # `compose run` that omits the flag, which is what surfaced it.
   #
-  # Overriding the entrypoint also skips cont-init, and one of those scripts is
-  # what links the wiki skills this turn needs — so it is run explicitly, and
-  # fatally: a turn without them ingests nothing and looks like an empty round.
+  # Overriding the entrypoint also skips cont-init, so nothing seeds the skills
+  # this turn needs during the run — the image installs them into the base's
+  # bundled root and the runtime reconciles them into the home at boot, so they
+  # are there already. Asserted, and fatally: a turn without them ingests
+  # nothing and looks like an empty round.
   #
   # --user is the other half of skipping s6, which would otherwise have remapped
   # the hermes user and chowned the data. Without it this runs as root and
@@ -73,7 +75,7 @@ else
     agent-mgr compose str run --rm --no-deps -T \
       -v "$VAULT_ABS:$CVAULT" --user "$(id -u):$(id -g)" -e INGEST_PROMPT="$1" \
       --entrypoint bash hermes \
-      -c '/etc/cont-init.d/03-link-wiki-skills.sh >&2 || exit 1; exec hermes chat -q "$INGEST_PROMPT"'
+      -c '[ -d "$HERMES_HOME/skills/wiki-ingest" ] || { echo "no wiki skills in $HERMES_HOME/skills — boot the container once so the runtime seeds them from the image" >&2; exit 1; }; exec hermes chat -q "$INGEST_PROMPT"'
   }
 fi
 

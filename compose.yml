@@ -1,0 +1,71 @@
+# This agent's own runtime surface, in the shape plow-agents' compose.example.yml
+# defines. This repository owns it from here.
+#
+# It lands BESIDE agent-mgr's compose.override.yml rather than replacing it:
+# agent-mgr is still the live path, and both existing at once is what keeps it
+# available as the rollback. They cannot run at the same time -- both name the
+# container `hermes` -- which is the point: two gateways on one home would share
+# a single auth.json and a single dotenv, and whichever started last would own
+# the chat.
+services:
+  hermes:
+    # Cold build needs the base first:
+    #   docker pull "$(awk '/^FROM/{print $2;exit}' Dockerfile)"
+    build: .
+    image: sams-str-hermes-agent:local
+    # Declared, not derived. scripts/no-nightly-running asks docker about this
+    # container by name and refuses to guess one, so the justfile's exported
+    # AGENT_CONTAINER has to match it -- a mismatch is a veto that always says
+    # yes, silently. The name carries no agent suffix because this agent
+    # predates that convention and renaming it would mean moving live state.
+    container_name: hermes
+    restart: unless-stopped
+    # Never pull. This tag names only what the build above produces, so a
+    # registry copy must never win: the default and `missing` both PULL when the
+    # local tag is absent, which would run a different image under this agent's
+    # credentials than the one anyone inspected.
+    pull_policy: never
+    environment:
+      # Who this agent is in the agent index.
+      AGENT_ID: str
+      # Every schedule in this repo is a Pacific wall-clock expression. The base
+      # sets no timezone, and under UTC `0 3 * * *` fires at 8 PM Pacific --
+      # peak guest messaging, the one window the nightly chain exists to avoid.
+      # Stated here rather than inherited from agent.env, which is being retired.
+      TZ: America/Los_Angeles
+    volumes:
+      # `.host`, not the path the agent reads: a bind carries this machine's
+      # ownership in, and a root cont-init step in the image copies the file
+      # into place as root itself. Outside the home on purpose -- this container
+      # fully controls the home, and could otherwise replace a path under it
+      # with a symlink to a sibling agent's credential.
+      - ${HOME}/.plow-credentials-str:/var/lib/plow/credentials.host:ro
+      # The home, and the reason nothing here mounts over a path the boot
+      # hardens: plow-init fchown()s SOUL.md and chmods the home and its skills
+      # on every boot, and a read-only mount at one of those fails EROFS and
+      # parks the boot before any gateway starts. A volume rather than a bind so
+      # it survives up/down and initialises from the image's payload while
+      # empty. `down -v` is forbidden on this agent: the home is 2.5 GB of
+      # conversation state, not a throwaway.
+      - agent-home:/var/lib/hermes
+      # The vault: per-property operations including access codes, never baked
+      # into an image. Declared AFTER the home so the nested mount resolves to
+      # this bind rather than to a path inside the volume -- docker resolves
+      # nested mounts longest-path-first, and this ordering makes that explicit
+      # rather than inherited. Verify it by reading a vault file from inside the
+      # container; `docker inspect` cannot tell you.
+      - ${HOME}/hermes-vault:/var/lib/hermes/repo/vault
+    # Hermes interrupts in-flight work on SIGTERM, then checkpoints the session
+    # and releases any compression lease before exiting. s6 allows it 30s --
+    # S6_SERVICES_GRACETIME=30000, baked into the base image and inherited here,
+    # verified with `docker image inspect`. Docker's outer deadline sits beyond
+    # that so s6 stays the owner of escalation; equal or lower and Docker kills
+    # the container mid-checkpoint, and the replacement gateway cannot append to
+    # that transcript until the orphaned lease expires.
+    stop_grace_period: 35s
+    # No ports. The dashboard stays off: publishing it means binding 0.0.0.0
+    # inside the container, which Hermes refuses without an auth provider
+    # because it holds API keys. The agent reaches Plow outbound.
+
+volumes:
+  agent-home:

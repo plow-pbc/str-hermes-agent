@@ -18,32 +18,41 @@ edit on every deploy — the failure #61 and #66 already recorded for other path
 Restoring after a rebuild is a deliberate copy; README § Skills Hermes wrote has
 the command.
 
-Three kinds of skill live in that store and only the third is ours:
+Two kinds of skill live in that store and only the second is ours:
 
-  bundled   shipped in the image, listed in `.bundled_manifest`, reproduced by
-            pulling the image. Off-limits to the review agent.
-  linked    copied in at container start by `docker/cont-init.d/03-link-wiki-
-            skills.sh` from the obsidian-wiki wheel; its ENABLED array is the
-            list. Reproduced by rebuilding.
+  bundled   shipped in the image and listed in `.bundled_manifest`, reproduced
+            by pulling the image. The wiki skills are in this set: the image
+            installs them into the base's bundled root at build time, so the
+            runtime records them like any other -- they used to be a third kind,
+            copied in at container start and enumerated by parsing a boot
+            script's ENABLED array, and one owner replaced two.
   authored  everything else — what Hermes wrote. Reproduced by nothing.
 
-So the classification is subtractive: whatever the image and the deploy cannot
-account for is what needs tracking. Both lists are read at run time rather than
-restated here, because a copy of either would drift silently and the drift
-would read as Hermes having written a skill it did not.
+So the classification is subtractive: whatever the image cannot account for is
+what needs tracking. The manifest is read at run time rather than restated here,
+because a copy would drift silently and the drift would read as Hermes having
+written a skill it did not.
+
+BAKED_SKILLS is the exception, and is restated: a skill this repo bakes appears
+in the manifest *because* the Dockerfile copies it from agent-skills/, and
+subtracting it by name would drop Hermes's next edit to a skill it modifies
+itself. Naming it makes this and the Dockerfile two owners of one fact, so a
+test holds them together.
 """
 from __future__ import annotations
 
 import os
 import pathlib
-import re
 import shutil
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SNAPSHOT = ROOT / "agent-skills"
-LINK_SCRIPT = ROOT / "docker" / "cont-init.d" / "03-link-wiki-skills.sh"
-ENABLED_BLOCK = re.compile(r"^ENABLED=\((.*?)^\)", re.MULTILINE | re.DOTALL)
+# The skill the Dockerfile bakes, and so the one the manifest reports as bundled
+# while Hermes still edits it in place. Named rather than discovered: the
+# Dockerfile alone decides what gets baked, and a second schema for working that
+# out earns nothing until a second self-modifying skill exists.
+BAKED_SKILLS = {"productivity/property-guest-messaging"}
 
 
 def refuse_in_the_deployed_clone(root: pathlib.Path) -> None:
@@ -93,24 +102,6 @@ def read_bundled(store: pathlib.Path) -> set[str]:
     }
 
 
-def read_linked(script: pathlib.Path) -> set[str]:
-    """Skill names the boot script copies in, from its ENABLED array.
-
-    Parsed from the script rather than duplicated, so enabling a wiki skill
-    stays a one-line edit there. Raises if the array cannot be found: a silent
-    empty set would report those skills as Hermes's own on the next run.
-    """
-    match = ENABLED_BLOCK.search(script.read_text())
-    if not match:
-        sys.exit(f"skills-snapshot: no ENABLED=( ... ) array in {script}")
-    return {
-        word
-        for line in match.group(1).splitlines()
-        for word in [line.split("#", 1)[0].strip()]
-        if word
-    }
-
-
 def find_skills(store: pathlib.Path) -> list[pathlib.Path]:
     """Every installed skill, as paths relative to the store.
 
@@ -130,27 +121,30 @@ def find_skills(store: pathlib.Path) -> list[pathlib.Path]:
 
 
 def authored(installed: list[pathlib.Path], bundled: set[str],
-             linked: set[str]) -> list[pathlib.Path]:
-    """The skills Hermes wrote: what neither the image nor the deploy owns.
+             baked: set[str]) -> list[pathlib.Path]:
+    """The skills Hermes wrote: what the image does not own.
 
-    Linked skills are matched by exact path. The boot script installs them at
-    the top of the store — `$SKILLS_DIR/$skill` — so there is no question which
-    directory a name means, and `research/llm-wiki` stays a different skill
-    from the `llm-wiki` the wheel supplies. They are different skills: one is
-    Karpathy's, bundled; the other is obsidian-wiki's.
+    A path in `baked` is authored whatever the manifest says. The image ships it
+    because this repo does, and it is exactly the kind Hermes edits in place --
+    subtracting it by name would drop the next edit silently, out of the
+    snapshot that exists so a rebuild does not lose it.
 
-    Bundled ones can only be matched by name, because the manifest records
-    names and not the categories the image files them under. That asymmetry is
-    what the exit below is for. One path carrying a bundled name is the bundled
-    skill. Two carrying it means one of them is and nothing here can say which,
-    so excluding both would drop a skill Hermes wrote — silently, and out of
-    the snapshot that exists to survive the rebuild. Stopping is the honest
-    answer, and the operator resolves it by renaming.
+    The rest are matched by name, because the manifest records names and not the
+    categories the image files them under. That asymmetry is what the exit below
+    is for. One path carrying a bundled name is the bundled skill. Two carrying
+    it means one of them is and nothing here can say which, so excluding both
+    would drop a skill Hermes wrote — silently, and out of the snapshot that
+    exists to survive the rebuild. Stopping is the honest answer, and the
+    operator resolves it by renaming.
+
+    Indexed from ALL installed paths, baked included: dropping those first
+    collapsed a genuine clash to one entry, so the run did not stop and the
+    authored namesake fell out of the final filter -- its name bundled, its path
+    not baked. The silent loss this exit exists to prevent, by the one route
+    that skipped it.
     """
-    rest = [path for path in installed if str(path) not in linked]
-
     by_name: dict[str, list[pathlib.Path]] = {}
-    for path in rest:
+    for path in installed:
         by_name.setdefault(path.name, []).append(path)
     ambiguous = sorted(
         str(path)
@@ -164,7 +158,8 @@ def authored(installed: list[pathlib.Path], bundled: set[str],
             "Rename the one Hermes wrote — otherwise it is not snapshotted."
         )
 
-    return [path for path in rest if path.name not in bundled]
+    return [path for path in installed
+            if str(path) in baked or path.name not in bundled]
 
 
 def mirror(store: pathlib.Path, skills: list[pathlib.Path],
@@ -195,7 +190,7 @@ def main() -> None:
         sys.exit(f"skills-snapshot: no skill store at {store}")
 
     installed = find_skills(store)
-    skills = authored(installed, read_bundled(store), read_linked(LINK_SCRIPT))
+    skills = authored(installed, read_bundled(store), BAKED_SKILLS)
     if not skills:
         # `mirror` rebuilds, so an empty result would delete the snapshot and
         # copy nothing back — and the run that produces it is the one this

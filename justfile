@@ -15,7 +15,45 @@
 # What stays here is what only this agent has: the wiki vault pipeline and the
 # skills it writes for itself.
 
+# The container compose.yml declares. scripts/no-nightly-running asks docker
+# about it by name and refuses to guess one, so the two have to agree;
+# compose.yml is where it is declared and this is the only place that repeats it.
+export AGENT_CONTAINER := "hermes"
+
+# The lifecycle. agent-mgr invoked scripts/no-nightly-running as
+# AGENT_PRE_TRANSITION before every `up`, `down` and `restart`; docker compose
+# has no such hook, so these recipes are the only thing left that can refuse.
+# Never reach for `docker compose` directly to stop or replace the container --
+# that is the bypass the veto exists to prevent.
+#
+# `-f compose.yml` is load-bearing, not tidiness: compose auto-loads
+# compose.override.yml whenever it sits beside compose.yml, and that override is
+# agent-mgr's -- it interpolates STR_REPO, STR_VAULT, AGENT_IMAGE and
+# AGENT_HOME_TARGET, which agent-mgr exports and nothing here does. Merged in,
+# every recipe below fails on a missing variable. Naming the one file is what
+# lets the outgoing path stay in the tree as the rollback.
+#
+# Why it refuses: a transition landing between a page write and its manifest
+# entry leaves the vault holding a page nothing recorded, and the next run
+# appends its facts a second time with nothing reporting it.
+up:
+    ./scripts/no-nightly-running
+    docker compose -f compose.yml up -d
+
+down:
+    ./scripts/no-nightly-running
+    docker compose -f compose.yml down
+
+restart:
+    ./scripts/no-nightly-running
+    docker compose -f compose.yml up -d --force-recreate
+
+# The image first: tests/test_image_contents.py and tests/test_vault_guard.py
+# assert against this exact tag, and without it 16 of them fail from a clean
+# checkout -- including the one that keeps the private vault out of a public
+# image, which passes while inspecting nothing.
 test:
+    docker build -q -t sams-str-hermes-agent:local .
     uv run --no-project --python 3.13 --with aiohttp==3.14.1 --with pytest==8.4.2 --with fastmcp==3.4.5 --with seam==1.209.0 pytest -q
 
 # Airbnb operations wiki — task runner.
@@ -130,18 +168,11 @@ test-wiki:
 
     # --entrypoint bash: the image's own entrypoint is the hermes CLI, so a bare
     # path argument is swallowed as a subcommand and the script never runs. That
-    # also skips s6, which at container start is what links the wiki skills the
-    # ingest turn needs — so run the linking script explicitly.
-    #
-    # Only that one script, not all of /etc/cont-init.d. It is the one this
-    # repo owns and ships, and it is plain bash. The other three are upstream's
-    # and are execline (`#!/command/with-contenv`): they need /command on PATH
-    # and the /run/s6 envdir that only s6's own boot creates, so a loop over the
-    # directory dies on the first of them before ever reaching this one. Nor can
-    # `--entrypoint /init` stand in — s6's boot also starts the gateway
+    # also skips s6, so nothing seeds the wiki skills into the home during this
+    # run — they have to be there already, which the assertion below checks.
+    # `--entrypoint /init` cannot stand in: s6's boot also starts the gateway
     # services, which have no TTY for the first-run setup prompt and take the
-    # container down with them. What those three configure is the gateway, which
-    # the nightly chain does not use.
+    # container down with them.
     #
     # --user: the same thing s6 does at a real container start, and skipping it
     # is the other half of skipping s6. The image's default user is root, but
@@ -149,7 +180,7 @@ test-wiki:
     # user: ~/.hermes/.env is mode 600, and anything written would come back
     # root-owned into a bind mount the host then cannot clean up.
     #
-    # Failures surface: if the skills the ingest turn needs were not linked,
+    # Failures surface: if the skills the ingest turn needs are not in the home,
     # the run must stop here rather than fail later as an unexplained empty
     # ingest. Output goes to the log with everything else.
     #
@@ -158,7 +189,7 @@ test-wiki:
     # $CV, not a repo-relative path — so this scratch vault comes in on a
     # per-run `-v` rather than widening what production hands the agent for
     # the sake of a test.
-    NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; /etc/cont-init.d/03-link-wiki-skills.sh || { echo \"linking the wiki skills failed\" >&2; exit 1; }; [ -d $HH/skills/wiki-digest ] || { echo \"the link script ran but the wiki skills are not linked\" >&2; exit 1; }; exec $HH/scripts/nightly.sh"
+    NIGHTLY="[ -e $CV/.e2e-vault-marker ] || { echo \"the vault at $CV is production, not the scratch vault — the -v did not replace compose's mount\" >&2; exit 1; }; [ -d $HH/skills/wiki-digest ] || { echo \"the wiki skills are not in $HH/skills — boot the container once so the runtime seeds them from the image\" >&2; exit 1; }; exec $HH/scripts/nightly.sh"
     #
     # No SOUL override any more, and none needed: this chain does not write the
     # SOUL at all. The vault mount above is the whole of what this run has to

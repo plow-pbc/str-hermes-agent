@@ -225,21 +225,35 @@ one disk, and change with no diff and no review.
 
 `just skills-snapshot` mirrors those skills into `agent-skills/`. Run it when
 Hermes says it patched something, read `git diff`, and commit what should
-survive. Three kinds of skill live in that store and the recipe keeps only the
-third: **bundled** ones from the image (`.bundled_manifest`), **linked** ones
-the boot script copies from the obsidian-wiki wheel
-(`docker/cont-init.d/03-link-wiki-skills.sh`), and whatever is left, which is
-Hermes's. Both lists are read at run time, so enabling a wiki skill does not
-start reporting it as agent-written.
+survive. Two kinds of skill live in that store and the recipe keeps only the
+second: **bundled** ones from the image, which `.bundled_manifest` lists — the
+wiki skills included, since the image installs them into the base's bundled
+root at build time — and whatever is left, which is Hermes's. That list is read
+at run time, so enabling a wiki skill does not start reporting it as
+agent-written.
 
-**`agent-skills/` is a record, not a source.** Nothing installs it back. The
-deploy owns `runtime/`, and owning these too would revert Hermes's next edit on
-every deploy — the failure `#61` and `#66` already record for other paths. So
-after a rebuild, restoring is a deliberate copy:
+**Except what this repo bakes.** A skill tracked here is Hermes's whatever the
+manifest says, because the image ships it *because* this directory does —
+`agent-skills/productivity/property-guest-messaging` is bundled and is one
+Hermes patches in place. Subtracting it by name like any other bundled skill
+would drop its next live edit from the snapshot silently, and lose it on the
+rebuild this recipe exists for.
+
+**`agent-skills/` is a record first, and a source only where the Dockerfile
+says so.** `COPY agent-skills/productivity/property-guest-messaging/` bakes that
+one into the image, so it *is* installed back — on the next build, not by a
+deploy step. Everything else here is a record and nothing installs it: owning
+those on deploy would revert Hermes's next edit every time, the failure `#61`
+and `#66` already record for other paths. So for a skill the image does not
+carry, restoring after a rebuild is a deliberate copy:
 
 ```sh
 cp -R agent-skills/. "$(agent-mgr resolve str | sed -n 's/^AGENT_HOME=//p')/skills/"
 ```
+
+The order matters when you commit one: an edit Hermes made lands in the image
+on the next build, so read the diff as a change to what every future container
+starts with, not just to this one's disk.
 
 Two things worth knowing before committing a snapshot. These skills are written
 from real sessions, so they can quote **guest first names and wording** — which

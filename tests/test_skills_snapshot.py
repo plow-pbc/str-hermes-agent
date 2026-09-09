@@ -8,6 +8,7 @@ is why the scripts tests import carry one and the ones they shell out to
 """
 import importlib.util
 import pathlib
+import re
 
 import pytest
 
@@ -38,41 +39,38 @@ def test_only_what_the_image_and_deploy_cannot_account_for_is_hermes_own(tmp_pat
     recognised as Hermes's — which is the point, since Hermes marks nothing."""
     store = store_with(tmp_path, [
         "productivity/airtable",            # bundled
-        "wiki-ingest",                      # linked by the boot script
+        "wiki-ingest",                      # bundled: the image installs it
         "productivity/property-guest-messaging",  # written by Hermes
-    ])
-    found = snap.authored(
-        snap.find_skills(store), snap.read_bundled(store), {"wiki-ingest"}
-    )
+    ], manifest=("airtable", "wiki-ingest"))
+    found = snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
     # The category it was filed under travels with it, so the snapshot mirrors
     # the store's shape rather than flattening every skill to one directory.
     assert found == [pathlib.Path("productivity/property-guest-messaging")]
 
 
-def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(tmp_path):
+@pytest.mark.parametrize(("case", "paths", "baked"), [
+    # The image's, and a distinct skill Hermes filed elsewhere.
+    ("neither side is ours", ["productivity/airtable", "guests/airtable"], set()),
+    # One side baked, which used to slip through: the index was built after baked
+    # paths were removed, so the pair collapsed to one entry and the run did not
+    # stop -- then the authored namesake fell out of the final filter, its name
+    # being bundled and its path not baked.
+    ("one side is baked",
+     [*snap.BAKED_SKILLS, "guests/property-guest-messaging"], snap.BAKED_SKILLS),
+])
+def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(
+        tmp_path, case, paths, baked):
     """The manifest carries names, not the categories the image files them
     under, so two paths sharing a bundled name are undecidable. Excluding both
     would discard whichever one Hermes wrote — silently, out of the snapshot
     that exists so a rebuild does not lose it."""
-    store = store_with(tmp_path, [
-        "productivity/airtable",  # the image's
-        "guests/airtable",        # a distinct skill Hermes filed elsewhere
-    ], manifest=("airtable",))
+    store = store_with(tmp_path, paths, manifest=(pathlib.Path(paths[0]).name,))
     with pytest.raises(SystemExit) as exit:
-        snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
+        snap.authored(snap.find_skills(store), snap.read_bundled(store), baked)
     # Both paths are named, since resolving it means renaming one of them.
-    assert "guests/airtable" in str(exit.value)
-    assert "productivity/airtable" in str(exit.value)
+    for path in paths:
+        assert path in str(exit.value), case
 
-
-def test_a_linked_skill_is_matched_by_path_so_its_namesake_elsewhere_is_not(tmp_path):
-    """The live store holds two different skills called llm-wiki: Karpathy's at
-    research/llm-wiki, bundled, and obsidian-wiki's at the top level, which the
-    boot script installs there. Matched by name the pair would read as
-    ambiguous; by path, each is accounted for by the owner that put it there."""
-    store = store_with(tmp_path, ["llm-wiki", "research/llm-wiki"],
-                       manifest=("llm-wiki",))
-    assert snap.authored(snap.find_skills(store), {"llm-wiki"}, {"llm-wiki"}) == []
 
 
 def test_a_symlink_in_a_skill_is_recorded_as_a_link_not_as_its_target(tmp_path):
@@ -98,23 +96,6 @@ def test_a_missing_manifest_stops_the_run_rather_than_claiming_every_skill(tmp_p
     store = store_with(tmp_path, ["productivity/airtable"], manifest=None)
     with pytest.raises(SystemExit):
         snap.read_bundled(store)
-
-
-def test_the_enabled_list_is_read_from_the_boot_script_that_installs_them():
-    """Parsed, not restated: the boot script's ENABLED array is what actually
-    lands those skills on the host, so enabling one stays a single edit there.
-    A stale copy here would report a deploy-owned skill as Hermes's own."""
-    linked = snap.read_linked(ROOT / "docker" / "cont-init.d" / "03-link-wiki-skills.sh")
-    assert linked == {"llm-wiki", "wiki-ingest", "wiki-lint", "wiki-digest", "wiki-query"}
-
-
-def test_a_missing_enabled_array_stops_the_run(tmp_path):
-    """Same failure shape as the manifest: an empty set silently promotes every
-    wiki skill into the snapshot as though Hermes had written it."""
-    script = tmp_path / "03-link-wiki-skills.sh"
-    script.write_text("#!/usr/bin/env bash\nSKILLS=(a b)\n")
-    with pytest.raises(SystemExit):
-        snap.read_linked(script)
 
 
 def test_the_deployed_clone_is_refused_and_a_development_one_is_not(tmp_path, monkeypatch):
@@ -146,14 +127,41 @@ def test_a_store_with_nothing_authored_does_not_empty_the_snapshot(tmp_path):
     exactly the state that produces one. main refuses before mirroring."""
     store = store_with(tmp_path, ["productivity/airtable"], manifest=("airtable",))
     snapshot = tmp_path / "agent-skills"
-    snap.mirror(store, snap.find_skills(store), snapshot)
+    # What the rebuild wiped from the store while the record still holds it.
+    # Seeded directly rather than by mirroring the whole store: mirror is fed
+    # `authored`, never `find_skills`, so a snapshot holding a bundled skill is
+    # a state main cannot produce -- and one that now reads as repo-owned.
+    (snapshot / "guests/late-checkout").mkdir(parents=True)
+    (snapshot / "guests/late-checkout" / "SKILL.md").write_text("# recorded\n")
 
     monkey = pytest.MonkeyPatch()
     monkey.setattr(snap, "SNAPSHOT", snapshot)
     monkey.setattr(snap, "ROOT", tmp_path)
     monkey.setattr(snap, "skills_dir", lambda: store)
-    monkey.setattr(snap, "read_linked", lambda _: set())
     with pytest.raises(SystemExit):
         snap.main()
     monkey.undo()
-    assert (snapshot / "productivity/airtable/SKILL.md").exists()
+    assert (snapshot / "guests/late-checkout/SKILL.md").exists()
+
+
+def test_a_skill_this_repo_bakes_stays_hermes_own(tmp_path):
+    """property-guest-messaging is bundled BECAUSE the Dockerfile bakes it from
+    agent-skills/, and it is one Hermes edits in place. Subtracted by name like
+    any other bundled skill, its next live edit is dropped from the snapshot and
+    lost on the rebuild this script exists for."""
+    (path,) = snap.BAKED_SKILLS
+    store = store_with(tmp_path, ["productivity/airtable", path],
+                       manifest=("airtable", pathlib.Path(path).name))
+    assert snap.authored(snap.find_skills(store), snap.read_bundled(store),
+                         snap.BAKED_SKILLS) == [pathlib.Path(path)]
+
+
+
+def test_the_named_baked_skill_is_the_one_the_dockerfile_bakes():
+    """BAKED_SKILLS is named rather than discovered, which makes it and the
+    Dockerfile two owners of one fact. Baking a second self-modifying skill
+    without listing it here would drop its live edits from the snapshot
+    silently -- the data loss the constant exists to prevent, one skill over."""
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert set(re.findall(r"^COPY agent-skills/(.+?)/ ", dockerfile, re.M)) \
+        == snap.BAKED_SKILLS

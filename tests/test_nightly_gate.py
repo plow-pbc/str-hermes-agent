@@ -67,8 +67,11 @@ def _fake_docker(tmp_path, *, running=True, exec_status=1, container="hermes"):
         # printing the key yields an empty value -- and this `:?` refusal is the
         # only thing that turns that into a non-zero exit and short-circuits the
         # `&&`. Soften it and that path starts a second nightly beside a live
-        # one with every other row still green.
-        pytest.param(True, 1, None, False, "run me through agent-mgr", id="no-container"),
+        # one with every other row still green. Matched on the variable name
+        # rather than the sentence: which caller the refusal points at changed
+        # when the justfile became the second one, and the contract here is that
+        # it refuses, not how it words it.
+        pytest.param(True, 1, None, False, "AGENT_CONTAINER", id="no-container"),
     ],
 )
 def test_guard_outcomes(tmp_path, running, exec_status, container, ok, error):
