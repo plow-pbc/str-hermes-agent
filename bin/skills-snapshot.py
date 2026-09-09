@@ -18,27 +18,26 @@ edit on every deploy — the failure #61 and #66 already recorded for other path
 Restoring after a rebuild is a deliberate copy; README § Skills Hermes wrote has
 the command.
 
-Three kinds of skill live in that store and only the third is ours:
+Two kinds of skill live in that store and only the second is ours:
 
-  bundled   shipped in the image, listed in `.bundled_manifest`, reproduced by
-            pulling the image -- UNLESS this repo is why the image ships it.
-            A skill tracked under agent-skills/ is authored whatever the
-            manifest says: property-guest-messaging is bundled *because* the
-            Dockerfile bakes it from here, and it is one Hermes edits itself,
-            so subtracting it by name would drop the next edit silently and
-            lose it on the rebuild this whole script exists for.
-            The wiki skills
-            are in this set now: the image installs them into the base's
-            bundled root at build time, so the runtime records them in the
-            manifest like any other. They used to be a third kind, copied in at
-            container start from the obsidian-wiki wheel and enumerated by
-            parsing the boot script's ENABLED array — one owner replaced two.
+  bundled   shipped in the image and listed in `.bundled_manifest`, reproduced
+            by pulling the image. The wiki skills are in this set: the image
+            installs them into the base's bundled root at build time, so the
+            runtime records them like any other -- they used to be a third kind,
+            copied in at container start and enumerated by parsing a boot
+            script's ENABLED array, and one owner replaced two.
   authored  everything else — what Hermes wrote. Reproduced by nothing.
 
 So the classification is subtractive: whatever the image cannot account for is
-what needs tracking. The list is read at run time rather than restated here,
+what needs tracking. The manifest is read at run time rather than restated here,
 because a copy would drift silently and the drift would read as Hermes having
 written a skill it did not.
+
+BAKED_SKILLS is the exception, and is restated: a skill this repo bakes appears
+in the manifest *because* the Dockerfile copies it from agent-skills/, and
+subtracting it by name would drop Hermes's next edit to a skill it modifies
+itself. Naming it makes this and the Dockerfile two owners of one fact, so a
+test holds them together.
 """
 from __future__ import annotations
 
@@ -49,6 +48,11 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SNAPSHOT = ROOT / "agent-skills"
+# The skill the Dockerfile bakes, and so the one the manifest reports as bundled
+# while Hermes still edits it in place. Named rather than discovered: the
+# Dockerfile alone decides what gets baked, and a second schema for working that
+# out earns nothing until a second self-modifying skill exists.
+BAKED_SKILLS = {"productivity/property-guest-messaging"}
 
 
 def refuse_in_the_deployed_clone(root: pathlib.Path) -> None:
@@ -116,26 +120,14 @@ def find_skills(store: pathlib.Path) -> list[pathlib.Path]:
     return sorted(md.parent.relative_to(store) for md in store.rglob("SKILL.md"))
 
 
-def tracked(snapshot: pathlib.Path) -> set[str]:
-    """Skill paths this repo already tracks under agent-skills/.
-
-    Read from the checkout rather than restated, so baking a second skill needs
-    no edit here. These are authored by definition: the image ships them because
-    this repo does, and the manifest cannot tell that apart from the base's own.
-    """
-    if not snapshot.is_dir():
-        return set()
-    return {str(md.parent.relative_to(snapshot)) for md in snapshot.rglob("SKILL.md")}
-
-
 def authored(installed: list[pathlib.Path], bundled: set[str],
-             repo_owned: set[str]) -> list[pathlib.Path]:
+             baked: set[str]) -> list[pathlib.Path]:
     """The skills Hermes wrote: what the image does not own.
 
-    A path in `repo_owned` is authored whatever the manifest says. The image
-    ships it because this repo does, and it is exactly the kind Hermes edits in
-    place -- subtracting it by name would drop the next edit silently, out of
-    the snapshot that exists so a rebuild does not lose it.
+    A path in `baked` is authored whatever the manifest says. The image ships it
+    because this repo does, and it is exactly the kind Hermes edits in place --
+    subtracting it by name would drop the next edit silently, out of the
+    snapshot that exists so a rebuild does not lose it.
 
     The rest are matched by name, because the manifest records names and not the categories
     the image files them under. That asymmetry is what the exit below is for.
@@ -145,7 +137,7 @@ def authored(installed: list[pathlib.Path], bundled: set[str],
     the snapshot that exists to survive the rebuild. Stopping is the honest
     answer, and the operator resolves it by renaming.
     """
-    rest = [path for path in installed if str(path) not in repo_owned]
+    rest = [path for path in installed if str(path) not in baked]
 
     by_name: dict[str, list[pathlib.Path]] = {}
     for path in rest:
@@ -163,7 +155,7 @@ def authored(installed: list[pathlib.Path], bundled: set[str],
         )
 
     return [path for path in installed
-            if str(path) in repo_owned or path.name not in bundled]
+            if str(path) in baked or path.name not in bundled]
 
 
 def mirror(store: pathlib.Path, skills: list[pathlib.Path],
@@ -194,7 +186,7 @@ def main() -> None:
         sys.exit(f"skills-snapshot: no skill store at {store}")
 
     installed = find_skills(store)
-    skills = authored(installed, read_bundled(store), tracked(SNAPSHOT))
+    skills = authored(installed, read_bundled(store), BAKED_SKILLS)
     if not skills:
         # `mirror` rebuilds, so an empty result would delete the snapshot and
         # copy nothing back — and the run that produces it is the one this

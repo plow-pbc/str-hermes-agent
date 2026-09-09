@@ -51,18 +51,15 @@ link_payload() {
 link_payload /opt/plow/str/bin scripts
 link_payload /opt/plow/str/mcp-seam mcp-seam
 
-# Only on a home this image manages, and the link above is exactly that signal:
-# link_payload creates it and leaves a directory someone else mounted alone, so
-# `scripts` being OUR symlink means nothing else is staging into this home.
-# While agent-mgr owns the lifecycle it also stages SOUL and config into the
-# bind-mounted home on every deploy -- restoring the image's copies over those
-# would silently revert a deploy on the next recreate, which is the failure this
-# whole seam exists to avoid the mirror image of.
+# Only on a home this image manages, and the link above is that signal:
+# link_payload made it, and leaves a directory someone else mounted alone. While
+# agent-mgr owns the lifecycle it stages SOUL and config into the bind-mounted
+# home on every deploy, and restoring the image's copies over those would revert
+# a deploy on the next recreate -- the mirror of the staleness this seam fixes.
 #
-# Unconditional on that path, because overwriting the stale copy a volume kept is
-# the entire point (plow-hermes-agent#58). Root-owned and 0644: harden_home()
-# re-asserts exactly that on SOUL.md a moment later, and plow-init rewrites the
-# keys it owns in config.yaml after this, so nothing here drifts from what boots.
+# Unconditional on that path: overwriting the stale copy a volume kept is the
+# entire point (#58). Root-owned 0644, which harden_home() re-asserts on SOUL.md
+# moments later; plow-init rewrites its own keys in config.yaml after this.
 if [ -L "$home/scripts" ]; then
   install -o root -g root -m 0644 -t "$home" \
     /opt/plow/str/home/SOUL.md /opt/plow/str/home/config.yaml

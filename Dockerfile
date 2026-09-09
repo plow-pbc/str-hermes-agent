@@ -118,11 +118,9 @@ RUN chown -R root:root /opt/plow \
 # cont-init, both ways round. Nothing else here fails: on the live agent's own
 # boot log all three of the base's cont-init scripts exit 0.
 # Plain COPY, not `COPY --chmod`: that option requires BuildKit, and on a stock
-# builder the build dies here -- before pytest ever collects, so the whole gate
-# reads as a build failure rather than a test result. Both scripts are tracked
-# 100755, so the executable bit travels with them; the chmod below normalises the
-# rest, because a plain COPY carries the checkout's umask and a group-writable
-# boot script would otherwise depend on which machine built the image.
+# builder the build dies here, before pytest collects. Both scripts are tracked
+# 100755 so the executable bit travels; the chmod below normalises the rest,
+# which a plain COPY would otherwise take from the builder's umask.
 COPY docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
 
 # The one image-to-home seam. Everything above is authoritative under /opt/plow

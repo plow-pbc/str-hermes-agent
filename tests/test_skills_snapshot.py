@@ -8,6 +8,7 @@ is why the scripts tests import carry one and the ones they shell out to
 """
 import importlib.util
 import pathlib
+import re
 
 import pytest
 
@@ -139,27 +140,19 @@ def test_a_skill_this_repo_bakes_stays_hermes_own(tmp_path):
     agent-skills/, and it is one Hermes edits in place. Subtracted by name like
     any other bundled skill, its next live edit is dropped from the snapshot and
     lost on the rebuild this script exists for."""
-    path = "productivity/property-guest-messaging"
+    (path,) = snap.BAKED_SKILLS
     store = store_with(tmp_path, ["productivity/airtable", path],
-                       manifest=("airtable", "property-guest-messaging"))
-    snapshot = tmp_path / "agent-skills"
-    (snapshot / path).mkdir(parents=True)
-    (snapshot / path / "SKILL.md").write_text("# tracked here\n")
-
-    assert snap.tracked(snapshot) == {path}
+                       manifest=("airtable", pathlib.Path(path).name))
     assert snap.authored(snap.find_skills(store), snap.read_bundled(store),
-                         snap.tracked(snapshot)) == [pathlib.Path(path)]
+                         snap.BAKED_SKILLS) == [pathlib.Path(path)]
 
 
-def test_a_repo_owned_path_settles_a_name_that_would_be_ambiguous(tmp_path):
-    """Two paths sharing a bundled name normally stop the run, because nothing
-    can say which is Hermes's. When this repo tracks one of them, something
-    can."""
-    store = store_with(tmp_path, ["productivity/airtable", "guests/airtable"],
-                       manifest=("airtable",))
-    snapshot = tmp_path / "agent-skills"
-    (snapshot / "guests/airtable").mkdir(parents=True)
-    (snapshot / "guests/airtable" / "SKILL.md").write_text("# ours\n")
 
-    assert snap.authored(snap.find_skills(store), snap.read_bundled(store),
-                         snap.tracked(snapshot)) == [pathlib.Path("guests/airtable")]
+def test_the_named_baked_skill_is_the_one_the_dockerfile_bakes():
+    """BAKED_SKILLS is named rather than discovered, which makes it and the
+    Dockerfile two owners of one fact. Baking a second self-modifying skill
+    without listing it here would drop its live edits from the snapshot
+    silently -- the data loss the constant exists to prevent, one skill over."""
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert set(re.findall(r"^COPY agent-skills/(.+?)/ ", dockerfile, re.M)) \
+        == snap.BAKED_SKILLS
