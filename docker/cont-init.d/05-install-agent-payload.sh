@@ -61,8 +61,17 @@ link_payload /opt/plow/str/mcp-seam mcp-seam
 # entire point (#58). Root-owned 0644, which harden_home() re-asserts on SOUL.md
 # moments later; plow-init rewrites its own keys in config.yaml after this.
 if [ -L "$home/scripts" ]; then
-  install -o root -g root -m 0644 -t "$home" \
-    /opt/plow/str/home/SOUL.md /opt/plow/str/home/config.yaml
+  # Two owners, deliberately. harden_home() fchown()s SOUL.md to 0:0 on every
+  # boot, so root is right there. config.yaml is the AGENT's: plow-init rewrites
+  # it as the agent rather than as root -- its own comment says so -- and $home
+  # carries the sticky bit, so a root-owned config.yaml is one the agent cannot
+  # replace. Installing it root-owned parks the boot on
+  # `PermissionError: os.replace('config.yaml.tmp' -> 'config.yaml')`,
+  # after cont-init has already reported success. The base ships it 0640
+  # agent-owned; match that.
+  install -o root -g root -m 0644 -t "$home" /opt/plow/str/home/SOUL.md
+  install -o "$(id -u hermes)" -g "$(id -g hermes)" -m 0640 -t "$home" \
+    /opt/plow/str/home/config.yaml
 else
   echo "str: $home/scripts is not ours -- leaving SOUL.md and config.yaml to the deploy that staged them." >&2
 fi
