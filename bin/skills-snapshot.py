@@ -129,18 +129,22 @@ def authored(installed: list[pathlib.Path], bundled: set[str],
     subtracting it by name would drop the next edit silently, out of the
     snapshot that exists so a rebuild does not lose it.
 
-    The rest are matched by name, because the manifest records names and not the categories
-    the image files them under. That asymmetry is what the exit below is for.
-    One path carrying a bundled name is the bundled skill. Two carrying it
-    means one of them is and nothing here can say which,
-    so excluding both would drop a skill Hermes wrote — silently, and out of
-    the snapshot that exists to survive the rebuild. Stopping is the honest
-    answer, and the operator resolves it by renaming.
-    """
-    rest = [path for path in installed if str(path) not in baked]
+    The rest are matched by name, because the manifest records names and not the
+    categories the image files them under. That asymmetry is what the exit below
+    is for. One path carrying a bundled name is the bundled skill. Two carrying
+    it means one of them is and nothing here can say which, so excluding both
+    would drop a skill Hermes wrote — silently, and out of the snapshot that
+    exists to survive the rebuild. Stopping is the honest answer, and the
+    operator resolves it by renaming.
 
+    Indexed from ALL installed paths, baked included: dropping those first
+    collapsed a genuine clash to one entry, so the run did not stop and the
+    authored namesake fell out of the final filter -- its name bundled, its path
+    not baked. The silent loss this exit exists to prevent, by the one route
+    that skipped it.
+    """
     by_name: dict[str, list[pathlib.Path]] = {}
-    for path in rest:
+    for path in installed:
         by_name.setdefault(path.name, []).append(path)
     ambiguous = sorted(
         str(path)

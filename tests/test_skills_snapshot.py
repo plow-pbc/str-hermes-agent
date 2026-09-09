@@ -48,20 +48,29 @@ def test_only_what_the_image_and_deploy_cannot_account_for_is_hermes_own(tmp_pat
     assert found == [pathlib.Path("productivity/property-guest-messaging")]
 
 
-def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(tmp_path):
+@pytest.mark.parametrize(("case", "paths", "baked"), [
+    # The image's, and a distinct skill Hermes filed elsewhere.
+    ("neither side is ours", ["productivity/airtable", "guests/airtable"], set()),
+    # One side baked, which used to slip through: the index was built after baked
+    # paths were removed, so the pair collapsed to one entry and the run did not
+    # stop -- then the authored namesake fell out of the final filter, its name
+    # being bundled and its path not baked.
+    ("one side is baked",
+     [*snap.BAKED_SKILLS, "guests/property-guest-messaging"], snap.BAKED_SKILLS),
+])
+def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(
+        tmp_path, case, paths, baked):
     """The manifest carries names, not the categories the image files them
     under, so two paths sharing a bundled name are undecidable. Excluding both
     would discard whichever one Hermes wrote — silently, out of the snapshot
     that exists so a rebuild does not lose it."""
-    store = store_with(tmp_path, [
-        "productivity/airtable",  # the image's
-        "guests/airtable",        # a distinct skill Hermes filed elsewhere
-    ], manifest=("airtable",))
+    store = store_with(tmp_path, paths, manifest=(pathlib.Path(paths[0]).name,))
     with pytest.raises(SystemExit) as exit:
-        snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
+        snap.authored(snap.find_skills(store), snap.read_bundled(store), baked)
     # Both paths are named, since resolving it means renaming one of them.
-    assert "guests/airtable" in str(exit.value)
-    assert "productivity/airtable" in str(exit.value)
+    for path in paths:
+        assert path in str(exit.value), case
+
 
 
 def test_a_symlink_in_a_skill_is_recorded_as_a_link_not_as_its_target(tmp_path):
