@@ -30,3 +30,41 @@ ENV PATH="/opt/wiki-venv/bin:${PATH}"
 # skills work around this by syncing in at boot; this does the same for ours.
 COPY docker/cont-init.d/03-link-wiki-skills.sh /etc/cont-init.d/03-link-wiki-skills.sh
 RUN chmod +x /etc/cont-init.d/03-link-wiki-skills.sh
+
+# The persona and the declarative half of this deployment's home. COPY'd rather
+# than mounted: plow-init's harden_home() fchown()s /var/lib/hermes/SOUL.md on
+# every boot, so a read-only mount at that path fails EROFS, plow-init parks and
+# no gateway starts. Both stay inert under agent-mgr's ~/.hermes bind mount;
+# they are what a named-volume home initialises from.
+#
+# config.yaml carries overrides only. Every base-owned key -- mcp_servers.plow,
+# model.*, display, agent.api_max_retries, cron.model_drift_guard,
+# tools.tool_search -- is re-asserted by plow-init on every boot, so declaring
+# one here could only drift from what actually runs.
+COPY runtime/SOUL.md runtime/config.yaml /var/lib/hermes/
+RUN chmod 0644 /var/lib/hermes/SOUL.md /var/lib/hermes/config.yaml
+
+# This agent's own skill, under the base's bundled root rather than in the home.
+# tools/skills_sync.py rglobs /opt/hermes/skills for SKILL.md and reconciles
+# what it finds into $HERMES_HOME/skills preserving the category path, so a
+# volume home still receives this and an image update still reaches a copy the
+# agent has not customised. A copy written into the home at build time would be
+# masked by whatever mounts over it.
+COPY agent-skills/productivity/property-guest-messaging/ /opt/hermes/skills/productivity/property-guest-messaging/
+RUN chmod -R a=rX,u+w /opt/hermes/skills/productivity/property-guest-messaging
+
+# What the host used to hand in: compose.override.yml bind-mounted bin/ and
+# mcp-seam/ off the deploy clone, and the deploy hook copied the vault seed from
+# it. A published image has no deploy clone, so it carries them.
+#
+# Root-owned under /opt/plow, the pattern life-assistant-hermes-agent uses for
+# the same reason: everything under $HERMES_HOME/skills belongs to the agent's
+# uid in a running container, so code scheduled from there is code one turn can
+# rewrite. These the agent can read and cannot change.
+COPY bin/ /opt/plow/str/bin/
+COPY mcp-seam/ /opt/plow/str/mcp-seam/
+COPY runtime/vault-seed/ /opt/plow/str/vault-seed/
+RUN chown -R root:root /opt/plow \
+ && find /opt/plow -type d -exec chmod 0755 {} + \
+ && find /opt/plow -type f -exec chmod 0644 {} + \
+ && find /opt/plow/str/bin -type f -exec chmod 0755 {} +

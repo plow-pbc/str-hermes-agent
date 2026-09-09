@@ -5,7 +5,22 @@
 # context — every `docker compose build` would otherwise hand the daemon the
 # lot, and any later `COPY .` would bake it into a layer.
 #
-# The Dockerfile copies exactly one file. Deny everything, then name it.
+# Deny everything, then name what the Dockerfile copies. A COPY of a path
+# missing from this list fails the build, which is the right way round: the
+# vault is what must never reach a published image, and it can only get there
+# by being named here.
 *
 !Dockerfile
 !docker/cont-init.d/03-link-wiki-skills.sh
+!runtime/SOUL.md
+!runtime/config.yaml
+!runtime/vault-seed
+!agent-skills/productivity/property-guest-messaging
+!bin
+!mcp-seam
+
+# Last match wins, so these come after the allowlist above: a `!bin` that
+# re-includes the directory re-includes whatever a local run left in it, and a
+# .pyc can carry a value compiled before an edit.
+**/__pycache__
+**/*.py[co]
