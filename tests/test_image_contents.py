@@ -74,14 +74,26 @@ def test_no_vault_content_is_baked():
     is a copyright name in two of the base's C headers, so the bare word
     reports a hit on a clean image and would be read as noise the first time it
     mattered. `henderson-ave` is spelled by the vault and nothing else.
+
+    Content AND names. `grep -l` matches contents only, and a mutation test
+    baking `henderson-ave-access-and-backup-codes.md` with unrelated text inside
+    it passed a content-only gate -- while the filename alone leaks the property
+    and the fact that its access codes exist. Six files in the live vault carry
+    the slug in their name; fifteen carry it in their text.
+
+    Through `_sh`, which is `check=True`: a raw subprocess.run reads a docker
+    that never ran as empty output, and empty output is what this test wants --
+    so the gate between the vault and a public registry passed while inspecting
+    nothing. It has to fail closed, because the condition that silences it (no
+    local image) is the ordinary state of a clean checkout.
     """
-    out = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "sh", IMAGE, "-c",
-         "grep -ril henderson-ave / --exclude-dir=proc --exclude-dir=sys "
-         "--exclude-dir=dev 2>/dev/null | head -5"],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    assert out == "", f"property data found in the image: {out}"
+    pseudo = "--exclude-dir=proc --exclude-dir=sys --exclude-dir=dev"
+    hits = _sh(
+        f"{{ grep -ril henderson-ave / {pseudo} 2>/dev/null; "
+        "find / -name '*henderson-ave*' -not -path '/proc/*' -not -path '/sys/*' "
+        "-not -path '/dev/*' 2>/dev/null; } | sort -u | head -5"
+    ).strip()
+    assert hits == "", f"property data found in the image: {hits}"
 
 
 # The wheel ships 37 wiki skills; these five are what this agent uses. The read
