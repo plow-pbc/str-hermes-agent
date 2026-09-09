@@ -225,12 +225,12 @@ one disk, and change with no diff and no review.
 
 `just skills-snapshot` mirrors those skills into `agent-skills/`. Run it when
 Hermes says it patched something, read `git diff`, and commit what should
-survive. Three kinds of skill live in that store and the recipe keeps only the
-third: **bundled** ones from the image (`.bundled_manifest`), **linked** ones
-the boot script copies from the obsidian-wiki wheel
-(`docker/cont-init.d/03-link-wiki-skills.sh`), and whatever is left, which is
-Hermes's. Both lists are read at run time, so enabling a wiki skill does not
-start reporting it as agent-written.
+survive. Two kinds of skill live in that store and the recipe keeps only the
+second: **bundled** ones from the image, which `.bundled_manifest` lists — the
+wiki skills included, since the image installs them into the base's bundled
+root at build time — and whatever is left, which is Hermes's. That list is read
+at run time, so enabling a wiki skill does not start reporting it as
+agent-written.
 
 **`agent-skills/` is a record, not a source.** Nothing installs it back. The
 deploy owns `runtime/`, and owning these too would revert Hermes's next edit on

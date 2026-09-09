@@ -11,7 +11,6 @@
 # by being named here.
 *
 !Dockerfile
-!docker/cont-init.d/03-link-wiki-skills.sh
 !runtime/SOUL.md
 !runtime/config.yaml
 !runtime/vault-seed

@@ -38,12 +38,10 @@ def test_only_what_the_image_and_deploy_cannot_account_for_is_hermes_own(tmp_pat
     recognised as Hermes's — which is the point, since Hermes marks nothing."""
     store = store_with(tmp_path, [
         "productivity/airtable",            # bundled
-        "wiki-ingest",                      # linked by the boot script
+        "wiki-ingest",                      # bundled: the image installs it
         "productivity/property-guest-messaging",  # written by Hermes
-    ])
-    found = snap.authored(
-        snap.find_skills(store), snap.read_bundled(store), {"wiki-ingest"}
-    )
+    ], manifest=("airtable", "wiki-ingest"))
+    found = snap.authored(snap.find_skills(store), snap.read_bundled(store))
     # The category it was filed under travels with it, so the snapshot mirrors
     # the store's shape rather than flattening every skill to one directory.
     assert found == [pathlib.Path("productivity/property-guest-messaging")]
@@ -59,20 +57,10 @@ def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(tmp_p
         "guests/airtable",        # a distinct skill Hermes filed elsewhere
     ], manifest=("airtable",))
     with pytest.raises(SystemExit) as exit:
-        snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
+        snap.authored(snap.find_skills(store), snap.read_bundled(store))
     # Both paths are named, since resolving it means renaming one of them.
     assert "guests/airtable" in str(exit.value)
     assert "productivity/airtable" in str(exit.value)
-
-
-def test_a_linked_skill_is_matched_by_path_so_its_namesake_elsewhere_is_not(tmp_path):
-    """The live store holds two different skills called llm-wiki: Karpathy's at
-    research/llm-wiki, bundled, and obsidian-wiki's at the top level, which the
-    boot script installs there. Matched by name the pair would read as
-    ambiguous; by path, each is accounted for by the owner that put it there."""
-    store = store_with(tmp_path, ["llm-wiki", "research/llm-wiki"],
-                       manifest=("llm-wiki",))
-    assert snap.authored(snap.find_skills(store), {"llm-wiki"}, {"llm-wiki"}) == []
 
 
 def test_a_symlink_in_a_skill_is_recorded_as_a_link_not_as_its_target(tmp_path):
@@ -98,23 +86,6 @@ def test_a_missing_manifest_stops_the_run_rather_than_claiming_every_skill(tmp_p
     store = store_with(tmp_path, ["productivity/airtable"], manifest=None)
     with pytest.raises(SystemExit):
         snap.read_bundled(store)
-
-
-def test_the_enabled_list_is_read_from_the_boot_script_that_installs_them():
-    """Parsed, not restated: the boot script's ENABLED array is what actually
-    lands those skills on the host, so enabling one stays a single edit there.
-    A stale copy here would report a deploy-owned skill as Hermes's own."""
-    linked = snap.read_linked(ROOT / "docker" / "cont-init.d" / "03-link-wiki-skills.sh")
-    assert linked == {"llm-wiki", "wiki-ingest", "wiki-lint", "wiki-digest", "wiki-query"}
-
-
-def test_a_missing_enabled_array_stops_the_run(tmp_path):
-    """Same failure shape as the manifest: an empty set silently promotes every
-    wiki skill into the snapshot as though Hermes had written it."""
-    script = tmp_path / "03-link-wiki-skills.sh"
-    script.write_text("#!/usr/bin/env bash\nSKILLS=(a b)\n")
-    with pytest.raises(SystemExit):
-        snap.read_linked(script)
 
 
 def test_the_deployed_clone_is_refused_and_a_development_one_is_not(tmp_path, monkeypatch):
@@ -152,7 +123,6 @@ def test_a_store_with_nothing_authored_does_not_empty_the_snapshot(tmp_path):
     monkey.setattr(snap, "SNAPSHOT", snapshot)
     monkey.setattr(snap, "ROOT", tmp_path)
     monkey.setattr(snap, "skills_dir", lambda: store)
-    monkey.setattr(snap, "read_linked", lambda _: set())
     with pytest.raises(SystemExit):
         snap.main()
     monkey.undo()

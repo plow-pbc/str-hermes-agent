@@ -82,3 +82,41 @@ def test_no_vault_content_is_baked():
         capture_output=True, text=True,
     ).stdout.strip()
     assert out == "", f"property data found in the image: {out}"
+
+
+# The wheel ships 37 wiki skills; these five are what this agent uses. The read
+# side is named first because for three weeks it was missing entirely -- the
+# enabled set was four write-side skills, so the vault was compiled nightly and
+# the agent had no retrieval tool at all.
+ENABLED_WIKI_SKILLS = ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest")
+
+
+@pytest.mark.parametrize("skill", ENABLED_WIKI_SKILLS)
+def test_the_wiki_skills_the_agent_uses_ship_in_the_image(skill):
+    """Installed at build time into the root the runtime reconciles from.
+
+    They used to be copied into $HERMES_HOME/skills at container start by
+    docker/cont-init.d/03-link-wiki-skills.sh, which exited 1 on every boot: a
+    plain `#!/usr/bin/env bash` cont-init script gets s6's own environment, not
+    the container's, so its `${HERMES_HOME:?}` was never set. A build-time
+    install needs no environment and no home, and it is the same job the layer
+    that ships every other bundled skill already does.
+
+    Flat, as siblings directly under the root, because that is where the link
+    script put them: skills_sync preserves the path it finds a skill at, so the
+    running agent's skills keep the names it knows them by.
+    """
+    assert _sh(f"test -s /opt/hermes/skills/{skill}/SKILL.md && echo present").strip() == "present"
+
+
+def test_the_theory_skill_comes_from_the_base_rather_than_the_wheel():
+    """llm-wiki is in the enabled set the agent uses but not in the list above.
+
+    Measured against this image: skills_sync keys a relocation on SKILL.md's
+    frontmatter name, so a second `name: llm-wiki` under the bundled root is
+    relocated onto the base's research/llm-wiki and then overwritten by the
+    base's own content. Installing the wheel's copy would be inert while
+    reading like a delivery, so the base owns this one and this asserts the
+    agent still gets it.
+    """
+    assert _sh("test -s /opt/hermes/skills/research/llm-wiki/SKILL.md && echo present").strip() == "present"

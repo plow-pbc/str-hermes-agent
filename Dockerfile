@@ -25,11 +25,36 @@ RUN uv venv "$WIKI_VENV" \
     && "$WIKI_VENV/bin/obsidian-wiki" --help > /dev/null
 ENV PATH="/opt/wiki-venv/bin:${PATH}"
 
-# ~/.hermes is bind-mounted over $HERMES_HOME (/var/lib/hermes on this base), so
-# anything written to its skills/ at build time is masked at runtime. The image's own bundled
-# skills work around this by syncing in at boot; this does the same for ours.
-COPY docker/cont-init.d/03-link-wiki-skills.sh /etc/cont-init.d/03-link-wiki-skills.sh
-RUN chmod +x /etc/cont-init.d/03-link-wiki-skills.sh
+# The wiki skills this agent uses, out of the wheel and into the base's
+# bundled-skill root. The other ~33 stay in the package, uninstalled and
+# invisible to the agent -- enable one by adding it here and rebuilding.
+#
+# llm-wiki is deliberately not among them, and the base's research/llm-wiki is
+# the one the agent gets. Measured against this image: skills_sync keys a
+# relocation on SKILL.md's frontmatter name, so a second `name: llm-wiki`
+# anywhere under this root is relocated onto the base's path and then
+# overwritten by the base's own content -- the wheel's copy, references/ and
+# all, never reaches the agent. Installing it would be inert, and would read
+# like a delivery.
+#
+# This replaces docker/cont-init.d/03-link-wiki-skills.sh, which copied them
+# into $HERMES_HOME/skills at every container start and exited 1 on every one:
+# a `#!/usr/bin/env bash` cont-init script gets s6's own environment rather than
+# the container's, so its `${HERMES_HOME:?}` was never set, and with
+# S6_BEHAVIOUR_IF_STAGE2_FAILS=1 the boot warned and carried on. Installing at
+# build time needs neither an environment nor a home: skills_sync reconciles
+# this root into whichever home the agent gets, which is the same job done once
+# by the layer that already owns every other bundled skill.
+#
+# Flat, as siblings directly under the root, because that is where the link
+# script put them: skills_sync preserves the path it finds a skill at, so the
+# running agent's skills keep the names it knows them by.
+RUN set -eu; \
+    src="$("$WIKI_VENV/bin/python" -c 'import obsidian_wiki, pathlib; print(pathlib.Path(obsidian_wiki.__file__).parent / "_data" / "skills")')"; \
+    for skill in wiki-query wiki-ingest wiki-lint wiki-digest; do \
+      cp -R "$src/$skill" /opt/hermes/skills/"$skill"; \
+    done; \
+    chmod -R a=rX,u+w /opt/hermes/skills/wiki-*
 
 # The persona and the declarative half of this deployment's home. COPY'd rather
 # than mounted: plow-init's harden_home() fchown()s /var/lib/hermes/SOUL.md on
