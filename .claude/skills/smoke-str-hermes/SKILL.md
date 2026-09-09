@@ -7,7 +7,7 @@ description: Use to check the deployed Hermes container actually answers — "is
 
 Drive a real message through the container on `wakeup` and assert on what comes back.
 
-`agent-mgr compose str ps` showing `Up`, a green `agent-mgr up str`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
+`docker compose ps` showing `Up`, a green `just up`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
 
 **What these probes do and do not prove.** `hermes chat` starts a *fresh
 process* inside the container, which reads `~/.hermes/config.yaml` at its own
@@ -49,7 +49,7 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 
 ## Guardrails
 
-- **`exec -T … < /dev/null`, not `run`.** `agent-mgr compose str run --rm hermes ...` starts a *throwaway* container from the image; it can pass while the deployed gateway is broken. `exec` runs inside the container that is serving. `-T` is required: without it Compose allocates a TTY and every probe dies with "the input device is not a TTY" from a non-interactive shell or over `ssh`, a false negative unrelated to agent health. `< /dev/null` belongs on every probe for the same reason a new one will: compose attaches stdin, `-T` suppresses only the TTY, and any probe inheriting a script on stdin eats it. (The one legitimate `run` is `auth list` in step 1, which needs `-T` too — it reads the shared `~/.hermes` mount and is the right tool precisely *because* `exec` is hung. It carries `--entrypoint` so that even this exception starts no gateway: the image's own entrypoint boots s6, and a rival gateway is the last thing a hung one needs. `agent-mgr` refuses a `compose run` without the flag for exactly that reason.)
+- **`exec -T … < /dev/null`, not `run`.** `docker compose run --rm hermes ...` starts a *throwaway* container from the image; it can pass while the deployed gateway is broken. `exec` runs inside the container that is serving. `-T` is required: without it Compose allocates a TTY and every probe dies with "the input device is not a TTY" from a non-interactive shell or over `ssh`, a false negative unrelated to agent health. `< /dev/null` belongs on every probe for the same reason a new one will: compose attaches stdin, `-T` suppresses only the TTY, and any probe inheriting a script on stdin eats it. (The one legitimate `run` is `auth list` in step 1, which needs `-T` too — it reads the shared `~/.hermes` mount and is the right tool precisely *because* `exec` is hung. It carries `--entrypoint` so that even this exception starts no gateway: the image's own entrypoint boots s6, and a rival gateway is the last thing a hung one needs. `agent-mgr` refuses a `compose run` without the flag for exactly that reason.)
 - **Read-only probes.** Ask about reservations, locks, listings. Never `send_message`, never `unlock_door` — a smoke test must not text a guest or open a door.
 - **Never print secrets.** On failure report the failure, not the environment.
 - Allow a 240s timeout on steps 1–4: liveness is ~5s, a tool-backed probe up
@@ -61,17 +61,17 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 ## 1. Liveness — does the agent answer at all
 
 ```sh
-agent-mgr compose str exec -T hermes hermes chat -q 'Reply with exactly: PONG' < /dev/null
+docker compose exec -T hermes hermes chat -q 'Reply with exactly: PONG' < /dev/null
 ```
 
 Expect `PONG` in the reply box. This proves the container is serving, the model route resolves, and its credentials are valid.
 
-A hang means the model provider is unreachable or OAuth expired — check with `agent-mgr compose str run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `~/.hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
+A hang means the model provider is unreachable or OAuth expired — check with `docker compose run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `~/.hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
 
 ## 2. Tool reachability — does it still reach Hostex
 
 ```sh
-agent-mgr compose str exec -T hermes hermes chat -q \
+docker compose exec -T hermes hermes chat -q \
   'Use your Hostex tools to tell me how many reservations arrive in the next 30 days. Answer with just the number and the word reservations.' < /dev/null
 ```
 
@@ -100,7 +100,7 @@ Then check the server itself connects — a separate concern from the
 credential:
 
 ```sh
-agent-mgr compose str exec -T hermes hermes mcp test hostex < /dev/null
+docker compose exec -T hermes hermes mcp test hostex < /dev/null
 ```
 
 Expect `✓ Connected` and a tool count.
@@ -115,7 +115,7 @@ credential as verified on a smoke run alone.
 ## 3. Lock surface — is Seam configured
 
 ```sh
-agent-mgr compose str exec -T hermes hermes mcp test seam < /dev/null
+docker compose exec -T hermes hermes mcp test seam < /dev/null
 ```
 
 Expect every tool named in `runtime/config.yaml` under

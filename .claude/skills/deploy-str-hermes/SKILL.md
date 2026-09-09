@@ -235,7 +235,7 @@ job exists, so a redeploy recreates the container around the old job. `origin`
 is not in `cron list`, so an inspection cannot rule the second one out.
 
 ```sh
-agent-mgr compose str exec -T hermes hermes cron list
+docker compose exec -T hermes hermes cron list
 ```
 
 No `hostex-inbound` job — skip. A job predating either change is recreated, not
@@ -277,7 +277,7 @@ after is the confirmation and it prints the line rather than a verdict, because
 ## 5. Verify
 
 ```sh
-agent-mgr compose str ps --format '{{.Name}} {{.Status}}'
+docker compose ps --format '{{.Name}} {{.Status}}'
 ```
 
 Expect `hermes Up ...`. `Restarting` is a crash loop — see Troubleshooting.
@@ -300,10 +300,10 @@ verified once it does.
 
 | Symptom | Cause | Move |
 |---|---|---|
-| `Restarting` loop | bad config or missing credential | `agent-mgr compose str logs --tail 50 hermes`; `~/.hermes/logs/gateway.log` |
+| `Restarting` loop | bad config or missing credential | `docker compose logs --tail 50 hermes`; `~/.hermes/logs/gateway.log` |
 | `mcp test seam` says not found | live config predates the Seam block, or step 3's script was missing | re-run steps 3 and 4; confirm `mcp_servers.seam` is in `runtime/config.yaml` |
 | Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls ~/.hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `~/.hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
-| Files in `~/.hermes` owned by `501`, or by another account | the container was created by a different account, or by hand outside `agent-mgr` | agent-mgr takes the ids from `id -u`/`id -g` at every invocation, so there is nothing to edit: re-own the directory (`sudo chown -R $(id -u):$(id -g) ~/.hermes`), then `agent-mgr compose str up -d --force-recreate` — `restart` will not re-substitute |
+| Files in `~/.hermes` owned by `501`, or by another account | the container was created by a different account, or by hand outside `agent-mgr` | agent-mgr takes the ids from `id -u`/`id -g` at every invocation, so there is nothing to edit: re-own the directory (`sudo chown -R $(id -u):$(id -g) ~/.hermes`), then `just restart` — `restart` will not re-substitute |
 | Agent ignores the home chat | home binding unset or stale in `~/.hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
 | boot parks on `vault has no index.md` / `vault/.git is inside the worktree` | `~/hermes-vault` absent, empty, or cloned the wrong way — first bring-up on this host, or it was moved/deleted | clone it per the README's § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 4. `docker/cont-init.d/04-require-vault-corpus.sh` is what refuses |

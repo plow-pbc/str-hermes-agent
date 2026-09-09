@@ -246,7 +246,7 @@ and `#66` already record for other paths. So for a skill the image does not
 carry, restoring after a rebuild is a deliberate copy:
 
 ```sh
-cp -R agent-skills/. "$(agent-mgr resolve str | sed -n 's/^AGENT_HOME=//p')/skills/"
+docker compose cp agent-skills/. hermes:/var/lib/hermes/skills/
 ```
 
 The order matters when you commit one: an edit Hermes made lands in the image
@@ -428,20 +428,20 @@ so that pin lives in this repo's `Dockerfile`. This section lists only what you
 run.
 
 ```sh
-agent-mgr up str          # start the gateway
-agent-mgr logs str        # container-level logs
-agent-mgr down str           # stop
-agent-mgr compose str build && agent-mgr up str     # rebuild at the current pins
+just up          # start the gateway
+docker compose logs -f hermes        # container-level logs
+just down           # stop
+docker compose build && just up     # rebuild at the current pins
 
 tail -f ~/.hermes/logs/gateway.log               # gateway detail
-agent-mgr compose str exec hermes hermes pairing list   # who's allowed to text it
+docker compose exec hermes hermes pairing list   # who's allowed to text it
 ```
 
 A `runtime/` edit — the plugin pin included — is not one of these; `up -d` is a
 no-op for an unchanged image. Use [Applying a `runtime/` edit](#applying-a-runtime-edit).
 
 Rebuilding is not upgrading. Every input is pinned — the base image by digest,
-`obsidian-wiki` by version — so `agent-mgr compose str build`
+`obsidian-wiki` by version — so `docker compose build`
 reproduces what is already running and picks up only changes to this repo. To
 upgrade, bump a pin in the `Dockerfile` and then rebuild; that way the version
 that moved is a line in a diff rather than whatever happened to be current on
@@ -450,8 +450,8 @@ the day someone rebuilt.
 Interactive one-offs run inside the live gateway container, which must be up:
 
 ```sh
-agent-mgr agent str 'hello'
-agent-mgr compose str exec hermes hermes auth list
+docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'hello'
+docker compose exec hermes hermes auth list
 ```
 
 ## Plow group chats
@@ -556,9 +556,15 @@ For a new Plow private/home chat, run upstream's activation helper at the pinned
 SHA and follow the Plow instructions. It writes `PLOW_CHAT_CHAT_UID` and
 `PLOW_CHAT_TOKEN` into the dotenv of whichever data directory `--data-dir` names:
 
-```sh
-agent-mgr activate str
-```
+> **This recipe does not currently work — [#44](https://github.com/plow-pbc/str-hermes-agent/issues/44).**
+> Two independent breaks, both verified rather than inferred: the pin file the
+> command below reads (`~/services/agent-mgr/runtime/plow-chat-activate.ref`) no
+> longer exists, so the URL substitutes an empty SHA; and `--data-dir` has no host
+> path to name now that the home is a named volume. Running the helper inside the
+> container instead does not work either — the image ships `bash` but no `curl`.
+> str is activated and serving, so this bites only on a re-activation or a new
+> host. The rest of this section is kept because it still describes the targeting
+> rule correctly, which is the part that is dangerous to get wrong.
 
 **`--data-dir` is the whole targeting mechanism, and it has no default that
 protects you.** The deleted local script honoured a `HERMES_DOTENV` env var;
@@ -569,9 +575,8 @@ than shadowing them — and leaves it off its chat until `/sethome` is sent agai
 Activating a second number means naming that agent's data directory:
 
 ```sh
-# The raw script, not `agent-mgr activate`: that refuses any home but this
-# agent's, which is the point of it. The pin comes from agent-mgr, the one
-# place the fleet's plugin SHA lives.
+# The pin came from agent-mgr, which is deprecated and no longer carries the
+# file -- see #44 before running this.
 bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plow-chat/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir ~/.hermes-second
 ```
 
@@ -582,7 +587,7 @@ against the home that container mounts; the commands below cannot reach it.
 On a host whose gateway is **already running**, restart it before pairing:
 
 ```sh
-agent-mgr restart str
+just restart
 ```
 
 The gateway reads its dotenv only at
@@ -594,7 +599,7 @@ Then text its private number and approve the pairing code returned in that
 conversation:
 
 ```sh
-agent-mgr compose str exec hermes hermes pairing approve plow_chat <CODE>
+docker compose exec hermes hermes pairing approve plow_chat <CODE>
 ```
 
 Then send `/sethome` in that desired private chat. The ID shown by
@@ -641,10 +646,10 @@ and call the REST API directly. Treat it as ergonomics and blast-radius
 reduction, not as a security boundary (#46).
 
 ```sh
-agent-mgr compose str exec hermes hermes mcp test hostex     # connectivity + tool list
+docker compose exec hermes hermes mcp test hostex     # connectivity + tool list
 # note: this reports the server's full surface, not the `include` selection —
 # use `hermes tools list | grep hostex` to see what the agent actually gets
-agent-mgr agent str 'Read my most recent Hostex message.'
+docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'Read my most recent Hostex message.'
 ```
 
 ### Finding a capability that isn't allowlisted
@@ -782,7 +787,7 @@ anyone waiting was marked seen. `cron create` echoes the job it
 made — name, schedule, next run — which is what confirms the enable landed.
 
 Day to day: `hermes cron run hostex-inbound` fires a one-shot tick and
-`hermes cron runs` shows durable history, both via `agent-mgr compose str exec`.
+`hermes cron runs` shows durable history, both via `docker compose exec`.
 
 <a name="owners-group-migration"></a>
 **One-time: point an existing job at the owners' group, and stamp its origin.**
@@ -821,7 +826,7 @@ on, and leaves the transcript readable. (`hermes sessions archive` is not a
 substitute — it sets `archived`, which that query does not look at.)
 
 ```sh
-agent-mgr compose str exec hermes /opt/hermes/.venv/bin/python - <<'PY'
+docker compose exec hermes /opt/hermes/.venv/bin/python - <<'PY'
 from hermes_state import SessionDB
 db = SessionDB()
 stale = [s for s in db.list_gateway_sessions(platform="plow_chat")
@@ -866,7 +871,7 @@ trigger. In order:
 2. Recreate the job:
 
    ```sh
-   agent-mgr compose str exec hermes hermes cron remove hostex-inbound
+   docker compose exec hermes hermes cron remove hostex-inbound
    ./scripts/enable-hostex-inbound.sh
    ```
 
@@ -875,7 +880,7 @@ trigger. In order:
    `Deliver:`, and the whole hazard here is a job baked with the *old* UID:
 
    ```sh
-   agent-mgr compose str exec hermes hermes cron list
+   docker compose exec hermes hermes cron list
    ```
 
    Its `Deliver:` must carry the UID the dotenv now holds. Get this wrong and
@@ -1032,10 +1037,10 @@ disk. Measured 2026-08-26: 18 pages rewritten and 6 new ones since the
 2026-08-04 commit — 22 days of compiled guest knowledge, unpushed.
 
 ```sh
-agent-mgr compose str exec hermes date                      # must print PDT/PST, not UTC
+docker compose exec hermes date                      # must print PDT/PST, not UTC
 ./scripts/enable-wiki-nightly.sh
-agent-mgr compose str exec hermes hermes cron list          # confirm it is registered
-agent-mgr compose str exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
+docker compose exec hermes hermes cron list          # confirm it is registered
+docker compose exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
 ```
 
 The `date` line comes first because everything below it is written in wall-clock
@@ -1140,10 +1145,9 @@ conversations again and appends their facts a second time. Run it directly
 instead, where nothing is watching the clock:
 
 ```sh
-agent-mgr compose str exec hermes hermes cron remove wiki-nightly
-AGENT_CONTAINER=$(agent-mgr resolve str | sed -n 's/^AGENT_CONTAINER=//p') \
-  ./scripts/no-nightly-running \
-  && agent-mgr compose str exec -u hermes hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
+docker compose exec hermes hermes cron remove wiki-nightly
+AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
+  && docker compose exec -u hermes hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
 ./scripts/enable-wiki-nightly.sh
 ```
 
@@ -1245,7 +1249,7 @@ It refuses without `HERMES_HOME`, without an `ops.toml` in the vault, and if a
 `checkin-watch` job already exists. Read the job back:
 
 ```sh
-agent-mgr compose str exec -T hermes hermes cron list
+docker compose exec -T hermes hermes cron list
 ```
 
 Schedule is `0 12 * * *` — noon in the container's timezone (`compose.yml` pins
@@ -1356,8 +1360,8 @@ after editing `runtime/config.yaml` apply it the way
 [applying a `runtime/` edit](#applying-a-runtime-edit) describes — then:
 
 ```sh
-agent-mgr compose str exec hermes hermes mcp test seam     # connectivity + tool list
-agent-mgr agent str 'Which of my doors are unlocked?'
+docker compose exec hermes hermes mcp test seam     # connectivity + tool list
+docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'Which of my doors are unlocked?'
 ```
 
 ### Known exposure
@@ -1421,10 +1425,10 @@ boot and writes the answer into the home: the `plow` entry under
 when `mcp_url` comes back null) and `PLOW_MCP_URL` in the dotenv. The same
 token is the relay credential, so there is no Latch pair to mint and nothing
 carried by hand; a token minted before relay access existed answers 403 on
-the relay and needs a fresh activation (`agent-mgr activate str`) on an
+the relay and needs a fresh activation (§ Private/home chat activation, #44) on an
 agent-mgr that keeps `relay:call` when it narrows (plow-pbc/agent-mgr#157).
 
-Verify from wakeup: `agent-mgr compose str exec -T hermes hermes mcp test plow`
+Verify from wakeup: `docker compose exec -T hermes hermes mcp test plow`
 lists the Mac's tools. Widening the agent's reach to the Mac is deliberate
 (§ Review priority, "Tool reach is deliberate") — every action still lands in
 Latch's approval UI and audit log on the Mac.
