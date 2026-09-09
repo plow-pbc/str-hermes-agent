@@ -117,7 +117,13 @@ RUN chown -R root:root /opt/plow \
 # noticing. At 2, rc.init stops the container. Measured on the base with a probe
 # cont-init, both ways round. Nothing else here fails: on the live agent's own
 # boot log all three of the base's cont-init scripts exit 0.
-COPY --chmod=0755 docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
+# Plain COPY, not `COPY --chmod`: that option requires BuildKit, and on a stock
+# builder the build dies here -- before pytest ever collects, so the whole gate
+# reads as a build failure rather than a test result. Both scripts are tracked
+# 100755, so the executable bit travels with them; the chmod below normalises the
+# rest, because a plain COPY carries the checkout's umask and a group-writable
+# boot script would otherwise depend on which machine built the image.
+COPY docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
 
 # The one image-to-home seam. Everything above is authoritative under /opt/plow
 # and unreachable from where its consumers look: hermes cron refuses a script
@@ -125,6 +131,8 @@ COPY --chmod=0755 docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d
 # server is launched by a path in config.yaml, and a pre-populated volume never
 # receives the image's SOUL or config at all. One script closes all three rather
 # than three copies of the payload closing one each.
-COPY --chmod=0755 docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
+COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
+RUN chmod 0755 /etc/cont-init.d/04-require-vault-corpus.sh \
+               /etc/cont-init.d/05-install-agent-payload.sh
 
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
