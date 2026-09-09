@@ -48,7 +48,12 @@ restart:
     ./scripts/no-nightly-running
     docker compose -f compose.yml up -d --force-recreate
 
+# The image first: tests/test_image_contents.py and tests/test_vault_guard.py
+# assert against this exact tag, and without it 16 of them fail from a clean
+# checkout -- including the one that keeps the private vault out of a public
+# image, which passes while inspecting nothing.
 test:
+    docker build -q -t sams-str-hermes-agent:local .
     uv run --no-project --python 3.13 --with aiohttp==3.14.1 --with pytest==8.4.2 --with fastmcp==3.4.5 --with seam==1.209.0 pytest -q
 
 # Airbnb operations wiki — task runner.
