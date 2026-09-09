@@ -41,7 +41,7 @@ def test_only_what_the_image_and_deploy_cannot_account_for_is_hermes_own(tmp_pat
         "wiki-ingest",                      # bundled: the image installs it
         "productivity/property-guest-messaging",  # written by Hermes
     ], manifest=("airtable", "wiki-ingest"))
-    found = snap.authored(snap.find_skills(store), snap.read_bundled(store))
+    found = snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
     # The category it was filed under travels with it, so the snapshot mirrors
     # the store's shape rather than flattening every skill to one directory.
     assert found == [pathlib.Path("productivity/property-guest-messaging")]
@@ -57,7 +57,7 @@ def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(tmp_p
         "guests/airtable",        # a distinct skill Hermes filed elsewhere
     ], manifest=("airtable",))
     with pytest.raises(SystemExit) as exit:
-        snap.authored(snap.find_skills(store), snap.read_bundled(store))
+        snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
     # Both paths are named, since resolving it means renaming one of them.
     assert "guests/airtable" in str(exit.value)
     assert "productivity/airtable" in str(exit.value)
@@ -117,7 +117,12 @@ def test_a_store_with_nothing_authored_does_not_empty_the_snapshot(tmp_path):
     exactly the state that produces one. main refuses before mirroring."""
     store = store_with(tmp_path, ["productivity/airtable"], manifest=("airtable",))
     snapshot = tmp_path / "agent-skills"
-    snap.mirror(store, snap.find_skills(store), snapshot)
+    # What the rebuild wiped from the store while the record still holds it.
+    # Seeded directly rather than by mirroring the whole store: mirror is fed
+    # `authored`, never `find_skills`, so a snapshot holding a bundled skill is
+    # a state main cannot produce -- and one that now reads as repo-owned.
+    (snapshot / "guests/late-checkout").mkdir(parents=True)
+    (snapshot / "guests/late-checkout" / "SKILL.md").write_text("# recorded\n")
 
     monkey = pytest.MonkeyPatch()
     monkey.setattr(snap, "SNAPSHOT", snapshot)
@@ -126,4 +131,35 @@ def test_a_store_with_nothing_authored_does_not_empty_the_snapshot(tmp_path):
     with pytest.raises(SystemExit):
         snap.main()
     monkey.undo()
-    assert (snapshot / "productivity/airtable/SKILL.md").exists()
+    assert (snapshot / "guests/late-checkout/SKILL.md").exists()
+
+
+def test_a_skill_this_repo_bakes_stays_hermes_own(tmp_path):
+    """property-guest-messaging is bundled BECAUSE the Dockerfile bakes it from
+    agent-skills/, and it is one Hermes edits in place. Subtracted by name like
+    any other bundled skill, its next live edit is dropped from the snapshot and
+    lost on the rebuild this script exists for."""
+    path = "productivity/property-guest-messaging"
+    store = store_with(tmp_path, ["productivity/airtable", path],
+                       manifest=("airtable", "property-guest-messaging"))
+    snapshot = tmp_path / "agent-skills"
+    (snapshot / path).mkdir(parents=True)
+    (snapshot / path / "SKILL.md").write_text("# tracked here\n")
+
+    assert snap.tracked(snapshot) == {path}
+    assert snap.authored(snap.find_skills(store), snap.read_bundled(store),
+                         snap.tracked(snapshot)) == [pathlib.Path(path)]
+
+
+def test_a_repo_owned_path_settles_a_name_that_would_be_ambiguous(tmp_path):
+    """Two paths sharing a bundled name normally stop the run, because nothing
+    can say which is Hermes's. When this repo tracks one of them, something
+    can."""
+    store = store_with(tmp_path, ["productivity/airtable", "guests/airtable"],
+                       manifest=("airtable",))
+    snapshot = tmp_path / "agent-skills"
+    (snapshot / "guests/airtable").mkdir(parents=True)
+    (snapshot / "guests/airtable" / "SKILL.md").write_text("# ours\n")
+
+    assert snap.authored(snap.find_skills(store), snap.read_bundled(store),
+                         snap.tracked(snapshot)) == [pathlib.Path("guests/airtable")]

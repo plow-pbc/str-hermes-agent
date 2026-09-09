@@ -21,7 +21,13 @@ the command.
 Three kinds of skill live in that store and only the third is ours:
 
   bundled   shipped in the image, listed in `.bundled_manifest`, reproduced by
-            pulling the image. Off-limits to the review agent. The wiki skills
+            pulling the image -- UNLESS this repo is why the image ships it.
+            A skill tracked under agent-skills/ is authored whatever the
+            manifest says: property-guest-messaging is bundled *because* the
+            Dockerfile bakes it from here, and it is one Hermes edits itself,
+            so subtracting it by name would drop the next edit silently and
+            lose it on the rebuild this whole script exists for.
+            The wiki skills
             are in this set now: the image installs them into the base's
             bundled root at build time, so the runtime records them in the
             manifest like any other. They used to be a third kind, copied in at
@@ -110,10 +116,28 @@ def find_skills(store: pathlib.Path) -> list[pathlib.Path]:
     return sorted(md.parent.relative_to(store) for md in store.rglob("SKILL.md"))
 
 
-def authored(installed: list[pathlib.Path], bundled: set[str]) -> list[pathlib.Path]:
+def tracked(snapshot: pathlib.Path) -> set[str]:
+    """Skill paths this repo already tracks under agent-skills/.
+
+    Read from the checkout rather than restated, so baking a second skill needs
+    no edit here. These are authored by definition: the image ships them because
+    this repo does, and the manifest cannot tell that apart from the base's own.
+    """
+    if not snapshot.is_dir():
+        return set()
+    return {str(md.parent.relative_to(snapshot)) for md in snapshot.rglob("SKILL.md")}
+
+
+def authored(installed: list[pathlib.Path], bundled: set[str],
+             repo_owned: set[str]) -> list[pathlib.Path]:
     """The skills Hermes wrote: what the image does not own.
 
-    Matched by name, because the manifest records names and not the categories
+    A path in `repo_owned` is authored whatever the manifest says. The image
+    ships it because this repo does, and it is exactly the kind Hermes edits in
+    place -- subtracting it by name would drop the next edit silently, out of
+    the snapshot that exists so a rebuild does not lose it.
+
+    The rest are matched by name, because the manifest records names and not the categories
     the image files them under. That asymmetry is what the exit below is for.
     One path carrying a bundled name is the bundled skill. Two carrying it
     means one of them is and nothing here can say which,
@@ -121,8 +145,10 @@ def authored(installed: list[pathlib.Path], bundled: set[str]) -> list[pathlib.P
     the snapshot that exists to survive the rebuild. Stopping is the honest
     answer, and the operator resolves it by renaming.
     """
+    rest = [path for path in installed if str(path) not in repo_owned]
+
     by_name: dict[str, list[pathlib.Path]] = {}
-    for path in installed:
+    for path in rest:
         by_name.setdefault(path.name, []).append(path)
     ambiguous = sorted(
         str(path)
@@ -136,7 +162,8 @@ def authored(installed: list[pathlib.Path], bundled: set[str]) -> list[pathlib.P
             "Rename the one Hermes wrote — otherwise it is not snapshotted."
         )
 
-    return [path for path in installed if path.name not in bundled]
+    return [path for path in installed
+            if str(path) in repo_owned or path.name not in bundled]
 
 
 def mirror(store: pathlib.Path, skills: list[pathlib.Path],
@@ -167,7 +194,7 @@ def main() -> None:
         sys.exit(f"skills-snapshot: no skill store at {store}")
 
     installed = find_skills(store)
-    skills = authored(installed, read_bundled(store))
+    skills = authored(installed, read_bundled(store), tracked(SNAPSHOT))
     if not skills:
         # `mirror` rebuilds, so an empty result would delete the snapshot and
         # copy nothing back — and the run that produces it is the one this
