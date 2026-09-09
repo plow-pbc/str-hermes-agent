@@ -15,6 +15,39 @@
 # What stays here is what only this agent has: the wiki vault pipeline and the
 # skills it writes for itself.
 
+# The container compose.yml declares. scripts/no-nightly-running asks docker
+# about it by name and refuses to guess one, so the two have to agree;
+# compose.yml is where it is declared and this is the only place that repeats it.
+export AGENT_CONTAINER := "hermes"
+
+# The lifecycle. agent-mgr invoked scripts/no-nightly-running as
+# AGENT_PRE_TRANSITION before every `up`, `down` and `restart`; docker compose
+# has no such hook, so these recipes are the only thing left that can refuse.
+# Never reach for `docker compose` directly to stop or replace the container --
+# that is the bypass the veto exists to prevent.
+#
+# `-f compose.yml` is load-bearing, not tidiness: compose auto-loads
+# compose.override.yml whenever it sits beside compose.yml, and that override is
+# agent-mgr's -- it interpolates STR_REPO, STR_VAULT, AGENT_IMAGE and
+# AGENT_HOME_TARGET, which agent-mgr exports and nothing here does. Merged in,
+# every recipe below fails on a missing variable. Naming the one file is what
+# lets the outgoing path stay in the tree as the rollback.
+#
+# Why it refuses: a transition landing between a page write and its manifest
+# entry leaves the vault holding a page nothing recorded, and the next run
+# appends its facts a second time with nothing reporting it.
+up:
+    ./scripts/no-nightly-running
+    docker compose -f compose.yml up -d
+
+down:
+    ./scripts/no-nightly-running
+    docker compose -f compose.yml down
+
+restart:
+    ./scripts/no-nightly-running
+    docker compose -f compose.yml up -d --force-recreate
+
 test:
     uv run --no-project --python 3.13 --with aiohttp==3.14.1 --with pytest==8.4.2 --with fastmcp==3.4.5 --with seam==1.209.0 pytest -q
 

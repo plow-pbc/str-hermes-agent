@@ -105,28 +105,23 @@ def test_the_descriptor_is_the_whole_contract_with_agent_mgr():
     assert "legacy" in (ROOT / "agent.env").read_text().lower()
 
 
-def test_the_repo_no_longer_defines_its_own_compose_service():
-    """Deployment comes from agent-mgr; a second definition here would drift from
-    the one the gateway actually runs under."""
-    assert not (ROOT / "compose.yml").exists()
+def test_nothing_but_the_justfile_reaches_docker_compose():
+    """The consumer boundary, narrowed to what still needs one.
 
+    agent-mgr owned every invocation while it owned the compose file. This repo
+    owns `compose.yml` now, so the justfile's transition recipes reach compose
+    directly and tests/test_compose_contract.py holds them to the stronger rule:
+    each one runs the nightly veto first.
 
-def test_nothing_reaches_docker_compose_without_agent_mgr():
-    """The single consumer boundary, and the only compose check this repo needs.
-
-    A bare `docker compose` resolves against this repo root, which no longer
-    holds a compose file -- so it fails with "no configuration file provided"
-    rather than doing the wrong thing. Routing through agent-mgr keeps the file
-    list, the override and the env-file defined in one place.
-
-    It also subsumes the gateway guard this file used to carry: once every
-    invocation goes through agent-mgr, agent-mgr's own refusal of a `compose
-    run` without --entrypoint covers the second-gateway shape. Re-implementing
-    that grammar here was ~75 lines restating a policy its owner enforces.
+    Everywhere else the boundary stands. `bin/` and `scripts/` run against the
+    live agent, and routing them through agent-mgr is what keeps the
+    second-gateway shape unreachable -- agent-mgr refuses a `compose run`
+    without --entrypoint, and re-implementing that grammar here was ~75 lines
+    restating a policy its owner enforces.
     """
     offenders = []
     for f, i, line in _source_lines():
-        if line.lstrip().startswith("#"):
+        if f.name == "justfile" or line.lstrip().startswith("#"):
             continue
         if "docker compose" in QUOTED.sub("", line):
             offenders.append(f"{f.relative_to(ROOT)}:{i}: {line.strip()[:110]}")
@@ -137,13 +132,18 @@ def test_the_justfile_keeps_no_fleet_wide_recipes():
     """Anything true of every agent belongs in agent-mgr.
 
     Stated as a denylist of the recipes that MOVED, not an allowlist of the
-    three that stayed: this agent's domain workflow is still iterating, and an
+    ones that stayed: this agent's domain workflow is still iterating, and an
     exact-set assertion would fail on the next legitimately-domain recipe --
     calcifying the whole task-runner surface into a deployment regression test.
+
+    `up`, `down` and `restart` came back when this repo took its compose file
+    back: they are the only thing left that can run the nightly veto, which
+    agent-mgr used to invoke as AGENT_PRE_TRANSITION and docker compose has no
+    hook for. What stayed migrated is what is still true of every agent.
     """
     recipes = {m.group(1) for line in _lines("justfile")
                if (m := re.match(r"^([a-z][a-z0-9-]*)(?: [A-Z]+)*:", line))}
-    migrated = {"agent", "install-plugin", "up", "down", "restart", "logs",
+    migrated = {"agent", "install-plugin", "logs",
                 "restore", "activate", "sign-in"} & recipes
     assert not migrated, f"these belong to agent-mgr now: {sorted(migrated)}"
 

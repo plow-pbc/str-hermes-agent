@@ -47,22 +47,13 @@ def test_the_guard_admits_only_a_vault_with_a_corpus(index, accepted):
 
 
 def test_a_failing_cont_init_stops_the_container_rather_than_warning():
-    """The half that makes the guard real, and the half that is not obvious.
-
-    The base ships S6_BEHAVIOUR_IF_STAGE2_FAILS=1, at which a cont-init script
-    exiting non-zero prints one warning and the boot carries on and starts the
-    gateway anyway. That is how 03-link-wiki-skills.sh exited 1 on every boot
-    for months with nobody noticing, and a guard that only warns is the failure
-    it exists to prevent -- so the image sets 2.
+    """The half that makes the guard real. The base ships 1, at which a failing
+    cont-init only warns and the gateway starts anyway -- the Dockerfile records
+    the measurement. A guard that only warns is the failure it exists to prevent.
 
     Asserted on the setting rather than by booting the image: a full boot runs
-    s6 and plow-init, which parks for want of a credential and then outlives
-    any timeout through its own grace period. The behaviour behind the setting
-    was measured instead, both ways round, on this image and on a probe image
-    built from the base: at 1 the boot logs "some scripts exited nonzero" and
-    continues to plow-init; at 2 rc.init logs "fatal: stopping the container"
-    and the container exits 1. A vault with a corpus passes cont-init and the
-    boot proceeds either way.
+    s6 and plow-init, which parks for want of a credential and then outlives any
+    timeout through its own grace period.
     """
     env = subprocess.run(
         ["docker", "image", "inspect", IMAGE,

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # This agent's veto on stopping or replacing its container.
 #
-# Declared as AGENT_PRE_TRANSITION in agent.env and invoked BY agent-mgr before
-# every transition -- `up`, `down`, `restart`, `restore`, and a `compose`
-# passthrough whose subcommand transitions. Pasted into exactly one documented
+# Invoked by both callers, and by nothing else. agent.env declares it as
+# AGENT_PRE_TRANSITION, which agent-mgr runs before every transition -- `up`,
+# `down`, `restart`, `restore`, and a `compose` passthrough whose subcommand
+# transitions -- and the justfile's own `up`, `down` and `restart` run it first
+# because docker compose has no such hook. Pasted into exactly one documented
 # sequence -- the README's manual-nightly recovery, which is an `exec` and so
 # fires no hook; it guards a second concurrent ingest there, not a transition.
 # It lived as a hand-copied `pgrep` in five places, three
@@ -16,11 +18,12 @@
 # leaves the vault holding a page nothing recorded -- the next run re-ingests it
 # and appends its facts a second time, and nothing reports it.
 #
-# Uses `docker` directly on the container agent-mgr resolved, not `agent-mgr
-# compose`: the tool that runs this is the one that would be called back into.
+# Uses `docker` directly on the container the caller named, not `agent-mgr
+# compose` or `docker compose`: the tool that runs this is the one that would be
+# called back into.
 set -uo pipefail
 
-container="${AGENT_CONTAINER:?run me through agent-mgr, which exports the container it resolved}"
+container="${AGENT_CONTAINER:?run me through \`just\` or agent-mgr, either of which names the container it resolved}"
 
 # Not-running is a pass, established first rather than inferred from a failing
 # exec: a fresh host has no container, and "it is not up" and "the check could
