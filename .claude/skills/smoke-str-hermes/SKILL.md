@@ -180,7 +180,7 @@ grep 'websocket subscribed' ~/.hermes/logs/gateway.log | tail -1
 **These two are in different zones — convert before comparing.** `StartedAt` is
 RFC3339 `Z`, always UTC; Docker emits nothing else. `gateway.log` prefixes
 `YYYY-MM-DD HH:MM:SS,mmm` through Python logging, which renders in the
-*container's* local time — and `AGENT_TZ` in `agent.env` sets that to
+*container's* local time — and `TZ` in `compose.yml` sets that to
 `America/Los_Angeles`, so the log reads Pacific and matches wakeup's own
 `date`:
 
