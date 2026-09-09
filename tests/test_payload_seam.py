@@ -44,6 +44,11 @@ SEAM_CLAIMS = [
     # container -- this repo must not break the shape it is migrating away from.
     ("a populated host directory is retained", HOSTED,
      "cat /tmp/h/scripts/nightly.sh", "host-supplied"),
+    # Both paths are live through phase 1, and `agent-mgr deploy` stages config
+    # and SOUL into the bind-mounted home. Refreshing them there would revert a
+    # deploy on the next recreate, silently.
+    ("a deploy's staged config is not reverted", HOSTED,
+     "cat /tmp/h/config.yaml", "staged-by-the-deploy"),
 ]
 
 
