@@ -6,13 +6,19 @@ root:root inside a root-owned sticky home at every container start -- so the one
 thing that must never live in it is content that changes nightly. The vault
 index does; it stays in the vault, and the persona names the path.
 
-These tests run against a scratch home, which is never hardened, so they cover
-the direct-write path. The root escalation is only reachable against a real
-hardened target and is verified by hand against the live container.
+The home is a named volume, so there is no host path to write and the script
+has exactly one path: an escalated `compose exec` into the agent's container.
+These tests drive that path for real. The `docker` stub below forwards the
+script's own inner shell into a throwaway container off this repo's image, with
+a scratch directory bound at $HERMES_HOME -- so `chown root:root`, the mode and
+the rename all execute as root against a real filesystem, and the host reads
+back what actually landed. Stubbing the transport and running the payload is
+what keeps this a behaviour test rather than a mock-call assertion.
 """
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -22,15 +28,41 @@ PUBLISH = ROOT / "scripts" / "publish-soul"
 PERSONA = ROOT / "runtime" / "SOUL.md"
 
 
-def _run(home: Path, **extra: str) -> subprocess.CompletedProcess:
+IMAGE = "sams-str-hermes-agent:local"
+DOCKER = shutil.which("docker")
+
+# Stands in for `docker compose exec -u root -T hermes sh -c <script>`, which is
+# the script's only call. The inner script is always the last argument, and it
+# is handed to a real container with $HERMES_HOME bound to the scratch home, so
+# what runs is the script's own payload rather than a paraphrase of it. The real
+# docker is called by absolute path: this stub IS `docker` on PATH.
+STUB = """#!/usr/bin/env bash
+set -eu
+for arg in "$@"; do inner=$arg; done
+exec {docker} run --rm -i -v "$SCRATCH_HOME:/tmp/h" -e HERMES_HOME=/tmp/h \
+  --entrypoint sh {image} -c "$inner"
+"""
+
+
+def _stub_path(tmp_path: Path, home: Path) -> tuple[Path, dict[str, str]]:
+    assert DOCKER, "docker is required for these tests"
+    stub_bin = tmp_path / "stub-bin"
+    stub_bin.mkdir(exist_ok=True)
+    stub = stub_bin / "docker"
+    stub.write_text(STUB.format(docker=DOCKER, image=IMAGE))
+    stub.chmod(0o755)
+    return stub_bin, {"SCRATCH_HOME": str(home)}
+
+
+def _run(home: Path, script: Path | None = None, **extra: str) -> subprocess.CompletedProcess:
+    stub_bin, stub_env = _stub_path(home.parent, home)
     env = {
         **os.environ,
-        "AGENT_HOME": str(home),
-        # Never reached: the scratch home is writable, so the direct path wins.
-        "AGENT_CONTAINER": "publish-soul-tests-no-such-container",
+        "PATH": f"{stub_bin}:{os.environ['PATH']}",
+        **stub_env,
         **extra,
     }
-    return subprocess.run([str(PUBLISH)], env=env, text=True, capture_output=True)
+    return subprocess.run([str(script or PUBLISH)], env=env, text=True, capture_output=True)
 
 
 def test_publishes_the_persona_verbatim_at_plow_inits_mode(tmp_path: Path) -> None:
@@ -99,11 +131,6 @@ def test_refuses_an_empty_persona_and_leaves_the_live_soul_alone(tmp_path: Path)
     (fake_repo / "scripts" / "publish-soul").write_bytes(PUBLISH.read_bytes())
     (fake_repo / "scripts" / "publish-soul").chmod(0o755)
 
-    result = subprocess.run(
-        [str(fake_repo / "scripts" / "publish-soul")],
-        env={**os.environ, "AGENT_HOME": str(home), "AGENT_CONTAINER": "none"},
-        text=True,
-        capture_output=True,
-    )
+    result = _run(home, script=fake_repo / "scripts" / "publish-soul")
     assert result.returncode != 0
     assert (home / "SOUL.md").read_text() == published, "clobbered the live SOUL"

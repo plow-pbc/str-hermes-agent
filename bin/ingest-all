@@ -9,6 +9,13 @@
 #   ./bin/ingest-all <vault>
 set -uo pipefail
 
+# Compose resolves its project from the directory, so anchor it to this repo
+# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
+# names a different project -- a dev checkout of this same repo is one -- and
+# reaches a container that is not this agent.
+repo=$(cd "$(dirname "$0")/.." && pwd)
+compose() { docker compose --project-directory "$repo" "$@"; }
+
 # The runtime vault, not a relative path into the checkout — there is no vault
 # there anymore. An operator run with no argument should reach the real one.
 VAULT="${1:-$HOME/hermes-vault}"
@@ -48,7 +55,7 @@ else
   # the one place that value can come from. Required, not defaulted: a
   # throwaway container that cannot report it must stop this run rather than
   # mount the vault somewhere the real container does not read from.
-  CHOME="$(agent-mgr compose str run --rm --no-deps -T --entrypoint bash hermes \
+  CHOME="$(compose run --rm --no-deps -T --entrypoint bash hermes \
     -c 'printf %s "${HERMES_HOME:?}"')" \
     || { echo "ingest-all: could not read HERMES_HOME from the image" >&2; exit 1; }
   CVAULT="$CHOME/repo/vault"
@@ -72,7 +79,7 @@ else
   # The prompt travels as an environment variable rather than inside -c, so a
   # conversation containing a quote cannot end the shell string early.
   turn() {
-    agent-mgr compose str run --rm --no-deps -T \
+    compose run --rm --no-deps -T \
       -v "$VAULT_ABS:$CVAULT" --user "$(id -u):$(id -g)" -e INGEST_PROMPT="$1" \
       --entrypoint bash hermes \
       -c '[ -d "$HERMES_HOME/skills/wiki-ingest" ] || { echo "no wiki skills in $HERMES_HOME/skills — boot the container once so the runtime seeds them from the image" >&2; exit 1; }; exec hermes chat -q "$INGEST_PROMPT"'

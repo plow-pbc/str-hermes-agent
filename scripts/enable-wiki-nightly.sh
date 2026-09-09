@@ -3,12 +3,19 @@
 # checkout. See README § Compiling the wiki nightly.
 set -euo pipefail
 
+# Compose resolves its project from the directory, so anchor it to this repo
+# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
+# names a different project -- a dev checkout of this same repo is one -- and
+# reaches a container that is not this agent.
+repo=$(cd "$(dirname "$0")/.." && pwd)
+compose() { docker compose --project-directory "$repo" "$@"; }
+
 # Refuse a second job. The chain ingests into the vault, so two of them race
 # the same pages — the same shared-state argument the poller's enabler makes
 # about its cursor.
 # Captured, not piped, so a docker error aborts under `set -e` rather than
 # reading as "no job".
-existing=$(agent-mgr compose str exec -T hermes hermes cron list)
+existing=$(compose exec -T hermes hermes cron list)
 case "$existing" in
   *wiki-nightly*)
     echo "wiki-nightly already exists - remove it first (hermes cron remove wiki-nightly)"
@@ -28,5 +35,5 @@ esac
 # A refusal exits non-zero and `set -e` stops the run. `cron create` echoes the
 # job it made, and that echo is the operator's confirmation, so this must not be
 # redirected or captured.
-agent-mgr compose str exec -T hermes hermes cron create '0 3 * * *' \
+compose exec -T hermes hermes cron create '0 3 * * *' \
     --name wiki-nightly --script nightly.sh --no-agent

@@ -9,11 +9,18 @@
 # enablers; $1 is the container's HERMES_HOME.
 set -euo pipefail
 
+# Compose resolves its project from the directory, so anchor it to this repo
+# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
+# names a different project -- a dev checkout of this same repo is one -- and
+# reaches a container that is not this agent.
+repo=$(cd "$(dirname "$0")/.." && pwd)
+compose() { docker compose --project-directory "$repo" "$@"; }
+
 state=$1
-group_name=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_APPROVAL_GROUP=//p' '$state/.env' | tail -n1")
+group_name=$(compose exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_APPROVAL_GROUP=//p' '$state/.env' | tail -n1")
 [ -n "$group_name" ] || { echo "PLOW_CHAT_APPROVAL_GROUP not in the dotenv - name the owners' group that approves guest replies" >&2; exit 1; }
 
-chat_uid=$(agent-mgr compose str exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_GROUP_UIDS=//p' '$state/.env' | tail -n1" \
+chat_uid=$(compose exec -T hermes sh -c "sed -n 's/^PLOW_CHAT_GROUP_UIDS=//p' '$state/.env' | tail -n1" \
   | tr ',' '\n' | awk -F= -v want="$group_name" '
       { uid=$1; name=substr($0, index($0, "=") + 1)
         gsub(/^[ \t]+|[ \t]+$/, "", uid); gsub(/^[ \t]+|[ \t]+$/, "", name)

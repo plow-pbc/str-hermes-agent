@@ -3,7 +3,14 @@
 # after applying runtime/config.yaml. See README § Inbound guest messages.
 set -euo pipefail
 
-state=$(agent-mgr compose str exec -T hermes sh -c 'printf %s "$HERMES_HOME"')
+# Compose resolves its project from the directory, so anchor it to this repo
+# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
+# names a different project -- a dev checkout of this same repo is one -- and
+# reaches a container that is not this agent.
+repo=$(cd "$(dirname "$0")/.." && pwd)
+compose() { docker compose --project-directory "$repo" "$@"; }
+
+state=$(compose exec -T hermes sh -c 'printf %s "$HERMES_HOME"')
 [ -n "$state" ] || { echo "HERMES_HOME is unset in the container"; exit 1; }
 cursor="$state/hostex-poll-cursor.json"
 
@@ -13,7 +20,7 @@ cursor="$state/hostex-poll-cursor.json"
 # announce guests to an agent that cannot answer them. It exits non-zero and
 # `set -e` aborts before cron create runs; they are separate exec calls, so
 # that abort — not co-location — is what stops the job being created.
-agent-mgr compose str exec -T hermes sh -c '
+compose exec -T hermes sh -c '
   LINE=$(hermes tools list | grep hostex)
   [ -n "$LINE" ] || { echo "no hostex line - is the gateway up?"; exit 1; }
   case "$LINE" in *send_message*) ;;
@@ -27,7 +34,7 @@ agent-mgr compose str exec -T hermes sh -c '
 # reactivation). Captured, not piped, so a docker error aborts under `set -e`
 # rather than reading as "no job"; checked before priming, which is the half
 # that cannot be undone.
-existing=$(agent-mgr compose str exec -T hermes hermes cron list)
+existing=$(compose exec -T hermes hermes cron list)
 case "$existing" in
   *hostex-inbound*)
     echo "hostex-inbound already exists - remove it first (README, reactivation)"
@@ -50,10 +57,10 @@ chat_uid=$("$(dirname "$0")/owners-chat-uid" "$state")
 # `set -e`, before the case runs; the `*)` arm catches the narrower shape of a
 # clean exit with an answer we cannot read. Either way the run stops rather
 # than re-priming a warm cursor, which is the loss this branch prevents.
-present=$(agent-mgr compose str exec -T hermes sh -c "test -f '$cursor' && echo yes || echo no")
+present=$(compose exec -T hermes sh -c "test -f '$cursor' && echo yes || echo no")
 case "$present" in
   yes) echo "cursor present - priming skipped, so the script has not been run here" ;;
-  no)  agent-mgr compose str exec -T hermes python3 "$state/scripts/hostex-poll.py" >/dev/null
+  no)  compose exec -T hermes python3 "$state/scripts/hostex-poll.py" >/dev/null
        echo "cursor primed" ;;
   *)   echo "could not tell whether the cursor exists - not creating the job"; exit 1 ;;
 esac
@@ -75,7 +82,7 @@ esac
 #
 # USER_ID is deliberately absent. It resolves the mirror to one member, and
 # every member of this group is an owner who can approve.
-agent-mgr compose str exec -T \
+compose exec -T \
     -e HERMES_SESSION_PLATFORM=plow_chat \
     -e HERMES_SESSION_CHAT_ID="$chat_uid" \
     hermes hermes cron create "every 2m" \

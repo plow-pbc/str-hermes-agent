@@ -24,7 +24,7 @@ EXISTING_JOB = f"  Name:      {NAME}"
 # rather than re-implementing the scheduler, NUL-delimited so an argument
 # carrying a space cannot compare equal to two arguments.
 #
-FAKE_AGENT_MGR = """#!/usr/bin/env bash
+FAKE_DOCKER = """#!/usr/bin/env bash
 case "$*" in
   *"cron list"*)    [ -s "$JOBS" ] && cat "$JOBS"
                     exit ${PRE_LIST_OK:-0} ;;
@@ -44,12 +44,12 @@ exit 0
 def enable(tmp_path, *, create_ok=0, pre_list_ok=0, jobs_seed=""):
     calls, jobs, argv = tmp_path / "calls", tmp_path / "jobs", tmp_path / "argv"
     jobs.write_text(jobs_seed)
-    # agent-mgr, not docker: the enable scripts reach the container
-    # through it now, so that is the boundary the fake stands at. The
-    # case globs below match on "$*", so the extra `compose str` words
-    # pass straight through.
-    fake = tmp_path / "agent-mgr"
-    fake.write_text(FAKE_AGENT_MGR)
+    # docker: the enable scripts reach the container through
+    # `docker compose exec` now, so that is the boundary the fake stands at.
+    # The case globs below match on "$*", so the leading `compose ...` words
+    # pass straight through as they did for agent-mgr's.
+    fake = tmp_path / "docker"
+    fake.write_text(FAKE_DOCKER)
     fake.chmod(0o755)
     env = {**os.environ,
            "PATH": f"{tmp_path}:{os.environ['PATH']}",

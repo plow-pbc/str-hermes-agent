@@ -1,55 +1,51 @@
 #!/usr/bin/env bash
-# Install the tracked persona as the agent's SOUL. Runs on the HOST, at deploy.
+# Install runtime/SOUL.md as the agent's persona, from the host, without a rebuild.
 #
-# SOUL.md is the agent's identity, and the base image treats it as provisioned
-# rather than generated: plow-init seeds it only when absent and then, at every
-# container start, chowns it root:root and chmods it 0644 inside a home it owns
-# and marks sticky. The agent therefore cannot rewrite what it is -- which is
-# the point, and this script does not work around it. It publishes the same
-# static file the repo tracks, and only when the operator changes that file.
+# The image bakes the same file and docker/cont-init.d/05-install-agent-payload.sh
+# reinstalls it on every boot, so this is a stopgap for an edit that must land
+# now -- the durable change is runtime/SOUL.md plus `docker compose build`. The
+# next boot overwrites whatever this wrote, which is the intended direction: the
+# image is canonical.
 #
-# What is NOT here, deliberately: the vault index. It changes every night, and
-# pushing it through a file the platform freezes is what turned an earlier
-# attempt into an escalation-and-scheduling pipeline. The persona names
-# $HERMES_HOME/repo/vault/index.md and tells the agent to read it; the nightly
-# keeps that file current in the vault it already owns. Identity stays frozen,
-# knowledge stays live, and neither needs machinery to reach the other.
-#
-# So this runs at deploy and nowhere else. No cron calls it, which is why it can
-# require AGENT_CONTAINER outright: agent-mgr exports it (with AGENT_HOME) to
-# every deploy hook.
+# The vault index is deliberately not in the persona. plow-init treats SOUL.md as
+# provisioned identity and freezes it root:root 0644 at every start, so the SOUL
+# names $HERMES_HOME/repo/vault/index.md and tells the agent to read it; the
+# nightly keeps that file current in the vault it already owns. Identity stays
+# frozen, knowledge stays live, and neither needs machinery to reach the other.
 #
 #   scripts/publish-soul
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source_soul="$repo_root/runtime/SOUL.md"
-home="${AGENT_HOME:?publish-soul: AGENT_HOME is unset -- run me through 'agent-mgr deploy str'}"
-target="$home/SOUL.md"
+
+# Compose resolves its project from the directory, so anchor it to this repo
+# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
+# names a different project -- a dev checkout of this same repo is one -- and
+# publishes into a container that is not this agent.
+compose() { docker compose --project-directory "$repo_root" "$@"; }
 
 # -s, not -f: an empty persona publishes an agent with no instructions, which
 # reads like a healthy deploy and is the quietest failure this repo can ship.
 [ -s "$source_soul" ] || { echo "publish-soul: no persona at $source_soul" >&2; exit 1; }
 
-# Idempotent and quiet. The persona changes on the rare deploy that edits it, so
-# the normal case is that there is nothing to do -- and a rewrite that changes
-# no bytes still costs the gateway a prompt-cache miss on its next turn.
-if [ -f "$target" ] && cmp -s "$source_soul" "$target"; then
-    echo "publish-soul: already current"
-    exit 0
-fi
-
-# Staged in $home so the publish below is a same-directory rename. umask 077
-# while it is a temp file; it is widened to 0644 at the rename, which is the
-# mode plow-init enforces anyway.
-umask 077
-staged="$(mktemp "$target.XXXXXX")"
-trap 'rm -f "$staged"' EXIT
-cat "$source_soul" > "$staged"
-
-# The direct path first, established rather than inferred from a failing write:
-# before the agent's first boot nothing has hardened the target yet, and the
-# tests run against a scratch home that never will.
+# Everything happens inside the container. There is no host path to write: the
+# home is a named volume, and the only supported way in is the container that
+# mounts it. That also settles what used to be a two-branch script -- a direct
+# host write, falling back to an escalated exec once plow-init had taken the
+# file. The first branch cannot succeed against a volume, so it is gone rather
+# than kept as a path that only ever fails.
+#
+# The compare runs in here too, for the same reason, and it is not just tidiness:
+# the persona changes on the rare edit, so the normal case is that there is
+# nothing to do, and a rewrite that changes no bytes still costs the gateway a
+# prompt-cache miss on its next turn.
+#
+# mktemp inside $HERMES_HOME, not the container's default tmpdir: a rename is
+# only atomic within one filesystem. `:?` on HERMES_HOME -- unset or empty would
+# otherwise publish to the container's filesystem root. chown and chmod before
+# the mv, so the file arrives at its final identity in one step rather than
+# being widened after it is already live under that name.
 #
 # chmod then mv, never a `>` redirect and never install(1). Not the redirect:
 # fs.protected_regular=2 makes the kernel refuse to open an existing file in a
@@ -58,41 +54,29 @@ cat "$source_soul" > "$staged"
 # leaves the LIVE SOUL truncated. `mv` within one directory is a rename -- the
 # path resolves to the whole old file or the whole new one, never a partial.
 #
-# Stderr kept: if this fails for a reason other than "hardened" -- a missing
-# home, a full disk -- the escalation below is the wrong diagnosis, and
-# $direct_err is what lets the failure say what actually happened.
-if direct_err=$(chmod 644 "$staged" && mv "$staged" "$target" 2>&1); then
-    echo "publish-soul: published $target"
-    exit 0
-fi
-
-# Otherwise plow-init has taken the file and only root can replace it. Root is
-# reachable through the agent's own container without a host password, and
-# agent-mgr resolved which container that is. One escalated exec does the
-# rest, no `docker ps` preflight: unlike scripts/no-nightly-running, where
-# not-running is a pass that must be told apart from "the check could not
-# run", here not-running is a failure either way, and `docker exec` already
-# fails non-zero with Docker's own stderr saying so. It also inherits the
-# container's environment, so the inner shell reads HERMES_HOME directly --
-# no separate `printenv` round trip.
-container="${AGENT_CONTAINER:?publish-soul: could not write $target directly ($direct_err), and AGENT_CONTAINER is unset -- run me through 'agent-mgr deploy str'}"
-
-# mktemp inside $HERMES_HOME, not the container's default tmpdir: a rename is
-# only atomic within one filesystem. `:?` on HERMES_HOME -- unset or empty
-# would otherwise publish to the container's filesystem root. chown and chmod
-# before the mv, so the file arrives at its final identity in one step rather
-# than being widened after it is already live under that name.
-docker exec -u root -i "$container" sh -c '
+# No `docker ps` preflight: unlike scripts/no-nightly-running, where not-running
+# is a pass that must be told apart from "the check could not run", here
+# not-running is a failure either way and compose already exits non-zero with
+# its own stderr saying so.
+status=0
+compose exec -u root -T hermes sh -c '
     set -eu
     home="${HERMES_HOME:?publish-soul: HERMES_HOME is unset or empty inside the container}"
     tmp=$(mktemp "$home/SOUL.md.XXXXXX")
     trap "rm -f \"$tmp\"" EXIT
     cat > "$tmp"
+    if [ -f "$home/SOUL.md" ] && cmp -s "$tmp" "$home/SOUL.md"; then
+        echo "publish-soul: already current"
+        exit 3
+    fi
     chown root:root "$tmp"
     chmod 644 "$tmp"
     mv "$tmp" "$home/SOUL.md"
-' < "$staged" || {
-    echo "FATAL: could not publish the SOUL into ${container}" >&2
+    echo "publish-soul: published $home/SOUL.md as root:root 0644"
+' < "$source_soul" || status=$?
+
+# 3 is the no-op the inner shell reports, not a failure. Anything else is.
+[ "$status" -eq 0 ] || [ "$status" -eq 3 ] || {
+    echo "FATAL: could not publish the SOUL" >&2
     exit 1
 }
-echo "publish-soul: published $target as root:root 0644"

@@ -204,7 +204,7 @@ def test_the_draft_reaches_the_session_that_approves_it():
     enable = (ROOT / "scripts/enable-hostex-inbound.sh").read_text()
     # The last exec in the file is the create; sliced so the env pair has to sit
     # on that call rather than anywhere earlier, where it would do nothing.
-    create = enable.rsplit("agent-mgr compose str exec", 1)[1]
+    create = enable.rsplit("compose exec", 1)[1]
     assert "cron create" in create
     assert "-e HERMES_SESSION_PLATFORM=plow_chat" in create
     assert '-e HERMES_SESSION_CHAT_ID="$chat_uid"' in create
