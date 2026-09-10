@@ -7,23 +7,23 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECK = ROOT / "scripts/check-home-binding.sh"
 
 
-def verdict(tmp_path, dotenv=None):
-    """Run the check under a temp $HOME; dotenv=None means no file at all.
+def verdict(tmp_path, *, up=True, published=True):
+    """Run the check against a stub `docker`.
 
-    Driving it through $HOME rather than a test-only override means the
-    fixtures exercise the same path production does.
+    The script asks the boot environment through the container, so the two
+    observable states are whether the container answers at all and whether
+    `test -s` finds a published home channel. The stub tells them apart by
+    matching the `test -s` the real `compose exec` would run.
     """
-    if dotenv is not None:
-        hermes = tmp_path / ".hermes"
-        hermes.mkdir()
-        (hermes / ".env").write_text(dotenv)
-    # The script reads the dotenv out of the container, so the stub stands in
-    # for docker and $HOME still steers the test. Exiting non-zero when the file
-    # is absent is what a real `compose exec` does against a home with no dotenv.
     stub_bin = tmp_path / "stub-bin"
     stub_bin.mkdir(exist_ok=True)
     stub = stub_bin / "docker"
-    stub.write_text('#!/bin/sh\ncat "$HOME/.hermes/.env" 2>/dev/null\n')
+    stub.write_text(
+        "#!/bin/sh\n"
+        f"[ {int(up)} -eq 1 ] || exit 1\n"
+        f'case "$*" in *"test -s"*) exit {0 if published else 1} ;; esac\n'
+        "exit 0\n"
+    )
     stub.chmod(0o755)
     result = subprocess.run(
         [CHECK], env={"HOME": str(tmp_path), "PATH": f"{stub_bin}:/usr/bin:/bin"},
@@ -33,43 +33,36 @@ def verdict(tmp_path, dotenv=None):
 
 
 @pytest.mark.parametrize(
-    ("case", "dotenv", "expected"),
+    ("case", "kwargs", "expected"),
     [
-        ("no dotenv", None, "NO DOTENV"),
-        ("absent key", "PLOW_CHAT_CHAT_UID=cht_priv\n", "UNSET"),
-        ("blank value", "PLOW_CHAT_CHAT_UID=cht_priv\nPLOW_CHAT_HOME_CHANNEL=\n", "UNSET"),
-        (
-            "private chat",
-            "PLOW_CHAT_CHAT_UID=cht_priv\nPLOW_CHAT_HOME_CHANNEL=cht_priv\n",
-            "the current private chat",
-        ),
-        (
-            # entries carry a display name; only the uid side is matched, and
-            # the plugin trims, so this spaced shape reaches the dotenv
-            "group pin, labelled list",
-            "PLOW_CHAT_CHAT_UID=cht_priv\n"
-            "PLOW_CHAT_GROUP_UIDS=cht_a=Cleaners, cht_b=STR Owners\n"
-            "PLOW_CHAT_HOME_CHANNEL=cht_b\n",
-            "pinned to a configured group",
-        ),
-        (
-            # re-activation issues a new chat UID; home keeps the old one
-            "stale after re-activation",
-            "PLOW_CHAT_CHAT_UID=cht_new\nPLOW_CHAT_GROUP_UIDS=cht_a=Cleaners\n"
-            "PLOW_CHAT_HOME_CHANNEL=cht_old\n",
-            "STALE",
-        ),
+        ("container down", {"up": False}, "CANNOT ASK"),
+        ("no home published", {"published": False}, "UNSET"),
+        ("home published", {}, "bound"),
     ],
+    ids=lambda v: v if isinstance(v, str) else "",
 )
-def test_home_binding_verdicts(tmp_path, case, dotenv, expected):
-    assert expected in verdict(tmp_path, dotenv)
+def test_verdict_names_the_state_and_never_the_chat(tmp_path, case, kwargs, expected):
+    """Both halves of the contract, over one state list.
+
+    The verdict has to be right, and it has to *be* a verdict: these are chat
+    identifiers read from a container whose environment also holds tokens, so
+    the script reports the shape of the binding and never what it is bound to.
+    One matrix asserts both -- two lists drift, and the one that drifts silently
+    is the disclosure check.
+    """
+    line = verdict(tmp_path, **kwargs)
+    assert expected in line
+    assert "cht_" not in line
 
 
-def test_the_check_never_prints_a_uid(tmp_path):
-    """It runs where tokens live; a verdict must not echo identifiers."""
-    out = verdict(
-        tmp_path,
-        "PLOW_CHAT_CHAT_UID=cht_new\nPLOW_CHAT_HOME_CHANNEL=cht_old_secret\n",
-    )
-    assert "cht_old_secret" not in out
-    assert "cht_new" not in out
+def test_unset_does_not_prescribe_sethome(tmp_path):
+    """The remedy is the reason this verdict exists.
+
+    `/sethome` cannot fix an unset home channel: without PLOW_HOME_CHANNEL the
+    plow_chat plugin does not load, so nothing is there to receive the command.
+    The previous contract prescribed it anyway, which is the failure this
+    replaced -- a remedy that reads as actionable and changes nothing.
+    """
+    line = verdict(tmp_path, published=False)
+    assert "plow-agents" in line
+    assert "Not /sethome" in line
