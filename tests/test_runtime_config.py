@@ -128,10 +128,11 @@ def test_restore_script_populates_fresh_hermes_home(tmp_path, restore_env):
     # is a no-op rather than a change it has to make back.
     assert stat.S_IMODE(soul.stat().st_mode) == 0o644
     # This script writes no dotenv of its own, and the check stays rather than
-    # becoming a comment: it is what proves the sentence two docs assert -- the
-    # /sethome target lives in that file as PLOW_CHAT_HOME_CHANNEL, so a seed
-    # copy or a publish-soul that grew into it would clobber the host's real
-    # tokens with nothing red. Non-vacuous under the stub, which only mkdirs.
+    # becoming a comment: the home's dotenv holds the Hostex and Seam tokens, so
+    # a seed copy or a publish-soul that grew into it would clobber them with
+    # nothing red. (It no longer holds the home binding -- that is
+    # PLOW_HOME_CHANNEL in the boot environment -- but the tokens are reason
+    # enough.) Non-vacuous under the stub, which only mkdirs.
     assert not (home / ".env").exists()
     assert not (home / "channel_directory.json").exists()
     # The other half of one restore: the hand-authored seed lands in the runtime

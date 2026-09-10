@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Which chat is Hermes bound to for /sethome deliveries, and is it usable?
+# Which chat is Hermes bound to for home deliveries, and is it usable?
 #
 # Prints exactly one verdict line and no values — these are chat identifiers,
 # and the file they come from also holds tokens.

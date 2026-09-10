@@ -204,7 +204,7 @@ Before `TZ` was set the container ran UTC and both sides were
 directly comparable — which is why an older transcript of this step compares
 them with no conversion and still looks right.
 
-**This is a proxy for delivery, not proof.** It shows the gateway holds a websocket to Plow. It does not show that a text from the operator's phone reaches the agent and gets a reply — that involves the Plow line, the pairing, and the home binding in `/var/lib/hermes/.env`, and only a real text exercises it.
+**This is a proxy for delivery, not proof.** It shows the gateway holds a websocket to Plow. It does not show that a text from the operator's phone reaches the agent and gets a reply — that involves the Plow line, the pairing, and the home binding — `PLOW_HOME_CHANNEL`, from the credential, per `./scripts/check-home-binding.sh` — and only a real text exercises it.
 
 ## 5. The serving gate — a real message from a handset
 
@@ -260,5 +260,5 @@ diagnostics alone.
 | Hostex `chat` | agent loop reached the tool | whether the call succeeded |
 | `mcp test hostex` | the server connects and registers tools | the credential |
 | `mcp test seam` | lock surface configured | whether locks respond |
-| Plow log | gateway holds the socket | delivery, and the home binding in `/var/lib/hermes/.env` |
+| Plow log | gateway holds the socket | delivery, and the home binding — `./scripts/check-home-binding.sh` owns that verdict |
 | handset message | the whole path a real message takes, including the line and the pairing | Hostex guest intake |
