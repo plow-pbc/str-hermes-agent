@@ -29,6 +29,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 PUBLISH = ROOT / "scripts" / "publish-soul"
 PERSONA = ROOT / "runtime" / "SOUL.md"
@@ -81,31 +83,33 @@ class Home:
             check=True, capture_output=True, text=True).stdout.strip()
 
 
-def home(tmp_path: Path) -> Home:
-    return Home(tmp_path)
-
-
-def test_publishes_the_persona_verbatim_at_plow_inits_mode(tmp_path: Path) -> None:
-    """Byte-identical to the tracked file, at the mode the boot hardening sets."""
-    h = home(tmp_path)
+@pytest.fixture
+def home(tmp_path: Path):
+    """One scratch home per test, removed however the test ends."""
+    h = Home(tmp_path)
     try:
-        result = h.run()
-        assert result.returncode == 0, result.stderr
-        # sha and mode read together in one probe: two containers could not see
-        # the same instant, and the mode is meaningless about a different file.
-        got = h.probe('sha256sum /tmp/h/SOUL.md | cut -d" " -f1; stat -c %a /tmp/h/SOUL.md')
-        digest, mode = got.splitlines()
-        expected = subprocess.run(["sha256sum", str(PERSONA)], check=True,
-                                  capture_output=True, text=True).stdout.split()[0]
-        assert digest == expected
-        # 0644 is what harden_home() sets at every container start, so publishing
-        # at that mode makes the hardening a no-op rather than a change it undoes.
-        assert mode == "644"
+        yield h
     finally:
         h.remove()
 
 
-def test_carries_the_index_path_and_not_the_index(tmp_path: Path) -> None:
+def test_publishes_the_persona_verbatim_at_plow_inits_mode(home: Home) -> None:
+    """Byte-identical to the tracked file, at the mode the boot hardening sets."""
+    result = home.run()
+    assert result.returncode == 0, result.stderr
+    # sha and mode read together in one probe: two containers could not see
+    # the same instant, and the mode is meaningless about a different file.
+    got = home.probe('sha256sum /tmp/h/SOUL.md | cut -d" " -f1; stat -c %a /tmp/h/SOUL.md')
+    digest, mode = got.splitlines()
+    expected = subprocess.run(["sha256sum", str(PERSONA)], check=True,
+                              capture_output=True, text=True).stdout.split()[0]
+    assert digest == expected
+    # 0644 is what harden_home() sets at every container start, so publishing
+    # at that mode makes the hardening a no-op rather than a change it undoes.
+    assert mode == "644"
+
+
+def test_carries_the_index_path_and_not_the_index(home: Home) -> None:
     """The regression this whole change exists to prevent.
 
     Pasting the vault index in is what forced a root-escalation-and-scheduling
@@ -120,53 +124,41 @@ def test_carries_the_index_path_and_not_the_index(tmp_path: Path) -> None:
     artifact's actual content, like this one, catches that. Do not delete this in
     favor of the byte-equality check.
     """
-    h = home(tmp_path)
-    try:
-        assert h.run().returncode == 0
-        body = h.probe("cat /tmp/h/SOUL.md")
-        assert "index.md" in body
-        assert "## Properties" not in body, "the vault index was composed into the SOUL"
-    finally:
-        h.remove()
+    assert home.run().returncode == 0
+    body = home.probe("cat /tmp/h/SOUL.md")
+    assert "index.md" in body
+    assert "## Properties" not in body, "the vault index was composed into the SOUL"
 
 
-def test_second_run_is_quiet_and_rewrites_nothing(tmp_path: Path) -> None:
+def test_second_run_is_quiet_and_rewrites_nothing(home: Home) -> None:
     """Only the rare run that edits the persona should write.
 
     mtime read with %y, not %Y: seconds-granularity cannot tell a rewrite from a
     no-op when both runs land in the same second, which is the normal case.
     """
-    h = home(tmp_path)
-    try:
-        assert h.run().returncode == 0
-        before = h.probe("stat -c %y /tmp/h/SOUL.md")
-        result = h.run()
-        assert result.returncode == 0, result.stderr
-        assert "already current" in result.stdout
-        assert h.probe("stat -c %y /tmp/h/SOUL.md") == before, "rewrote an unchanged SOUL"
-    finally:
-        h.remove()
+    assert home.run().returncode == 0
+    before = home.probe("stat -c %y /tmp/h/SOUL.md")
+    result = home.run()
+    assert result.returncode == 0, result.stderr
+    assert "already current" in result.stdout
+    assert home.probe("stat -c %y /tmp/h/SOUL.md") == before, "rewrote an unchanged SOUL"
 
 
-def test_refuses_an_empty_persona_and_leaves_the_live_soul_alone(tmp_path: Path) -> None:
+def test_refuses_an_empty_persona_and_leaves_the_live_soul_alone(home: Home, tmp_path: Path) -> None:
     """An empty identity reads like a healthy deploy, so it must fail loudly.
 
     Exercised through a repo copy rather than by emptying the tracked file: the
     persona's own path is what the script derives from its location.
     """
-    h = home(tmp_path)
-    try:
-        assert h.run().returncode == 0
-        published = h.probe("cat /tmp/h/SOUL.md")
+    assert home.run().returncode == 0
+    published = home.probe("cat /tmp/h/SOUL.md")
 
-        fake_repo = tmp_path / "repo"
-        (fake_repo / "scripts").mkdir(parents=True)
-        (fake_repo / "runtime").mkdir()
-        (fake_repo / "runtime" / "SOUL.md").write_text("")
-        (fake_repo / "scripts" / "publish-soul").write_bytes(PUBLISH.read_bytes())
-        (fake_repo / "scripts" / "publish-soul").chmod(0o755)
+    fake_repo = tmp_path / "repo"
+    (fake_repo / "scripts").mkdir(parents=True)
+    (fake_repo / "runtime").mkdir()
+    (fake_repo / "runtime" / "SOUL.md").write_text("")
+    (fake_repo / "scripts" / "publish-soul").write_bytes(PUBLISH.read_bytes())
+    (fake_repo / "scripts" / "publish-soul").chmod(0o755)
 
-        assert h.run(script=fake_repo / "scripts" / "publish-soul").returncode != 0
-        assert h.probe("cat /tmp/h/SOUL.md") == published, "clobbered the live SOUL"
-    finally:
-        h.remove()
+    assert home.run(script=fake_repo / "scripts" / "publish-soul").returncode != 0
+    assert home.probe("cat /tmp/h/SOUL.md") == published, "clobbered the live SOUL"
