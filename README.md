@@ -861,10 +861,11 @@ group is re-created — the trap is the same one, and it does not announce
 itself.
 
 <a name="hostex-reactivation"></a>
-**After re-creating the owners' group, the job must be recreated.**
-`cron create` bakes the resolved chat UID in, so the job still points at the
-old group and its announcements go somewhere no one reads — and a job with a
-stale target still advances the shared cursor, so the guest it consumed is
+**After re-creating the owners' group, every job that names it must be
+recreated** — `hostex-inbound`, `checkin-watch` and `wiki-nightly`.
+`cron create` bakes the resolved chat UID in, so a job still points at the
+old group and its announcements go somewhere no one reads — and `hostex-inbound`
+with a stale target still advances the shared cursor, so the guest it consumed is
 never announced at all.
 
 Re-running activation does *not* strand it: that writes
@@ -880,7 +881,14 @@ trigger. In order:
    ```sh
    docker compose exec hermes hermes cron remove hostex-inbound
    ./scripts/enable-hostex-inbound.sh
+   docker compose exec hermes hermes cron remove checkin-watch
+   ./scripts/enable-checkin-watch.sh
+   docker compose exec hermes hermes cron remove wiki-nightly
+   ./scripts/enable-wiki-nightly.sh
    ```
+
+   Skip any that `hermes cron list` does not show. Not while the 03:00 run is in
+   flight: the nightly chain ingests into the vault.
 
 3. Read the delivery target back, which is the one thing the enable script
    cannot confirm — `cron create` echoes name, schedule and next run, not

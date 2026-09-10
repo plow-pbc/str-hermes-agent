@@ -100,15 +100,13 @@ def test_the_nightly_never_asks_a_cli_turn_to_send():
         "these name a delivery channel to a platform-less CLI turn:\n  "
         + "\n  ".join(offenders))
 
-    # Same contract, other half: stdout IS the delivered message now, verbatim.
-    # Fetch counts, ingest progress, lint findings, hub output and the vault
-    # suite belong in the cron log, so every step but the digest redirects. Miss
-    # one and the owners get a wall of tool output wrapped around their digest.
-    noisy = [line.strip()[:90] for line in body.splitlines()
-             if not line.lstrip().startswith("#")
-             and (line.lstrip().startswith(('"$BIN/', 'if ! "$BIN/', '(cd "$VAULT"'))
-                  or "uv run" in line or "hermes chat" in line)
-             and ">&2" not in line and "wiki-digest" not in line]
-    assert not noisy, (
-        "these reach the delivered message instead of the cron log:\n  "
-        + "\n  ".join(noisy))
+    # Same contract, other half: stdout IS the delivered message, so the script
+    # routes it once -- stderr by default, fd 3 for the two things the scheduler
+    # should send. Asserted as ordering rather than by scanning each command,
+    # because the failure mode is specific: lose the `exec` and every `>&3`
+    # write hits a closed descriptor, stdout arrives empty, and an empty stdout
+    # is delivered as nothing. Silent, again.
+    lines = [l.strip() for l in body.splitlines() if not l.lstrip().startswith("#")]
+    opens = next(i for i, l in enumerate(lines) if l == "exec 3>&1 1>&2")
+    first_use = next(i for i, l in enumerate(lines) if ">&3" in l)
+    assert opens < first_use, "fd 3 is written before it is opened"

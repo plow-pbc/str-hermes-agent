@@ -18,11 +18,17 @@
 # an empty stdout is delivered as nothing — which is why every path prints.
 # `notify()` carries the rest of that contract.
 #
-# The corollary, and the reason for the `>&2` on every step below: stdout is the
-# MESSAGE now, delivered verbatim. Fetch counts, ingest progress, lint findings,
-# hub output and the vault suite all belong in the cron log, not in the owners'
-# chat, so each writes to stderr. Only an abort and the digest reach stdout.
+# The corollary: stdout is the MESSAGE now, delivered verbatim. Fetch counts,
+# ingest progress, lint findings, hub output and the vault suite belong in the
+# cron log, not the owners' chat. So the routing is one policy rather than a
+# redirect per command -- see the `exec` below.
 set -uo pipefail
+
+# Stderr is the default, and fd 3 is the delivered channel. Everything this
+# script runs is diagnostics for the cron log; only `notify()` and the digest
+# write to fd 3, so a step added later is quiet by default rather than quiet
+# only if whoever added it remembered a redirect.
+exec 3>&1 1>&2
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
 # here, rather than hardcoding the literal, keeps VAULT correct across base
@@ -47,11 +53,11 @@ note() { STATUS+="$1; "; echo "nightly: $1" >&2; }
 # rather than fail: two hours and 32 tool calls once, holding the vault
 # throughout. Printing cannot do that. See #49.
 notify() {
+  echo "nightly: $1" >&3
   echo "nightly: $1"
-  echo "nightly: $1" >&2
 }
 
-if ! "$BIN/hostex-raw" --vault "$VAULT" >&2; then
+if ! "$BIN/hostex-raw" --vault "$VAULT"; then
   # Fetch failure leaves the vault untouched and consistent — still report,
   # or the silence reads as death.
   notify "Wiki nightly FAILED at fetch. Vault unchanged."
@@ -63,7 +69,7 @@ fi
 # doing it inline here meant the nightly run silently ingested a fraction of
 # what arrived and nothing noticed. ingest-all loops and asserts coverage from
 # the manifest between rounds.
-if ! "$BIN/ingest-all" "$VAULT" >&2; then
+if ! "$BIN/ingest-all" "$VAULT"; then
   # Stop, do not note-and-continue. Carrying on through lint and digest after
   # a terminal ingest failure reports a partially-ingested night as a normal
   # one.
@@ -72,7 +78,7 @@ if ! "$BIN/ingest-all" "$VAULT" >&2; then
   exit 1
 fi
 
-if ! hermes chat -q "Use the wiki-lint skill on the vault at ${VAULT}. Report contradictions, orphaned pages, and stale citations." >&2; then
+if ! hermes chat -q "Use the wiki-lint skill on the vault at ${VAULT}. Report contradictions, orphaned pages, and stale citations."; then
   note "lint errored"
 fi
 
@@ -106,11 +112,11 @@ fi
 # defect here has to be reported through it rather than silenced by an abort.
 # The pages are already written by now; aborting would not unwrite them, it
 # would only withhold the news.
-if ! "$BIN/build-hubs" "$VAULT" >&2; then
+if ! "$BIN/build-hubs" "$VAULT"; then
   note "hub rebuild failed; property hubs may not list tonight's pages"
 fi
 
-(cd "$VAULT" && uv run --no-project --python 3.13 --with pytest==8.4.2 pytest -q) >&2
+(cd "$VAULT" && uv run --no-project --python 3.13 --with pytest==8.4.2 pytest -q)
 rc=$?
 if [ "$rc" -eq 1 ]; then
   note "vault integrity FAILED; see the cron log"
@@ -124,7 +130,7 @@ fi
 # scheduler delivers this script's stdout -- so the bound now covers reading the
 # vault and writing a summary, not an unwinnable hunt for a channel this process
 # does not have.
-if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the vault at ${VAULT} for the last day. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all."; then
+if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the vault at ${VAULT} for the last day. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
   echo "nightly: the digest did not send within 600s" >&2
   exit 1
 fi
