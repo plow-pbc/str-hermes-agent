@@ -390,7 +390,7 @@ belongs there; this repo only follows, by bumping its pin if it holds one.
 Not here:
 
 - **Send enforcement and trust state.** The `plow_chat` plugin
-  ([`hermes-plow-chat`](https://github.com/plow-pbc/hermes-plow-chat)) gates
+  ([`hermes-plugin-plow`](https://github.com/plow-pbc/hermes-plugin-plow)) gates
   outbound sends and [`plow`](https://github.com/plow-pbc/plow) holds which
   chats are trusted. What *is* this repo's is the STR-specific eligibility
   rule — which guest may be answered, and on whose approval — which lives in
@@ -586,7 +586,7 @@ Activating a second number means naming that agent's data directory:
 ```sh
 # The pin came from agent-mgr, which is deprecated and no longer carries the
 # file -- see #44 before running this.
-bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plow-chat/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir /var/lib/hermes-second
+bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plugin-plow/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir /var/lib/hermes-second
 ```
 
 The rest of this section pairs *this* agent, through the `hermes` container and
