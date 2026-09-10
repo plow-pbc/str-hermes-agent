@@ -132,9 +132,10 @@ def main():
             print(f"REPLY: {reply}")
             return 0
     print(f"TIMEOUT after {TIMEOUT:.0f}s — no reply carrying {nonce}. The message left this "
-          "Mac. Before suspecting the line, place the failure: grep "
-          "~/.hermes/logs/gateway.log on wakeup for an 'inbound message' line naming this "
-          "chat after the send. Absent, it never arrived and the line and the pairing are "
+          "Mac. Before suspecting the line, place the failure: `just logs hermes` on "
+          "wakeup, for an 'inbound message' line naming this chat after the send. The "
+          "container's own stream, not a file under the retired host home, which #39 "
+          "froze. Absent, it never arrived and the line and the pairing are "
           "where to look. Present, it did, and the fault is downstream of every leg this "
           "probe covers — re-run with a larger HANDSET_TIMEOUT before concluding which "
           "one, since a slow turn and a lost reply look identical from here. Neither log "
