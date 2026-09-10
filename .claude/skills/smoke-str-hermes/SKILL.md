@@ -12,12 +12,12 @@ Since #39 the home is the `agent-home` volume, so a `logs/` directory left on
 the host is a leftover of the last agent-mgr boot: frozen, and still full of
 plausible-looking lines. A probe that greps it answers a question about a
 generation that ended, and it fails *quietly* — the file is present and
-parseable, so nothing tells you the answer is stale. `agent-mgr compose str
-logs hermes` is the live surface. The same applies to a host
+parseable, so nothing tells you the answer is stale. `just logs hermes` is the live
+surface. The same applies to a host
 `gateway_state.json`, which records the platform states written by the last
 gateway to shut down cleanly, not the running one.
 
-`agent-mgr compose str ps` showing `Up`, a green `agent-mgr up str`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
+`just ps` showing `Up`, a green `agent-mgr up str`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
 
 **What these probes do and do not prove.** `hermes chat` starts a *fresh
 process* inside the container, which reads `/var/lib/hermes/config.yaml` at its own
@@ -71,17 +71,17 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 ## 1. Liveness — does the agent answer at all
 
 ```sh
-agent-mgr compose str exec -T hermes hermes chat -q 'Reply with exactly: PONG' < /dev/null
+just agent hermes chat -q 'Reply with exactly: PONG' < /dev/null
 ```
 
 Expect `PONG` in the reply box. This proves the container is serving, the model route resolves, and its credentials are valid.
 
-A hang means the model provider is unreachable or OAuth expired — check with `agent-mgr compose str run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `/var/lib/hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
+A hang means the model provider is unreachable or OAuth expired — check auth with a throwaway container — the one legitimate `run`, and the only probe here that still needs the agent-mgr spelling, since it deliberately bypasses the serving container that `just agent` execs into: `agent-mgr compose str run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null`. If agent-mgr reports the service is not running, it is addressing the wrong compose project (#48) and this fallback is unavailable. An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `/var/lib/hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
 
 ## 2. Tool reachability — does it still reach Hostex
 
 ```sh
-agent-mgr compose str exec -T hermes hermes chat -q \
+just agent hermes chat -q \
   'Use your Hostex tools to tell me how many reservations arrive in the next 30 days. Answer with just the number and the word reservations.' < /dev/null
 ```
 
@@ -110,7 +110,7 @@ Then check the server itself connects — a separate concern from the
 credential:
 
 ```sh
-agent-mgr compose str exec -T hermes hermes mcp test hostex < /dev/null
+just agent hermes mcp test hostex < /dev/null
 ```
 
 Expect `✓ Connected` and a tool count.
@@ -125,7 +125,7 @@ credential as verified on a smoke run alone.
 ## 3. Lock surface — is Seam configured
 
 ```sh
-agent-mgr compose str exec -T hermes hermes mcp test seam < /dev/null
+just agent hermes mcp test seam < /dev/null
 ```
 
 Expect every tool named in `runtime/config.yaml` under
@@ -157,8 +157,8 @@ hardware in a smoke test.
 Grep each pattern separately and require both. A single `grep -E 'A|B' | tail -2` is satisfied by two matches of the *same* alternative, and the pipe swallows grep's exit status so an empty log reads as a silent pass:
 
 ```sh
-agent-mgr compose str logs hermes | grep -c '✓ plow_chat connected'
-agent-mgr compose str logs hermes | grep -c 'websocket subscribed'
+just logs hermes | grep -c '✓ plow_chat connected'
+just logs hermes | grep -c 'websocket subscribed'
 ```
 
 The two lines have different owners, and only one of them is ours. `✓ plow_chat
@@ -183,8 +183,8 @@ the container actually started:
 
 ```sh
 docker inspect -f '{{.State.StartedAt}}' hermes
-agent-mgr compose str logs hermes | grep '✓ plow_chat connected' | tail -1
-agent-mgr compose str logs hermes | grep 'websocket subscribed' | tail -1
+just logs hermes | grep '✓ plow_chat connected' | tail -1
+just logs hermes | grep 'websocket subscribed' | tail -1
 ```
 
 **These two are in different zones — convert before comparing.** `StartedAt` is

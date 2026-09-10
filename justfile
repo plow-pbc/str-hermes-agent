@@ -50,6 +50,32 @@ restart:
     ./scripts/no-nightly-running
     docker compose -f compose.yml up -d --force-recreate
 
+# Read-only reach into the serving container. These exist because the operator
+# skills need them and the alternative spellings do not work: `agent-mgr compose
+# str ...` resolves AGENT_PROJECT=hermes-str while compose.yml runs the stack as
+# sams-str-hermes-agent, so `exec` reports the service is not running and `logs`
+# prints nothing at all -- a troubleshooting step that reads as a clean log.
+#
+# No nightly veto: none of these transition the container. `exec`, never `run`
+# -- `run` starts a second gateway from the image, which evicts the live one
+# from its chat websockets. That is the hazard tests/test_instance_contract.py
+# keeps out of bin/ and scripts/ by routing them through agent-mgr; here the
+# recipe shape is the guard, since a recipe cannot be spelled `run` by accident.
+logs *ARGS:
+    docker compose -f compose.yml logs {{ARGS}}
+
+ps:
+    docker compose -f compose.yml ps
+
+# A probe inside the container, with the boot environment loaded. s6 publishes
+# the agent's identity into /run/s6/container_environment; an exec'd process
+# inherits none of it, so a bare `hermes chat` 401s with "Invalid or revoked
+# token" against a perfectly healthy gateway -- the same string a real
+# revocation prints, which is why this wrapper exists rather than a note.
+agent *ARGS:
+    docker compose -f compose.yml exec -T hermes sh -c \
+      'for f in /run/s6/container_environment/*; do export "$(basename "$f")=$(cat "$f")"; done; exec "$@"' _ {{ARGS}} < /dev/null
+
 # The image first: tests/test_image_contents.py and tests/test_vault_guard.py
 # assert against this exact tag, and without it 16 of them fail from a clean
 # checkout -- including the one that keeps the private vault out of a public

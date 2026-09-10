@@ -23,7 +23,7 @@ mid-sentence while the agent keeps serving, which reads as an outage that is
 not happening, and nothing about the files says so.
 
 Every path below written `/var/lib/hermes/...` is **inside the container**.
-Reach it with `agent-mgr compose str exec -T hermes …`; editing the host
+Reach it with `just agent …`; editing the host
 directory of the same name changes nothing the agent reads. Confirm the shape
 before trusting any host path:
 
@@ -182,7 +182,7 @@ it. The build is safe before anything knows the contract: nothing in it reads
 `AGENT_HOME_TARGET`.
 
 ```sh
-agent-mgr compose str build
+docker build -t sams-str-hermes-agent:local .
 ```
 
 ```sh
@@ -250,7 +250,7 @@ Troubleshooting.
 ## 4. Bring it up
 
 ```sh
-agent-mgr compose str up -d --force-recreate
+just restart
 ```
 
 **Stop if it refuses.** Force-recreating the container mid-ingest can land
@@ -317,7 +317,7 @@ job exists, so a redeploy recreates the container around the old job. `origin`
 is not in `cron list`, so an inspection cannot rule the second one out.
 
 ```sh
-agent-mgr compose str exec -T hermes hermes cron list
+just agent hermes cron list
 ```
 
 No `hostex-inbound` job — skip. A job predating either change is recreated, not
@@ -359,7 +359,7 @@ after is the confirmation and it prints the line rather than a verdict, because
 ## 5. Verify
 
 ```sh
-agent-mgr compose str ps --format '{{.Name}} {{.Status}}'
+just ps --format '{{.Name}} {{.Status}}'
 ```
 
 Expect `hermes Up ...`. `Restarting` is a crash loop — see Troubleshooting.
@@ -382,9 +382,9 @@ verified once it does.
 
 | Symptom | Cause | Move |
 |---|---|---|
-| `Restarting` loop | bad config or missing credential | `agent-mgr compose str logs --tail 50 hermes` — the container's own stream, and the only one that is live. A `logs/gateway.log` under the old host home is a frozen artifact of the last boot before #39 and will describe an outage that ended |
+| `Restarting` loop | bad config or missing credential | `just logs --tail 50 hermes` — the container's own stream, and the only one that is live. A `logs/gateway.log` under the old host home is a frozen artifact of the last boot before #39 and will describe an outage that ended |
 | `mcp test seam` says not found | live config predates the Seam block, or step 3's script was missing | re-run steps 3 and 4; confirm `mcp_servers.seam` is in `runtime/config.yaml` |
-| Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `agent-mgr compose str exec -T hermes ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
+| Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `just agent ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
 | Files in `~/.hermes` owned by `501`, or by another account | **agent-mgr shape only.** Under the volume shape nothing on the host backs the home, so this cannot occur; seeing it means the rollback compose is in play | confirm the shape first with the `docker inspect` mount check at the top of this file. If it really is the bind shape: re-own it (`sudo chown -R $(id -u):$(id -g) ~/.hermes`) then recreate |
 | Agent ignores the home chat | home binding unset or stale in `/var/lib/hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
