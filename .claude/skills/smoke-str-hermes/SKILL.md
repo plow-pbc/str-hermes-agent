@@ -178,7 +178,7 @@ docker compose exec -T hermes grep 'websocket connected' /var/lib/hermes/logs/ag
 ```
 
 **These two are in different zones — convert before comparing.** `StartedAt` is
-RFC3339 `Z`, always UTC; Docker emits nothing else. `gateway.log` prefixes
+RFC3339 `Z`, always UTC; Docker emits nothing else. `agent.log` prefixes
 `YYYY-MM-DD HH:MM:SS,mmm` through Python logging, which renders in the
 *container's* local time — and `TZ` in `compose.yml` sets that to
 `America/Los_Angeles`, so the log reads Pacific and matches wakeup's own
@@ -186,7 +186,7 @@ RFC3339 `Z`, always UTC; Docker emits nothing else. `gateway.log` prefixes
 
 ```text
 StartedAt:   2026-07-31T23:46:54.015288458Z
-gateway.log: 2026-07-31 16:46:59,252 INFO gateway.run: ✓ plow_chat connected
+agent.log: 2026-07-31 16:46:59,252 INFO gateway.run: ✓ plow_chat connected
 ```
 
 Five seconds apart, not seven hours. Compare the fields directly and every

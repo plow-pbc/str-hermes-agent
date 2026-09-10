@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -58,16 +59,26 @@ def read_token() -> str:
     container that had lost it, which is the "silently resolving somewhere the
     enable script does not look" case the poller's docstring rejects.
     """
-    candidates = [
-        Path(os.environ["HERMES_HOME"]) / ".env" if os.environ.get("HERMES_HOME") else None,
-        Path.home() / ".hermes" / ".env",
-    ]
-    for env in candidates:
-        if env and env.exists():
-            for line in env.read_text().splitlines():
-                if line.startswith("HOSTEX_TOKEN="):
-                    return line.split("=", 1)[1].strip()
-    sys.exit("HOSTEX_TOKEN not found in $HERMES_HOME/.env or ~/.hermes/.env")
+    env = Path(os.environ["HERMES_HOME"]) / ".env" if os.environ.get("HERMES_HOME") else None
+    if env and env.exists():
+        for line in env.read_text().splitlines():
+            if line.startswith("HOSTEX_TOKEN="):
+                return line.split("=", 1)[1].strip()
+    # Run from the host, HERMES_HOME is unset and there is no host path to the
+    # home -- it is a named volume. Ask the container that mounts it. The
+    # previous fallback read ~/.hermes/.env, which still EXISTS on the deploy
+    # host, frozen at the cutover: it returned a stale token and looked like a
+    # success.
+    compose = Path(__file__).resolve().parent.parent / "scripts" / "compose"
+    found = subprocess.run(
+        [str(compose), "exec", "-T", "hermes", "sh", "-c",
+         'sed -n "s/^HOSTEX_TOKEN=//p" "$HERMES_HOME/.env" | tail -1'],
+        capture_output=True, text=True)
+    token = found.stdout.strip()
+    if token:
+        return token
+    sys.exit("HOSTEX_TOKEN not in $HERMES_HOME/.env, and the container could not "
+             f"be asked for it: {found.stderr.strip() or 'no output'}")
 
 
 def api_get(path: str, tok: str, **params: object) -> dict:
