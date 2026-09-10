@@ -15,6 +15,7 @@ A hook the tool calls has no copies and no blind spots, so what is left to test
 is the guard's own behaviour.
 """
 import os
+import re
 import subprocess
 
 import pytest
@@ -83,3 +84,18 @@ def test_guard_outcomes(tmp_path, running, exec_status, container, ok, error):
 # when the hook did not run. A test asserting those lines exist duplicates them
 # and makes exact prose part of the contract, which is the churn six rounds of
 # scanner tuning already demonstrated.
+
+
+def test_the_nightly_never_asks_a_cli_turn_to_send():
+    """A `hermes chat -q` turn runs with `platform=cli` -- no messaging platform
+    is attached, so it cannot send. Asking one to burns the step's whole timeout
+    and delivers nothing (#49). Delivery is the scheduler's; the turn prints,
+    which is the wiki-digest skill's own default mode."""
+    body = (ROOT / "bin" / "nightly.sh").read_text()
+    # Naming a channel is the precise tell, not the word "send" -- the prompt is
+    # allowed to say "do not try to send it anywhere", and does.
+    offenders = [line.strip()[:120] for line in body.splitlines()
+                 if "hermes chat" in line and "plow_chat" in line]
+    assert not offenders, (
+        "these name a delivery channel to a platform-less CLI turn:\n  "
+        + "\n  ".join(offenders))

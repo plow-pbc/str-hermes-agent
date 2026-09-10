@@ -26,6 +26,9 @@ EXISTING_JOB = f"  Name:      {NAME}"
 #
 FAKE_DOCKER = """#!/usr/bin/env bash
 case "$*" in
+  *'printf %s "$HERMES_HOME"'*) printf '%s' "${STATE:-/var/lib/hermes}" ;;
+  *"PLOW_CHAT_APPROVAL_GROUP="*) printf '%s\\n' "${GROUP_NAME:-STR Owners}" ;;
+  *"PLOW_CHAT_GROUP_UIDS="*)     printf '%s\\n' "${UID_MAP:-cht_owners=STR Owners}" ;;
   *"cron list"*)    [ -s "$JOBS" ] && cat "$JOBS"
                     exit ${PRE_LIST_OK:-0} ;;
   *"cron create"*)  echo cron >> "$CALLS"
@@ -112,3 +115,15 @@ def test_the_run_stops_rather_than_leaving_the_chain_half_registered(
     assert (calls == ["cron"]) is creates
     if says:
         assert says in run.stdout + run.stderr
+
+
+def test_the_job_declares_where_the_scheduler_delivers():
+    """Without --deliver the job is `Deliver: local` and the digest goes nowhere
+    (#49). --no-agent must survive that fix: the script's stdout carries vault
+    content distilled from guest mail, and in agent mode stdout becomes the
+    prompt -- guest-derived text in the instruction channel."""
+    body = ENABLE.read_text()
+    create = body.rsplit("cron create", 1)[1]
+    assert '--deliver "plow_chat:$chat_uid"' in create, "no delivery target"
+    assert "--no-agent" in create, "the guest-text/instruction-channel boundary"
+    assert "owners-chat-uid" in body, "resolve the group, do not pin its id"

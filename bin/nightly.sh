@@ -40,16 +40,15 @@ STATUS=""
 # could see that the run had noted anything at all.
 note() { STATUS+="$1; "; echo "nightly: $1" >&2; }
 
-# Every abort reports through here. Bounded, because the delivery is an agent
-# turn: it has to pick a tool and use it, and when the channel is not reachable
-# it does not fail, it searches. Measured, one such turn spent two hours and 32
-# tool calls looking for a plow_chat it was never going to find, holding the
-# vault the whole time. A cron job that hangs is worse than one that reports
-# failure, so a message that cannot be delivered inside two minutes is written
-# to the log instead and the run ends.
+# Every abort reports by printing: the scheduler delivers this job's stdout, and
+# a non-zero exit as an error alert (cron/scheduler.py). This used to spend an
+# agent turn on the send, which could not succeed -- `hermes chat -q` has no
+# messaging platform — and an unreachable channel makes such a turn search
+# rather than fail: two hours and 32 tool calls once, holding the vault
+# throughout. Printing cannot do that. See #49.
 notify() {
-  timeout 120 hermes chat -q "Send me this over plow_chat, verbatim: '$1'" \
-    || echo "nightly: could not deliver within 120s: $1" >&2
+  echo "nightly: $1"
+  echo "nightly: $1" >&2
 }
 
 if ! "$BIN/hostex-raw" --vault "$VAULT"; then
@@ -121,9 +120,11 @@ fi
 
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the vault and writes a summary before it sends. This is the
-# success path's liveness message, so if it cannot be delivered the run says so
-# in the log and exits non-zero rather than sitting on the vault until morning.
-if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the vault at ${VAULT} for the last day. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Send the result to me over plow_chat. Send it even if nothing changed — this message is how I know the job is alive."; then
+# success path's liveness message. The turn only has to PRINT it -- the
+# scheduler delivers this script's stdout -- so the bound now covers reading the
+# vault and writing a summary, not an unwinnable hunt for a channel this process
+# does not have.
+if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the vault at ${VAULT} for the last day. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all."; then
   echo "nightly: the digest did not send within 600s" >&2
   exit 1
 fi
