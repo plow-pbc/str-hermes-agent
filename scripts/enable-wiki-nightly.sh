@@ -3,12 +3,7 @@
 # checkout. See README § Compiling the wiki nightly.
 set -euo pipefail
 
-# Compose resolves its project from the directory, so anchor it to this repo
-# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
-# names a different project -- a dev checkout of this same repo is one -- and
-# reaches a container that is not this agent.
-repo=$(cd "$(dirname "$0")/.." && pwd)
-compose() { docker compose --project-directory "$repo" "$@"; }
+compose() { "$(dirname "$0")/compose" "$@"; }
 
 # Refuse a second job. The chain ingests into the vault, so two of them race
 # the same pages — the same shared-state argument the poller's enabler makes

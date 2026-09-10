@@ -9,12 +9,7 @@
 # routinely contain spaces) would run as a command.
 set -uo pipefail
 
-# Compose resolves its project from the directory, so anchor it to this repo
-# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
-# names a different project -- a dev checkout of this same repo is one -- and
-# reads a dotenv that is not this agent's.
-repo=$(cd "$(dirname "$0")/.." && pwd)
-compose() { docker compose --project-directory "$repo" "$@"; }
+compose() { "$(dirname "$0")/compose" "$@"; }
 
 # Asked of the container rather than of a host path: the home is a named volume
 # now, and the only supported way in is through the container that mounts it.

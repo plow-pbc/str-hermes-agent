@@ -75,18 +75,12 @@ test-wiki:
     # `-v` at the same target replaces compose's mount instead of joining it, so
     # naming the canonical path is what makes production unreachable here.
     #
-    # Read off the image rather than guessed or restated. agent-mgr used to
-    # export AGENT_HOME_TARGET from the boot contract and nothing does now, but
-    # the contract was always the image's: HERMES_HOME is baked into it, and
-    # compose resolves the real mount against the same value. A wrong guess here
-    # mounts the scratch vault somewhere production's mount does not replace,
-    # defeating the whole isolation this recipe exists for -- so it is derived,
-    # and `:?` makes an image that stops declaring it fail loudly.
-    # Parsed off the JSON rather than through `--format`: just claims the
-    # doubled-brace sequence for its own interpolation -- even inside a recipe
-    # comment -- so a Go template cannot be written here at all.
-    HH=$(docker image inspect sams-str-hermes-agent:local | sed -n 's/.*"HERMES_HOME=\([^"]*\)".*/\1/p' | head -1)
-    HH="${HH:?the image declares no HERMES_HOME -- build it first (just test)}"
+    # The same boot contract compose.yml names as its mount target, and that
+    # tests/test_image_contents.py asserts against the real image. A wrong value
+    # here mounts the scratch vault somewhere production's mount does not replace,
+    # defeating the isolation this recipe exists for -- so it is stated once, in
+    # the one place a mount target can be stated, and checked there.
+    HH=/var/lib/hermes
     CV="$HH/repo/vault"
 
     # Empty, never delete: $V is a bind-mount source, and unlinking the inode

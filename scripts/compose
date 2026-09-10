@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# `docker compose` for THIS agent, from anywhere.
+#
+# Compose takes its project name from the directory, so a bare `docker compose`
+# run from somewhere else names a different project -- a dev checkout of this
+# same repo is one -- and reaches a container that is not this agent. Anchoring
+# --project-directory to this script's own repo is what makes the seven callers
+# safe to run from any cwd. agent-mgr used to provide this by resolving the
+# agent by name from its registry.
+set -euo pipefail
+exec docker compose --project-directory "$(cd "$(dirname "$0")/.." && pwd)" "$@"

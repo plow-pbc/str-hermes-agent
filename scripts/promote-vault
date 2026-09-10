@@ -26,7 +26,7 @@
 # previous night whose push failed, without a branch for any of them.
 set -euo pipefail
 
-vault="${1:-${STR_VAULT:-$HOME/hermes-vault}}"
+vault="${1:-$HOME/hermes-vault}"
 git_dir="$vault.git"
 
 [ -d "$vault" ]   || { echo "promote-vault: no vault at $vault" >&2; exit 1; }

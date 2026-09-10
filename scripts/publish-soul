@@ -19,11 +19,7 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source_soul="$repo_root/runtime/SOUL.md"
 
-# Compose resolves its project from the directory, so anchor it to this repo
-# rather than to the caller's cwd: run from elsewhere, a bare `docker compose`
-# names a different project -- a dev checkout of this same repo is one -- and
-# publishes into a container that is not this agent.
-compose() { docker compose --project-directory "$repo_root" "$@"; }
+compose() { "$(dirname "$0")/compose" "$@"; }
 
 # -s, not -f: an empty persona publishes an agent with no instructions, which
 # reads like a healthy deploy and is the quietest failure this repo can ship.

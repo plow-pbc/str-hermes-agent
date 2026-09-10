@@ -12,13 +12,12 @@ import pytest
 IMAGE = "sams-str-hermes-agent:local"
 SEAM = "/etc/cont-init.d/05-install-agent-payload.sh"
 
-# The two homes the seam has to tell apart. A MIGRATED home carries the empty
-# directory a bind-mount target leaves behind; a HOSTED one is the agent-mgr
-# shape, where compose.override.yml is still mounting bin/ and mcp-seam/ and the
-# deploy stages SOUL and config into the home itself.
+# A MIGRATED home carries the empty directory a bind-mount target leaves behind.
+# There was a HOSTED shape too -- agent-mgr mounting bin/ and mcp-seam/ and
+# staging SOUL and config into the home -- which the seam had to leave alone
+# while both paths were live. That path is gone, so the seam no longer branches
+# on it and there is nothing to assert.
 MIGRATED = "mkdir -p /tmp/h/scripts"
-HOSTED = ("mkdir -p /tmp/h/scripts && echo host-supplied > /tmp/h/scripts/nightly.sh"
-          " && echo staged-by-the-deploy > /tmp/h/config.yaml")
 
 # Asked of cron's own checker rather than restated. Why the links are on the
 # DIRECTORY is the seam script's to explain.
@@ -47,15 +46,6 @@ SEAM_CLAIMS = [
     # cont-init has already reported exit 0 by then, which is what hid it.
     ("the config belongs to the agent that rewrites it", MIGRATED,
      "stat -c '%U %a' /tmp/h/config.yaml", "hermes 640"),
-    # Replacing a mount point fails the boot, and at FAILS=2 that is the whole
-    # container -- this repo must not break the shape it is migrating away from.
-    ("a populated host directory is retained", HOSTED,
-     "cat /tmp/h/scripts/nightly.sh", "host-supplied"),
-    # Both paths are live through phase 1, and `agent-mgr deploy` stages config
-    # and SOUL into the bind-mounted home. Refreshing them there would revert a
-    # deploy on the next recreate, silently.
-    ("a deploy's staged config is not reverted", HOSTED,
-     "cat /tmp/h/config.yaml", "staged-by-the-deploy"),
 ]
 
 

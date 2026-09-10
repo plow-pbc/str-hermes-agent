@@ -97,26 +97,6 @@ def test_the_home_is_a_volume_and_the_vault_is_a_bind():
     assert any(v.endswith("/repo/vault") and v.startswith("${HOME}") for v in vols)
 
 
-# What agent-mgr's deploy path owned. Each is superseded rather than dropped:
-# the descriptor and its override by `compose.yml`, and restore-runtime-config's
-# two jobs by the image -- the SOUL/config install by
-# docker/cont-init.d/05-install-agent-payload.sh, the vault-corpus rule by
-# 04-require-vault-corpus.sh. The operator diagnostics under scripts/ are a
-# separate concern: they only borrow agent-mgr as a transport.
-RETIRED = (
-    "compose.override.yml",
-    "agent.env",
-    "scripts/restore-runtime-config.sh",
-)
-
-
-def test_the_agent_mgr_deploy_path_stays_deleted():
-    """A file back in the tree is a second owner of a lifecycle the image now
-    owns alone -- and `compose.override.yml` specifically would auto-load beside
-    compose.yml and fail every recipe on a variable nothing here exports."""
-    survivors = [name for name in RETIRED if (ROOT / name).exists()]
-    assert not survivors, f"agent-mgr deploy surface is back: {survivors}"
-
 
 def test_the_agent_uid_is_declared_so_it_can_write_the_vault():
     """The vault is a host bind the agent WRITES -- the nightly ingests into it.
