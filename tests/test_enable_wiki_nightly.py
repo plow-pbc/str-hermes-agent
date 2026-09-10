@@ -26,6 +26,9 @@ EXISTING_JOB = f"  Name:      {NAME}"
 #
 FAKE_DOCKER = """#!/usr/bin/env bash
 case "$*" in
+  *'printf %s "$HERMES_HOME"'*) printf '%s' "${STATE:-/var/lib/hermes}" ;;
+  *"PLOW_CHAT_APPROVAL_GROUP="*) printf '%s\\n' "${GROUP_NAME:-STR Owners}" ;;
+  *"PLOW_CHAT_GROUP_UIDS="*)     printf '%s\\n' "${UID_MAP:-cht_owners=STR Owners}" ;;
   *"cron list"*)    [ -s "$JOBS" ] && cat "$JOBS"
                     exit ${PRE_LIST_OK:-0} ;;
   *"cron create"*)  echo cron >> "$CALLS"
@@ -79,6 +82,10 @@ def test_the_job_asked_for_runs_the_script_without_an_agent_turn(tmp_path):
     assert tokens[tokens.index("--name") + 1] == NAME
     assert tokens[tokens.index("--script") + 1] == SCRIPT
     assert "--no-agent" in tokens
+    # Without a target the job is `Deliver: local` and the digest goes nowhere
+    # (#49). Asserted as the RESOLVED value, so this also proves the uid came
+    # from the group map rather than being pinned in the script.
+    assert tokens[tokens.index("--deliver") + 1] == "plow_chat:cht_owners"
     # `cron create` echoes what it made, and that echo is the operator's only
     # confirmation — so the call must not be redirected or captured.
     assert any(line.split() == ["Name:", NAME] for line in run.stdout.splitlines())

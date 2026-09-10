@@ -9,20 +9,26 @@
 # whose git dir sits beside the worktree. Pages reach git when the host-side
 # scripts/promote-vault runs; none of it reaches this repo's `main`.
 #
-# Two rules shape the error handling:
-#   1. A message is sent on every path, because it doubles as the liveness
-#      signal — a routine failure must not look like the job dying. On a normal
-#      night that message is the wiki-digest; on an abort it is a one-line
-#      status, since the vault may not be in a state worth summarising.
+# One rule shapes the error handling: something is PRINTED on every path,
+# because the message doubles as the liveness signal — a routine failure must
+# not look like the job dying. On a normal night that is the wiki-digest; on an
+# abort it is a one-line status, since the vault may not be worth summarising.
 #
-#      Delivery is bounded, so silence is not quite proof of death. Sending is
-#      an agent turn, and an unreachable channel makes it search rather than
-#      fail — one such turn ran two hours holding the vault. Past the bound the
-#      run writes the message to the log and exits non-zero instead. So silence
-#      means the job died OR the channel was unreachable, and the cron log
-#      tells them apart. Blocking on delivery is worse: a job wedged all night
-#      is a job that did not run tomorrow either.
+# This script does not deliver. The scheduler does, from the job's stdout, and
+# an empty stdout is delivered as nothing — which is why every path prints.
+# `notify()` carries the rest of that contract.
+#
+# The corollary: stdout is the MESSAGE now, delivered verbatim. Fetch counts,
+# ingest progress, lint findings, hub output and the vault suite belong in the
+# cron log, not the owners' chat. So the routing is one policy rather than a
+# redirect per command -- see the `exec` below.
 set -uo pipefail
+
+# Stderr is the default, and fd 3 is the delivered channel. Everything this
+# script runs is diagnostics for the cron log; only `notify()` and the digest
+# write to fd 3, so a step added later is quiet by default rather than quiet
+# only if whoever added it remembered a redirect.
+exec 3>&1 1>&2
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
 # here, rather than hardcoding the literal, keeps VAULT correct across base
@@ -40,16 +46,15 @@ STATUS=""
 # could see that the run had noted anything at all.
 note() { STATUS+="$1; "; echo "nightly: $1" >&2; }
 
-# Every abort reports through here. Bounded, because the delivery is an agent
-# turn: it has to pick a tool and use it, and when the channel is not reachable
-# it does not fail, it searches. Measured, one such turn spent two hours and 32
-# tool calls looking for a plow_chat it was never going to find, holding the
-# vault the whole time. A cron job that hangs is worse than one that reports
-# failure, so a message that cannot be delivered inside two minutes is written
-# to the log instead and the run ends.
+# Every abort reports by printing: the scheduler delivers this job's stdout, and
+# a non-zero exit as an error alert (cron/scheduler.py). This used to spend an
+# agent turn on the send, which could not succeed -- `hermes chat -q` has no
+# messaging platform — and an unreachable channel makes such a turn search
+# rather than fail: two hours and 32 tool calls once, holding the vault
+# throughout. Printing cannot do that. See #49.
 notify() {
-  timeout 120 hermes chat -q "Send me this over plow_chat, verbatim: '$1'" \
-    || echo "nightly: could not deliver within 120s: $1" >&2
+  echo "nightly: $1" >&3
+  echo "nightly: $1"
 }
 
 if ! "$BIN/hostex-raw" --vault "$VAULT"; then
@@ -121,9 +126,11 @@ fi
 
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the vault and writes a summary before it sends. This is the
-# success path's liveness message, so if it cannot be delivered the run says so
-# in the log and exits non-zero rather than sitting on the vault until morning.
-if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the vault at ${VAULT} for the last day. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Send the result to me over plow_chat. Send it even if nothing changed — this message is how I know the job is alive."; then
+# success path's liveness message. The turn only has to PRINT it -- the
+# scheduler delivers this script's stdout -- so the bound now covers reading the
+# vault and writing a summary, not an unwinnable hunt for a channel this process
+# does not have.
+if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the vault at ${VAULT} for the last day. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
   echo "nightly: the digest did not send within 600s" >&2
   exit 1
 fi

@@ -861,10 +861,11 @@ group is re-created — the trap is the same one, and it does not announce
 itself.
 
 <a name="hostex-reactivation"></a>
-**After re-creating the owners' group, the job must be recreated.**
-`cron create` bakes the resolved chat UID in, so the job still points at the
-old group and its announcements go somewhere no one reads — and a job with a
-stale target still advances the shared cursor, so the guest it consumed is
+**After re-creating the owners' group, every job that names it must be
+recreated** — `hostex-inbound`, `checkin-watch` and `wiki-nightly`.
+`cron create` bakes the resolved chat UID in, so a job still points at the
+old group and its announcements go somewhere no one reads — and `hostex-inbound`
+with a stale target still advances the shared cursor, so the guest it consumed is
 never announced at all.
 
 Re-running activation does *not* strand it: that writes
@@ -880,7 +881,14 @@ trigger. In order:
    ```sh
    docker compose exec hermes hermes cron remove hostex-inbound
    ./scripts/enable-hostex-inbound.sh
+   docker compose exec hermes hermes cron remove checkin-watch
+   ./scripts/enable-checkin-watch.sh
+   docker compose exec hermes hermes cron remove wiki-nightly
+   ./scripts/enable-wiki-nightly.sh
    ```
+
+   Skip any that `hermes cron list` does not show. Not while the 03:00 run is in
+   flight: the nightly chain ingests into the vault.
 
 3. Read the delivery target back, which is the one thing the enable script
    cannot confirm — `cron create` echoes name, schedule and next run, not
@@ -1063,10 +1071,15 @@ substituted at container *create*, so run it after a `compose up -d`, not a
 The command here used to be a bare `cron create … --script nightly.sh`, which
 the CLI refuses — *"create requires either prompt or at least one skill"* — so
 following it created nothing while reading like it had. `--no-agent` says the
-script *is* the job, which is true: `nightly.sh` runs the whole chain and
-reports through its own bounded `notify`. It also keeps the script's stdout,
-which carries vault content distilled from guest mail, out of an agent's
-instruction channel (#44).
+script *is* the job, which is true: `nightly.sh` runs the whole chain. It also
+keeps the script's stdout, which carries vault content distilled from guest mail,
+out of an agent's instruction channel.
+
+The script does not deliver — the scheduler does, from that stdout, which is why
+the job also needs `--deliver` (#49). So only the digest and an abort are printed;
+every step in between writes to the cron log instead. A **direct** manual run
+prints to your terminal and delivers nowhere, which is the point of running it
+directly, but it means a manual recovery does not tell the owners anything.
 
 The schedule is a cron expression, which this CLI accepts alongside `30m` and
 `every 2h` forms. It is read in the container's timezone, which `compose.yml`
