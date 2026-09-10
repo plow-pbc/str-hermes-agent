@@ -1,10 +1,12 @@
 # Short-term-rental operations agent -- DOMAIN recipes only.
 #
-# Deployment lives in plow-pbc/agent-mgr, which owns the compose service, the
-# bring-up, the pins and the contract tests for every agent on this host:
+# Deployment is mid-migration. This repo owns `compose.yml` and the transition
+# recipes below since #39; plow-pbc/agent-mgr -- now deprecated -- still owns the
+# deploy, the pins and the contract tests, and `compose.override.yml` remains as
+# the rollback to its shape:
 #
-#   agent-mgr up str          agent-mgr logs str
-#   agent-mgr agent str "..." agent-mgr deploy str
+#   agent-mgr deploy str      agent-mgr logs str
+#   agent-mgr agent str "..." just up / just down / just restart
 #
 # `agent-mgr agent` replaced this repo's `just agent`, which used
 # `docker compose run`. The image's s6 entrypoint starts a gateway whatever
