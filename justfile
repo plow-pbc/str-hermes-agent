@@ -72,9 +72,15 @@ ps *ARGS:
 # inherits none of it, so a bare `hermes chat` 401s with "Invalid or revoked
 # token" against a perfectly healthy gateway -- the same string a real
 # revocation prints, which is why this wrapper exists rather than a note.
+#
+# `with-contenv` is the base's own loader, so there is no second implementation
+# of import semantics here. It is an execline script and needs the s6 toolchain
+# on PATH: an exec'd shell gets the image's PATH, which omits /command, and
+# without it the wrapper dies with `unable to exec ifelse` before running
+# anything. Verified both ways against the running container.
 agent *ARGS:
-    docker compose -f compose.yml exec -T hermes sh -c \
-      'for f in /run/s6/container_environment/*; do export "$(basename "$f")=$(cat "$f")"; done; exec "$@"' _ {{ARGS}} < /dev/null
+    docker compose -f compose.yml exec -T -e PATH=/command:/usr/bin:/bin hermes \
+      /command/with-contenv {{ARGS}} < /dev/null
 
 # The image first: tests/test_image_contents.py and tests/test_vault_guard.py
 # assert against this exact tag, and without it 16 of them fail from a clean

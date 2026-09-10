@@ -139,12 +139,20 @@ def test_the_justfile_keeps_no_fleet_wide_recipes():
     `up`, `down` and `restart` came back when this repo took its compose file
     back: they are the only thing left that can run the nightly veto, which
     agent-mgr used to invoke as AGENT_PRE_TRANSITION and docker compose has no
-    hook for. What stayed migrated is what is still true of every agent.
+    hook for. `agent`, `logs` and `ps` came back for the same reason one layer
+    down: agent-mgr addresses compose project `hermes-str` while compose.yml
+    runs this stack as `sams-str-hermes-agent`, so its spelling of them reaches
+    nothing (#48). What stayed migrated is what is still true of every agent AND
+    still reachable through it.
+
+    The `[*A-Z]` in the pattern is load-bearing: a variadic recipe is spelled
+    `logs *ARGS:`, and a pattern that only allowed `[A-Z]+` matched none of
+    them -- so every variadic recipe silently evaded this denylist while the
+    denylist still claimed it.
     """
     recipes = {m.group(1) for line in _lines("justfile")
-               if (m := re.match(r"^([a-z][a-z0-9-]*)(?: [A-Z]+)*:", line))}
-    migrated = {"agent", "install-plugin", "logs",
-                "restore", "activate", "sign-in"} & recipes
+               if (m := re.match(r"^([a-z][a-z0-9-]*)(?: [*A-Z]+)*:", line))}
+    migrated = {"install-plugin", "restore", "activate", "sign-in"} & recipes
     assert not migrated, f"these belong to agent-mgr now: {sorted(migrated)}"
 
 

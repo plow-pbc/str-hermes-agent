@@ -283,10 +283,10 @@ so `build` reproduces what is already running and picks up only this
 repository. Upgrading means bumping a pin deliberately, which is the README's
 own separate step.
 
-No `/sethome` afterwards. Hermes persists the home target to `/var/lib/hermes/.env`
-(`PLOW_CHAT_HOME_CHANNEL`, `PLOW_CHAT_HOME_CHANNEL_THREAD_ID`), and step 3
-installs `config.yaml` and the installed `SOUL.md`, never `.env` — so the
-binding survives a redeploy untouched.
+No `/sethome` afterwards. The home target is `PLOW_HOME_CHANNEL`, which plow-init
+publishes into the boot environment from the credential, so a redeploy cannot
+disturb it. (The dotenv's `PLOW_CHAT_HOME_CHANNEL` is pre-v2.0.0 residue; nothing
+reads it.)
 
 ## 4.5 End the group's per-member sessions, once
 
@@ -387,5 +387,5 @@ verified once it does.
 | Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `just agent ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
 | Files in `~/.hermes` owned by `501`, or by another account | **agent-mgr shape only.** Under the volume shape nothing on the host backs the home, so this cannot occur; seeing it means the rollback compose is in play | confirm the shape first with the `docker inspect` mount check at the top of this file. If it really is the bind shape: re-own it (`sudo chown -R $(id -u):$(id -g) ~/.hermes`) then recreate |
-| Agent ignores the home chat | home binding unset or stale in `/var/lib/hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
+| Agent ignores the home chat | plow-init published no `PLOW_HOME_CHANNEL` | `./scripts/check-home-binding.sh` for the verdict. `UNSET` means re-mint the credential (README § Plow Chat) — not `/sethome`: without that variable the plugin does not load, so it cannot receive the command |
 | `restore: no runtime vault at …` | `~/hermes-vault` absent — first deploy on this host, or it was moved/deleted | clone it per the README's § Restoring runtime config — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 3 |

@@ -43,17 +43,15 @@ def verdict(tmp_path, *, running=True, bound=True):
     ],
     ids=lambda v: v if isinstance(v, str) else "",
 )
-def test_home_binding_verdicts(tmp_path, case, kwargs, expected):
-    assert expected in verdict(tmp_path, **kwargs)
+def test_home_binding_verdict_names_the_state_and_never_the_chat(tmp_path, case, kwargs, expected):
+    """Both halves of the contract, over one state list.
 
-
-def test_no_identifier_is_ever_printed(tmp_path):
-    """The whole contract: a verdict, never a value.
-
-    These are chat identifiers and they come from a container whose environment
-    also holds tokens, so the script reports the shape of the binding and never
-    what it is bound to. A regression here leaks into whatever log or chat the
-    operator pastes the output into.
+    The verdict has to be right, and it has to be a verdict: these are chat
+    identifiers, read from a container whose environment also holds tokens, so
+    the script reports the shape of the binding and never what it is bound to.
+    Asserting both here keeps one state matrix -- two lists drift, and the one
+    that drifts silently is the disclosure check.
     """
-    for kwargs in ({}, {"bound": False}, {"running": False}):
-        assert "cht_" not in verdict(tmp_path, **kwargs)
+    line = verdict(tmp_path, **kwargs)
+    assert expected in line
+    assert "cht_" not in line
