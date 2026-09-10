@@ -62,6 +62,19 @@ IMAGE_CLAIMS = [
      "stat -c %a /opt/hermes/plow-seed/persona.md", "644"),
     ("the config is this agent's own",
      "grep -qF hostex /var/lib/hermes/config.yaml && echo yes", "yes"),
+    # The base's own seam, driven for real. Every row above reads a file this
+    # image placed; only plow-init writing the home's SOUL.md proves BOTH
+    # halves reach the agent, and nothing else in this repo can. RED until the
+    # FROM pin bumps to a base that composes -- that red is this draft's gate.
+    ("plow-init composes the identity from both halves",
+     "/opt/hermes/.venv/bin/python -c \"import importlib.util as u;"
+     "s=u.spec_from_file_location('p','/etc/s6-overlay/scripts/plow-init.py');"
+     "m=u.module_from_spec(s);s.loader.exec_module(m);m.compose_identity()\" "
+     ">/dev/null 2>/tmp/seam.err || tail -1 /tmp/seam.err; "
+     "grep -q '# Plow assistant' /var/lib/hermes/SOUL.md "
+     "&& grep -q 'short-term rentals' /var/lib/hermes/SOUL.md "
+     "&& echo composed || echo 'not composed'",
+     "composed"),
 ]
 
 
