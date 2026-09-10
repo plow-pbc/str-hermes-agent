@@ -17,6 +17,11 @@
 # This script does not deliver. The scheduler does, from the job's stdout, and
 # an empty stdout is delivered as nothing — which is why every path prints.
 # `notify()` carries the rest of that contract.
+#
+# The corollary, and the reason for the `>&2` on every step below: stdout is the
+# MESSAGE now, delivered verbatim. Fetch counts, ingest progress, lint findings,
+# hub output and the vault suite all belong in the cron log, not in the owners'
+# chat, so each writes to stderr. Only an abort and the digest reach stdout.
 set -uo pipefail
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
@@ -46,7 +51,7 @@ notify() {
   echo "nightly: $1" >&2
 }
 
-if ! "$BIN/hostex-raw" --vault "$VAULT"; then
+if ! "$BIN/hostex-raw" --vault "$VAULT" >&2; then
   # Fetch failure leaves the vault untouched and consistent — still report,
   # or the silence reads as death.
   notify "Wiki nightly FAILED at fetch. Vault unchanged."
@@ -58,7 +63,7 @@ fi
 # doing it inline here meant the nightly run silently ingested a fraction of
 # what arrived and nothing noticed. ingest-all loops and asserts coverage from
 # the manifest between rounds.
-if ! "$BIN/ingest-all" "$VAULT"; then
+if ! "$BIN/ingest-all" "$VAULT" >&2; then
   # Stop, do not note-and-continue. Carrying on through lint and digest after
   # a terminal ingest failure reports a partially-ingested night as a normal
   # one.
@@ -67,7 +72,7 @@ if ! "$BIN/ingest-all" "$VAULT"; then
   exit 1
 fi
 
-if ! hermes chat -q "Use the wiki-lint skill on the vault at ${VAULT}. Report contradictions, orphaned pages, and stale citations."; then
+if ! hermes chat -q "Use the wiki-lint skill on the vault at ${VAULT}. Report contradictions, orphaned pages, and stale citations." >&2; then
   note "lint errored"
 fi
 
@@ -101,11 +106,11 @@ fi
 # defect here has to be reported through it rather than silenced by an abort.
 # The pages are already written by now; aborting would not unwrite them, it
 # would only withhold the news.
-if ! "$BIN/build-hubs" "$VAULT"; then
+if ! "$BIN/build-hubs" "$VAULT" >&2; then
   note "hub rebuild failed; property hubs may not list tonight's pages"
 fi
 
-(cd "$VAULT" && uv run --no-project --python 3.13 --with pytest==8.4.2 pytest -q)
+(cd "$VAULT" && uv run --no-project --python 3.13 --with pytest==8.4.2 pytest -q) >&2
 rc=$?
 if [ "$rc" -eq 1 ]; then
   note "vault integrity FAILED; see the cron log"

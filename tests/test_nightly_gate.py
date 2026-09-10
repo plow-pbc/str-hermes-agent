@@ -99,3 +99,16 @@ def test_the_nightly_never_asks_a_cli_turn_to_send():
     assert not offenders, (
         "these name a delivery channel to a platform-less CLI turn:\n  "
         + "\n  ".join(offenders))
+
+    # Same contract, other half: stdout IS the delivered message now, verbatim.
+    # Fetch counts, ingest progress, lint findings, hub output and the vault
+    # suite belong in the cron log, so every step but the digest redirects. Miss
+    # one and the owners get a wall of tool output wrapped around their digest.
+    noisy = [line.strip()[:90] for line in body.splitlines()
+             if not line.lstrip().startswith("#")
+             and (line.lstrip().startswith(('"$BIN/', 'if ! "$BIN/', '(cd "$VAULT"'))
+                  or "uv run" in line or "hermes chat" in line)
+             and ">&2" not in line and "wiki-digest" not in line]
+    assert not noisy, (
+        "these reach the delivered message instead of the cron log:\n  "
+        + "\n  ".join(noisy))

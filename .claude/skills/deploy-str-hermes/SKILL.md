@@ -243,6 +243,29 @@ No `hostex-inbound` job — skip. A job predating either change is recreated, no
 diagnosed; work through README § [One-time: point an existing job at the owners'
 group](../../../README.md#owners-group-migration), which owns this path.
 
+## 4.65 Retarget the nightly digest, once
+
+A `wiki-nightly` job created before #52 has `Deliver: local`, so the chain runs,
+writes its pages, and tells nobody — which is exactly how 2026-09-10's digest was
+lost. Nothing above fixes it: `scripts/enable-wiki-nightly.sh` refuses while a job
+exists, so a redeploy recreates the container around the old registration.
+
+```sh
+docker compose exec -T hermes hermes cron list
+```
+
+`Deliver: local` under `wiki-nightly` means it predates the change. Recreate it —
+not while the 03:00 run is in flight, since the chain ingests into the vault:
+
+```sh
+docker compose exec -T hermes hermes cron remove wiki-nightly
+./scripts/enable-wiki-nightly.sh
+```
+
+The enabler echoes the job it made. Confirm `Deliver: plow_chat:cht_…`, and after
+the next run confirm the scheduler line `Job 'wiki-nightly': delivered to
+plow_chat:…`. Already `plow_chat:` — skip.
+
 ## 4.7 Register the host-side promote, once
 
 `bin/nightly.sh` compiles the corpus inside the container and commits nothing —

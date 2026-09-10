@@ -82,6 +82,10 @@ def test_the_job_asked_for_runs_the_script_without_an_agent_turn(tmp_path):
     assert tokens[tokens.index("--name") + 1] == NAME
     assert tokens[tokens.index("--script") + 1] == SCRIPT
     assert "--no-agent" in tokens
+    # Without a target the job is `Deliver: local` and the digest goes nowhere
+    # (#49). Asserted as the RESOLVED value, so this also proves the uid came
+    # from the group map rather than being pinned in the script.
+    assert tokens[tokens.index("--deliver") + 1] == "plow_chat:cht_owners"
     # `cron create` echoes what it made, and that echo is the operator's only
     # confirmation — so the call must not be redirected or captured.
     assert any(line.split() == ["Name:", NAME] for line in run.stdout.splitlines())
@@ -115,15 +119,3 @@ def test_the_run_stops_rather_than_leaving_the_chain_half_registered(
     assert (calls == ["cron"]) is creates
     if says:
         assert says in run.stdout + run.stderr
-
-
-def test_the_job_declares_where_the_scheduler_delivers():
-    """Without --deliver the job is `Deliver: local` and the digest goes nowhere
-    (#49). --no-agent must survive that fix: the script's stdout carries vault
-    content distilled from guest mail, and in agent mode stdout becomes the
-    prompt -- guest-derived text in the instruction channel."""
-    body = ENABLE.read_text()
-    create = body.rsplit("cron create", 1)[1]
-    assert '--deliver "plow_chat:$chat_uid"' in create, "no delivery target"
-    assert "--no-agent" in create, "the guest-text/instruction-channel boundary"
-    assert "owners-chat-uid" in body, "resolve the group, do not pin its id"
