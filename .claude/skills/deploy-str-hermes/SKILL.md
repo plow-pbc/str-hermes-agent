@@ -60,7 +60,7 @@ skill maps the host — rather than piping these through `ssh` inline.
 - **Pull `--ff-only`, on `main` only.** A non-fast-forward means prod diverged; stop and investigate.
 - **Never** force-push, `--no-verify`, `git stash`, `git reset --hard`, `git clean`, or `git checkout -- <path>`.
 - **Never print secret values.** `/var/lib/hermes/.env` holds the Hostex and Seam credentials and the Plow chat *configuration*; the Plow credential itself is `~/.plow-credentials-str`. Check presence or last 3 chars in either, never `cat` them.
-- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls both from what the image bakes, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs under `properties/` are the vault's own: edit their prose there, it survives. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages on every nightly. Rename the page, don't edit the link. The vault seed no longer overlays into the vault at all ([#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)): the live `AGENTS.md` and `.env` belong to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a rebuild does not unbind the home chat.
+- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls both from what the image bakes, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs under `properties/` are the vault's own: edit their prose there, it survives. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages on every nightly. Rename the page, don't edit the link. The vault seed no longer overlays into the vault at all ([#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)): the live `AGENTS.md` and `.env` belong to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the home binding is not in it at all — that is `PLOW_HOME_CHANNEL`, from the credential — so a rebuild cannot unbind the home chat.
 
 ## 1. Confirm the checkout is deployable
 
@@ -203,8 +203,9 @@ The recipe is what sequences the two.
 serving the configuration it loaded at its last start. And `up`, not Docker's
 `restart`, because Compose substitutes the environment at container create time.
 
-`/var/lib/hermes/.env` is untouched by any of this, so the `/sethome` home
-binding survives a redeploy untouched.
+`/var/lib/hermes/.env` is untouched by any of this. The home binding is not in it
+either: that is `PLOW_HOME_CHANNEL`, published into the boot environment from the
+credential, so a redeploy cannot disturb it.
 
 ## 4.5 End the group's per-member sessions, once
 
@@ -305,5 +306,5 @@ verified once it does.
 | Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
 | Files in the home volume owned by an account the agent does not run as | the home was migrated off a bind mount, where it carried the host account's ids | `compose.yml` sets `HERMES_UID`/`HERMES_GID`, so the agent runs as the host account's ids -- **read them off `compose.yml` rather than trusting this row**, which is how it went stale the last time they changed. Re-own from inside — **pruning the vault**, which is a host bind holding the operator's own checkout: `docker compose exec -u root hermes find /var/lib/hermes -path /var/lib/hermes/repo/vault -prune -o -exec chown "$(id -u)":"$(id -g)" {} +`, then `just restart`. `-prune`, not `chown -R` and not `find -xdev`: the bind shares a device with the volume (`stat -c %D` reports `10302` for both), so `-xdev` crosses it and a bare `-R` re-owns 316 vault files out from under the host account |
-| Agent ignores the home chat | home binding unset or stale in `/var/lib/hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
+| Agent ignores the home chat | plow-init published no `PLOW_HOME_CHANNEL` | `./scripts/check-home-binding.sh` — it prints the verdict and the remedy, and owns both |
 | boot parks on `vault has no index.md` / `vault/.git is inside the worktree` | `~/hermes-vault` absent, empty, or cloned the wrong way — first bring-up on this host, or it was moved/deleted | clone it per the README's § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 4. `docker/cont-init.d/04-require-vault-corpus.sh` is what refuses |

@@ -50,6 +50,14 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 ## Guardrails
 
 - **`exec -T … < /dev/null`, not `run`.** `docker compose run --rm hermes ...` starts a *throwaway* container from the image; it can pass while the deployed gateway is broken. `exec` runs inside the container that is serving. `-T` is required: without it Compose allocates a TTY and every probe dies with "the input device is not a TTY" from a non-interactive shell or over `ssh`, a false negative unrelated to agent health. `< /dev/null` belongs on every probe for the same reason a new one will: compose attaches stdin, `-T` suppresses only the TTY, and any probe inheriting a script on stdin eats it. (The one legitimate `run` is `auth list` in step 1, which needs `-T` too — it reads the shared `/var/lib/hermes` mount and is the right tool precisely *because* `exec` is hung. It carries `--entrypoint` so that even this exception starts no gateway: the image's own entrypoint boots s6, and a rival gateway is the last thing a hung one needs. `agent-mgr` refuses a `compose run` without the flag for exactly that reason.)
+- **`hermes chat` runs under `with-contenv`; the other probes do not need to.** s6 publishes the
+  agent's identity into `/run/s6/container_environment`, and an exec'd process inherits none of
+  it — so a bare `hermes chat` fails `HTTP 401: Invalid or revoked token` against a gateway that
+  is serving normally. That is the same string a real revocation prints, which is what makes it
+  worth a wrapper rather than a note: the false negative reads as a specific, alarming positive.
+  `with-contenv` is the base's own loader; it is an execline script, so the `PATH` override is
+  what lets it find `ifelse` — without it the wrapper dies before running anything. Measured:
+  `mcp test` and `cron list` pass bare, because they read the dotenv rather than the model route.
 - **Read-only probes.** Ask about reservations, locks, listings. Never `send_message`, never `unlock_door` — a smoke test must not text a guest or open a door.
 - **Never print secrets.** On failure report the failure, not the environment.
 - Allow a 240s timeout on steps 1–4: liveness is ~5s, a tool-backed probe up
@@ -61,7 +69,7 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 ## 1. Liveness — does the agent answer at all
 
 ```sh
-docker compose exec -T hermes hermes chat -q 'Reply with exactly: PONG' < /dev/null
+docker compose exec -T -e PATH=/command:/usr/bin:/bin hermes /command/with-contenv hermes chat -q 'Reply with exactly: PONG' < /dev/null
 ```
 
 Expect `PONG` in the reply box. This proves the container is serving, the model route resolves, and its credentials are valid.
@@ -71,7 +79,7 @@ A hang means the model provider is unreachable or OAuth expired — check with `
 ## 2. Tool reachability — does it still reach Hostex
 
 ```sh
-docker compose exec -T hermes hermes chat -q \
+docker compose exec -T -e PATH=/command:/usr/bin:/bin hermes /command/with-contenv hermes chat -q \
   'Use your Hostex tools to tell me how many reservations arrive in the next 30 days. Answer with just the number and the word reservations.' < /dev/null
 ```
 
@@ -199,7 +207,7 @@ Before `TZ` was set the container ran UTC and both sides were
 directly comparable — which is why an older transcript of this step compares
 them with no conversion and still looks right.
 
-**This is a proxy for delivery, not proof.** It shows the gateway holds a websocket to Plow. It does not show that a text from the operator's phone reaches the agent and gets a reply — that involves the Plow line, the pairing, and the home binding in `/var/lib/hermes/.env`, and only a real text exercises it.
+**This is a proxy for delivery, not proof.** It shows the gateway holds a websocket to Plow. It does not show that a text from the operator's phone reaches the agent and gets a reply — that involves the Plow line, the pairing, and the home binding — `PLOW_HOME_CHANNEL`, from the credential; `./scripts/check-home-binding.sh` owns that verdict — and only a real text exercises it.
 
 ## 5. The serving gate — a real message from a handset
 
@@ -255,5 +263,5 @@ diagnostics alone.
 | Hostex `chat` | agent loop reached the tool | whether the call succeeded |
 | `mcp test hostex` | the server connects and registers tools | the credential |
 | `mcp test seam` | lock surface configured | whether locks respond |
-| Plow log | gateway holds the socket | delivery, and the home binding in `/var/lib/hermes/.env` |
+| Plow log | gateway holds the socket | delivery, and the home binding — `./scripts/check-home-binding.sh` owns that verdict |
 | handset message | the whole path a real message takes, including the line and the pairing | Hostex guest intake |

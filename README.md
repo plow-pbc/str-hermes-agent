@@ -322,11 +322,14 @@ docker compose exec --user "$(id -u):$(id -g)" -it hermes hermes auth add openai
 just restart
 ```
 
-After pairing and activating the private Plow chat, send `/sethome` in the
-desired chat. Hermes persists that host-specific home target to the dotenv as
-`PLOW_CHAT_HOME_CHANNEL` and `PLOW_CHAT_HOME_CHANNEL_THREAD_ID`; it is
-intentionally not tracked, and `plow-init` keeps it — it rewrites only the keys
-it owns and copies every other line through.
+The home chat comes from the credential, not from a command: `plow-init`
+publishes `PLOW_HOME_CHANNEL` into the boot environment at every start, and the
+plugin reads it from there. `./scripts/check-home-binding.sh` reports whether it
+is bound and, when it is not, what to do about it.
+
+`/sethome` is not that remedy. Without `PLOW_HOME_CHANNEL` the plugin does not
+load, so there is nothing running to receive the command — an unbound agent is
+re-minted, not messaged.
 
 <a name="applying-a-runtime-edit"></a>
 Applying a `runtime/` edit — `config.yaml` or the `SOUL.md` persona:
@@ -456,7 +459,7 @@ the day someone rebuilt.
 Interactive one-offs run inside the live gateway container, which must be up:
 
 ```sh
-docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'hello'
+docker compose exec -T -e PATH=/command:/usr/bin:/bin hermes /command/with-contenv hermes chat -q 'hello'
 docker compose exec hermes hermes auth list
 ```
 
@@ -577,7 +580,7 @@ protects you.** The deleted local script honoured a `HERMES_DOTENV` env var;
 upstream's does not, so exporting it does nothing and the `--data-dir` value is
 what decides which agent gets rewritten. Pointing a second agent's activation at
 a home that is not its own overwrites *this* agent's credentials in place — replacing rather
-than shadowing them — and leaves it off its chat until `/sethome` is sent again.
+than shadowing them — and leaves it off its chat until the credential is re-minted.
 Activating a second number means naming that agent's data directory:
 
 ```sh
@@ -608,15 +611,13 @@ conversation:
 docker compose exec hermes hermes pairing approve plow_chat <CODE>
 ```
 
-Then send `/sethome` in that desired private chat. The ID shown by
-`hermes pairing list` is an internal ID, not the pairing code — use the one
-texted back to your phone.
+The ID shown by `hermes pairing list` is an internal ID, not the pairing code —
+use the one texted back to your phone.
 
 Re-running activation issues a *new* `PLOW_CHAT_CHAT_UID`, and the adapter
-refuses any destination outside it and the group UIDs. One stored copy of the
-old one goes stale: if home is the private chat, `PLOW_CHAT_HOME_CHANNEL`
-still holds the old UID and every home delivery is rejected until `/sethome`
-is sent again (a home pinned to a group UID is unaffected). The
+refuses any destination outside it and the group UIDs. The home channel is not
+among the stale copies — it comes from the credential each boot, so
+`./scripts/check-home-binding.sh` is the check that settles it. The
 `hostex-inbound` job is unaffected — it resolves its target from the owners'
 group, not this UID.
 
@@ -655,7 +656,7 @@ reduction, not as a security boundary (#46).
 docker compose exec hermes hermes mcp test hostex     # connectivity + tool list
 # note: this reports the server's full surface, not the `include` selection —
 # use `hermes tools list | grep hostex` to see what the agent actually gets
-docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'Read my most recent Hostex message.'
+docker compose exec -T -e PATH=/command:/usr/bin:/bin hermes /command/with-contenv hermes chat -q 'Read my most recent Hostex message.'
 ```
 
 ### Finding a capability that isn't allowlisted
@@ -1367,7 +1368,7 @@ after editing `runtime/config.yaml` apply it the way
 
 ```sh
 docker compose exec hermes hermes mcp test seam     # connectivity + tool list
-docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'Which of my doors are unlocked?'
+docker compose exec -T -e PATH=/command:/usr/bin:/bin hermes /command/with-contenv hermes chat -q 'Which of my doors are unlocked?'
 ```
 
 ### Known exposure

@@ -1,44 +1,36 @@
 #!/usr/bin/env bash
-# Which chat is Hermes bound to for /sethome deliveries, and is it usable?
+# Which chat is Hermes bound to for home deliveries, and is it usable?
 #
-# Prints exactly one verdict line and no values — PLOW_CHAT_* are chat
-# identifiers, and this runs on a host whose dotenv also holds tokens.
+# Prints exactly one verdict line and no values — these are chat identifiers,
+# and they come from a container whose environment also holds tokens.
 #
-# Parses the dotenv rather than sourcing it: `.` executes the file, and an
-# unquoted spaced value (PLOW_CHAT_GROUP_UIDS=cht_a=STR Owners — display names
-# routinely contain spaces) would run as a command.
+# Asks the boot environment, not the dotenv. This compared the home's
+# PLOW_CHAT_HOME_CHANNEL against PLOW_CHAT_CHAT_UID and the PLOW_CHAT_GROUP_UIDS
+# list, which is the pre-v2.0.0 contract: the plow_chat plugin has read
+# PLOW_HOME_CHANNEL from the boot environment since then, and plow-init
+# publishes it there from the credential. Measured against the live agent, the
+# dotenv key and the boot value disagree, and the boot value appears in neither
+# the dotenv chat uid nor its group list -- so the three-way comparison printed
+# STALE about inputs nothing reads, and prescribed a remedy that cannot work.
+# A verdict from dead inputs is worse than no verdict.
+#
+# Asked of the container rather than of a host path: the home is a named volume
+# now, and the only supported way in is through the container that mounts it.
 set -uo pipefail
 
 compose() { "$(dirname "$0")/compose" "$@"; }
 
-# Asked of the container rather than of a host path: the home is a named volume
-# now, and the only supported way in is through the container that mounts it.
-# $HERMES_HOME rather than a literal, because the boot contract decides it.
-#
-# One verdict covers both "not up" and "no dotenv yet". They were separate while
-# the home was a host directory that could exist without a container; a volume
-# this script cannot reach is a volume it cannot judge, and inventing a
-# distinction it cannot actually observe names a cause that may not be the cause.
-if ! dotenv=$(compose exec -T hermes sh -c 'cat "$HERMES_HOME/.env"' 2>/dev/null); then
-  echo "home: NO DOTENV — the container is not up, or has none yet"
-  exit 0
-fi
+BOOT_ENV=/run/s6/container_environment/PLOW_HOME_CHANNEL
 
-get() { printf '%s\n' "$dotenv" | sed -n "s/^$1=//p" | tail -1 | tr -d "[:space:]\"'"; }
-
-home=$(get PLOW_CHAT_HOME_CHANNEL)
-private=$(get PLOW_CHAT_CHAT_UID)
-# Entries are <uid>=<display name>; only the uid side is matched. get() has
-# already stripped whitespace, so a spaced name arrives run together — which
-# does not matter, since the name is dropped here and never printed.
-groups=$(get PLOW_CHAT_GROUP_UIDS | sed 's/=[^,]*//g')
-
-if [ -z "$home" ]; then
-  echo "home: UNSET — needs /sethome (the operator)"
-elif [ "$home" = "$private" ]; then
-  echo "home: the current private chat — fine"
-elif case ",$groups," in *",$home,"*) true ;; *) false ;; esac; then
-  echo "home: pinned to a configured group — fine"
+# `exec`, never `run`: this reads one value and must never start a second
+# gateway beside the serving one.
+if compose exec -T hermes test -s "$BOOT_ENV" 2>/dev/null; then
+  echo "home: bound — the gateway holds a home channel from its credential"
+elif compose exec -T hermes true 2>/dev/null; then
+  echo "home: UNSET — plow-init published no home channel. Re-mint the credential with"
+  echo "      plow-pbc/plow-agents (\`plow-agents mint <line-uid> --credential-file"
+  echo "      ~/.plow-credentials-str\`, then \`just restart\`). Not /sethome: without"
+  echo "      PLOW_HOME_CHANNEL the plugin does not load, so it cannot receive it."
 else
-  echo "home: STALE — needs /sethome (the operator)"
+  echo "home: CANNOT ASK — the container is not up on this host"
 fi
