@@ -51,10 +51,15 @@ IMAGE_CLAIMS = [
     # Persona and config on CONTENT, not size: the base ships its own at both
     # paths, so an existence check passes on an image carrying the generic
     # persona -- an agent that boots and answers as someone else.
+    #
+    # The persona at the SEED path, never /var/lib/hermes/SOUL.md: plow-init
+    # writes that file at every boot as the base persona followed by this one,
+    # so what the image carries there is the base's and says nothing about this
+    # agent.
     ("the persona is this agent's own",
-     "grep -qF 'short-term rentals' /var/lib/hermes/SOUL.md && echo yes", "yes"),
+     "grep -qF 'short-term rentals' /opt/hermes/plow-seed/persona.md && echo yes", "yes"),
     ("the persona is readable by the agent",
-     "stat -c %a /var/lib/hermes/SOUL.md", "644"),
+     "stat -c %a /opt/hermes/plow-seed/persona.md", "644"),
     ("the config is this agent's own",
      "grep -qF hostex /var/lib/hermes/config.yaml && echo yes", "yes"),
 ]

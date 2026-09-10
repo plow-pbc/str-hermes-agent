@@ -14,9 +14,9 @@ SEAM = "/etc/cont-init.d/05-install-agent-payload.sh"
 
 # A MIGRATED home carries the empty directory a bind-mount target leaves behind.
 # There was a HOSTED shape too -- agent-mgr mounting bin/ and mcp-seam/ and
-# staging SOUL and config into the home -- which the seam had to leave alone
-# while both paths were live. That path is gone, so the seam no longer branches
-# on it and there is nothing to assert.
+# staging the persona and config into the home -- which the seam had to leave
+# alone while both paths were live. That path is gone, so the seam no longer
+# branches on it and there is nothing to assert.
 MIGRATED = "mkdir -p /tmp/h/scripts"
 
 # Asked of cron's own checker rather than restated. Why the links are on the
@@ -33,19 +33,20 @@ SEAM_CLAIMS = [
     ("the scheduler's scripts", MIGRATED, "readlink /tmp/h/scripts", "/opt/plow/str/bin"),
     ("the seam mcp server", MIGRATED, "readlink /tmp/h/mcp-seam", "/opt/plow/str/mcp-seam"),
     ("cron accepts the directory link", MIGRATED, CRON_CHECK, "ACCEPTED ACCEPTED REFUSED"),
-    ("the persona is refreshed", MIGRATED,
-     "grep -qF 'short-term rentals' /tmp/h/SOUL.md && echo yes", "yes"),
     ("the config is refreshed", MIGRATED,
      "grep -qF /opt/plow/str/mcp-seam/server.py /tmp/h/config.yaml && echo yes", "yes"),
-    ("the persona is root-owned and read-only to the agent", MIGRATED,
-     "stat -c '%U %a' /tmp/h/SOUL.md", "root 644"),
-    # The opposite of the line above, and the reason they are two installs.
     # plow-init rewrites config.yaml AS THE AGENT, and $HERMES_HOME carries the
     # sticky bit -- so a root-owned one is a file the agent cannot replace, and
     # the boot parks on `os.replace(config.yaml.tmp -> config.yaml)` EPERM.
     # cont-init has already reported exit 0 by then, which is what hid it.
     ("the config belongs to the agent that rewrites it", MIGRATED,
      "stat -c '%U %a' /tmp/h/config.yaml", "hermes 640"),
+    # The seam must NOT write the identity. plow-init composes it from the base
+    # persona and /opt/hermes/plow-seed/persona.md at every boot; a copy
+    # installed here would be half an identity overwriting a whole one, and the
+    # window between the two writes is invisible from outside.
+    ("the seam leaves the identity to plow-init", MIGRATED,
+     "test -e /tmp/h/SOUL.md && echo wrote || echo untouched", "untouched"),
 ]
 
 

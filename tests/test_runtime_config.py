@@ -140,7 +140,7 @@ def test_every_tool_soul_names_is_one_some_server_offers():
         if not line.lstrip().startswith("#"))))
 
     named = re.findall(r"`((?:search|get|update|list|create|delete)_\w+)`",
-                       (ROOT / "runtime/SOUL.md").read_text())
+                       (ROOT / "runtime/persona.md").read_text())
     assert named, "precondition: SOUL names at least one tool"
     for tool in named:
         assert tool in offered, f"SOUL.md tells the agent to call {tool}; no server offers it"
@@ -246,7 +246,7 @@ def test_the_draft_reaches_the_session_that_approves_it():
     # SOUL.md; the poller and group prompts reference it rather than restate
     # it (contract-drift finding, PR #3). These pins hold the owner's copy;
     # the reference pins live beside each consumer's other clauses.
-    soul_src = " ".join((ROOT / "runtime/SOUL.md").read_text().split())
+    soul_src = " ".join((ROOT / "runtime/persona.md").read_text().split())
     assert "verbatim from an unmarked vault" in soul_src
     assert "commits the owners to nothing" in soul_src
     assert "SOUL.md veto-window test" in flowed

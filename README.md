@@ -186,9 +186,8 @@ between the two; #46 records why the allowlist never was.
 | `bin/` | Scripts Hermes' scheduler runs. Baked to `/opt/plow/str/bin` and symlinked to `/var/lib/hermes/scripts` — root-owned, so a turn can read them and cannot rewrite them |
 | `mcp-seam/` | Seam lock-control MCP server. Baked to `/opt/plow/str/mcp-seam` and symlinked into the home the same way |
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
-| `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `/var/lib/hermes` |
+| `runtime/` | Sanitized, restorable `config.yaml` — the declarative half of `/var/lib/hermes` — and `persona.md`, the half of the agent's identity this repo owns |
 | `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`. Baked to `/opt/plow/str/vault-seed/` as the reference copy; the live files belong to the vault repo, which is the operator's git checkout, so apply an edit there (see [#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)). The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
-| `scripts/publish-soul` | Installs `runtime/SOUL.md` verbatim from the HOST, for an edit that must land without a rebuild. The image bakes the same file and `docker/cont-init.d/05-install-agent-payload.sh` reinstalls it on every boot, so the durable edit is `runtime/SOUL.md` plus a rebuild. Composes nothing. Before the agent's first boot this is a plain write; afterwards `plow-init` owns the file as root, so it escalates through the running container. Nothing else writes the SOUL — the nightly does not. |
 | `.env.example` | The environment-key contract, with no values |
 | [`.claude/skills/deploy-str-hermes/`](.claude/skills/deploy-str-hermes/SKILL.md) | Redeploy to `wakeup` — reseat, deploy, force-recreate |
 | [`.claude/skills/smoke-str-hermes/`](.claude/skills/smoke-str-hermes/SKILL.md) | Prove the deployed container answers, and what that does not prove |
@@ -202,7 +201,7 @@ between the two; #46 records why the allowlist never was.
 | `/var/lib/hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
 | `/var/lib/hermes/auth.json` | OpenAI/Codex OAuth | no |
 | `/var/lib/hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
-| `/var/lib/hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
+| `/var/lib/hermes/SOUL.md` | system prompt; **composed by `plow-init` at every boot** as the base image's persona followed by `runtime/persona.md`, so edits here are lost | no — edit `runtime/persona.md` |
 | `/var/lib/hermes/skills/` | bundled + boot-linked skills, plus any Hermes wrote itself | only the ones Hermes wrote — see below |
 | remaining `/var/lib/hermes` state | sessions, databases, logs, caches | no |
 
@@ -263,9 +262,9 @@ Two things worth knowing before committing a snapshot. These skills are written
 from real sessions, so they can quote **guest first names and wording** — which
 is the reason to read the diff rather than commit it blind: this tree is public,
 so nothing that quotes a guest may land in it. And a rule Hermes writes for itself can
-**contradict `runtime/SOUL.md`**, which the deploy does install; when the two
-disagree, SOUL is the one under review, so fix the skill or fold the rule into
-SOUL rather than leaving both.
+**contradict `runtime/persona.md`**, which the deploy does ship into the
+identity; when the two disagree, the persona is the one under review, so fix the
+skill or fold the rule into the persona rather than leaving both.
 
 ## Bringing it up
 
@@ -332,35 +331,34 @@ load, so there is nothing running to receive the command — an unbound agent is
 re-minted, not messaged.
 
 <a name="applying-a-runtime-edit"></a>
-Applying a `runtime/` edit — `config.yaml` or the `SOUL.md` persona:
+Applying a `runtime/` edit — `config.yaml` or `persona.md`:
 
 ```sh
 docker compose build     # `up` alone will NOT rebuild: it only builds when the
 just restart             # tagged image is absent, and this one never is
 ```
 
-Both files are baked into the image, and
-`docker/cont-init.d/05-install-agent-payload.sh` reinstalls them into the home
-on every boot — unconditionally, because a named-volume home seeds from the
-image only while empty and would otherwise shadow every later revision
-(plow-hermes-agent#58). So a rebuild is what applies a `runtime/` edit, and a
-host-side edit to `/var/lib/hermes/SOUL.md` is lost at the next boot. Edit
-`runtime/SOUL.md`.
+Both files are baked into the image. `config.yaml` is reinstalled into the home
+by `docker/cont-init.d/05-install-agent-payload.sh` on every boot —
+unconditionally, because a named-volume home seeds from the image only while
+empty and would otherwise shadow every later revision (plow-hermes-agent#58).
+`persona.md` never enters the home under its own name: it ships to
+`/opt/hermes/plow-seed/persona.md`, and `plow-init` writes
+`/var/lib/hermes/SOUL.md` at every boot as the base persona followed by it. So a
+rebuild is what applies a `runtime/` edit either way, and a host-side edit to
+`/var/lib/hermes/SOUL.md` is lost at the next boot. Edit `runtime/persona.md`.
 
 `up` returns before the gateway is serving and there is no healthcheck to wait
 on, so watch `docker compose logs -f hermes` until it lists its platforms.
 Nothing in that path touches `/var/lib/hermes/.env`, so the home target and both
 secrets survive.
 
-`scripts/publish-soul` remains for an edit that must land without a rebuild. It
-writes the same file from the host and is overwritten by the next boot, so it is
-a stopgap, not the way to change the persona.
-
-The vault index is deliberately **not** in the SOUL. The base image treats
-`SOUL.md` as provisioned identity: `plow-init` seeds it only when absent, then
-chowns it `root:root` and chmods it `0644` inside a home it owns and marks
-sticky, at every container start. Pushing a nightly-changing corpus through that
-freeze takes root escalation and a schedule; naming the file does not. So the
+The vault index is deliberately **not** in the persona. The base image owns
+`SOUL.md` outright: `plow-init` rewrites it from the two seed halves and chowns
+it `root:root` at `0644`, inside a home it owns and marks sticky, at every
+container start. Anything a nightly wrote into it is gone by the next boot, and
+pushing a nightly-changing corpus through that write takes root escalation and a
+schedule; naming the file does not. So the
 persona carries the path — `$HERMES_HOME/repo/vault/index.md` — and the nightly
 keeps that file current in the vault the agent already reads. Identity stays
 frozen, knowledge stays live.
@@ -394,13 +392,14 @@ Not here:
   outbound sends and [`plow`](https://github.com/plow-pbc/plow) holds which
   chats are trusted. What *is* this repo's is the STR-specific eligibility
   rule — which guest may be answered, and on whose approval — which lives in
-  `runtime/SOUL.md` and is what the config and the poller delegate to. A copy
+  `runtime/persona.md` and is what the config and the poller delegate to. A copy
   of the *enforcement* here, or a second trust flag, is a path no dashboard
   reads.
 - **Generic Plow-assistant persona text.** Anything a second assistant would
   also want belongs in the base's `image/seed/SOUL.md`
-  ([`plow-hermes-agent`](https://github.com/plow-pbc/plow-hermes-agent));
-  `runtime/SOUL.md` is for what makes this the rentals agent.
+  ([`plow-hermes-agent`](https://github.com/plow-pbc/plow-hermes-agent)), which
+  `plow-init` composes ahead of this repo's half at every boot;
+  `runtime/persona.md` is for what makes this the rentals agent.
 - **A Hermes runtime fix.** It goes to the fork and upstream, not into a
   workaround here — this repo takes it as the image digest bump the Dockerfile
   pins.
@@ -419,7 +418,7 @@ Examples:
   https://github.com/plow-pbc/str-hermes-agent/pull/4
 - Drift — #3 put the two-tier eligibility rule (this repo's) into ~40 lines of
   `group_prompts` prose in `runtime/config.yaml` beside the one in
-  `runtime/SOUL.md`, so the rule has two homes here and reads as a second
+  `runtime/persona.md`, so the rule has two homes here and reads as a second
   approval path next to the plugin's send gate:
   https://github.com/plow-pbc/str-hermes-agent/pull/3
 
@@ -915,7 +914,7 @@ This makes guest mail **unattended**, which the roadmap names as the trigger
 for revisiting #7.
 
 The agent holds `send_message`, and what keeps it from answering a guest on its
-own is the two-tier instruction owned by `runtime/SOUL.md` and referenced from
+own is the two-tier instruction owned by `runtime/persona.md` and referenced from
 the cron prompt (`bin/hostex-poll.py`): nothing goes to the guest with wording
 the owners have not seen — explicit approval by default, the announced veto
 window as the one exception — and what they approved (or let pass) is what

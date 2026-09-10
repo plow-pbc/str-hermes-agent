@@ -10,8 +10,8 @@
 #             checkin-watch cannot name /opt/plow at all.
 #   mcp-seam  config.yaml names the server by path, and a home migrated from the
 #             agent-mgr shape carries the old spelling until it is refreshed.
-#   SOUL.md   a named-volume home seeds from the image only while EMPTY, so a
-#   config.yaml  migrated home shadows every later revision of both
+#   config.yaml  a named-volume home seeds from the image only while EMPTY, so
+#             a migrated home shadows every later revision of it
 #             (plow-hermes-agent#58). Reinstalling here is what makes an image
 #             update reach a home that already exists.
 #
@@ -51,16 +51,17 @@ link_payload /opt/plow/str/mcp-seam mcp-seam
 # image did not lay out, restoring its copies would revert whatever did.
 #
 # Unconditional on that path: overwriting the stale copy a volume kept is the
-# entire point (#58). Root-owned 0644, which harden_home() re-asserts on SOUL.md
-# moments later; plow-init rewrites its own keys in config.yaml after this.
-# Two owners, deliberately. harden_home() fchown()s SOUL.md to 0:0 on every
-# boot, so root is right there. config.yaml is the AGENT's: plow-init rewrites
-# it as the agent rather than as root -- its own comment says so -- and $home
-# carries the sticky bit, so a root-owned config.yaml is one the agent cannot
-# replace. Installing it root-owned parks the boot on
+# entire point (#58). config.yaml is the AGENT's: plow-init rewrites its own
+# keys in it after this, as the agent rather than as root -- its own comment
+# says so -- and $home carries the sticky bit, so a root-owned config.yaml is
+# one the agent cannot replace. Installing it root-owned parks the boot on
 # `PermissionError: os.replace('config.yaml.tmp' -> 'config.yaml')`,
 # after cont-init has already reported success. The base ships it 0640
 # agent-owned; match that.
-install -o root -g root -m 0644 -t "$home" /opt/plow/str/home/SOUL.md
+#
+# SOUL.md is deliberately absent: plow-init writes the home's copy on every boot
+# as the base persona followed by /opt/hermes/plow-seed/persona.md, so
+# reinstalling one here would make this a second owner of a file it holds only
+# half of.
 install -o "$(id -u hermes)" -g "$(id -g hermes)" -m 0640 -t "$home" \
   /opt/plow/str/home/config.yaml

@@ -56,11 +56,19 @@ RUN set -eu; \
     done; \
     chmod -R a=rX,u+w /opt/hermes/skills/wiki-*
 
-# The persona and the declarative half of this deployment's home. COPY'd rather
-# than mounted: plow-init's harden_home() fchown()s /var/lib/hermes/SOUL.md on
-# every boot, so a read-only mount at that path fails EROFS, plow-init parks and
-# no gateway starts. Both stay inert under agent-mgr's ~/.hermes bind mount;
-# they are what a named-volume home initialises from.
+# Identity: only what is specific to this agent. plow-init writes the home's
+# SOUL.md on every boot as the base persona followed by this file, so nothing
+# here targets /var/lib/hermes/SOUL.md -- that path is overwritten at boot, and
+# a copy of it in this image would be a second source for a file this image does
+# not own. `docker run <tag> cat /opt/hermes/plow-seed/persona.md` is what shows
+# an operator the persona a published image carries.
+COPY runtime/persona.md /opt/hermes/plow-seed/persona.md
+RUN chmod 0644 /opt/hermes/plow-seed/persona.md
+
+# The declarative half of this deployment's home. COPY'd rather than mounted: a
+# published image has no deploy clone to mount from, and it stays inert under
+# agent-mgr's ~/.hermes bind mount; it is what a named-volume home initialises
+# from.
 #
 # config.yaml carries overrides only. Every base-owned key -- mcp_servers.plow,
 # model.*, display, agent.api_max_retries, cron.model_drift_guard,
@@ -68,17 +76,16 @@ RUN set -eu; \
 # one here could only drift from what actually runs.
 # The authoritative copy lives outside the home, because the home is a volume
 # and a volume seeds from the image only while it is EMPTY -- so a migrated home
-# shadows every later revision of these two files (plow-hermes-agent#58).
-# 05-install-agent-payload.sh reinstalls them from here on every boot, which is
+# shadows every later revision of it (plow-hermes-agent#58).
+# 05-install-agent-payload.sh reinstalls it from here on every boot, which is
 # what makes an image update reach a pre-populated home at all.
 #
-# The copies under /var/lib/hermes are derived from that one, not a second
-# source: they are what an EMPTY volume initialises from, and what
-# `docker run <tag> cat /var/lib/hermes/SOUL.md` shows an operator checking a
-# published image.
-COPY runtime/SOUL.md runtime/config.yaml /opt/plow/str/home/
-RUN install -m 0644 -t /var/lib/hermes/ \
-      /opt/plow/str/home/SOUL.md /opt/plow/str/home/config.yaml
+# The copy under /var/lib/hermes is derived from that one, not a second source:
+# it is what an EMPTY volume initialises from, and what
+# `docker run <tag> cat /var/lib/hermes/config.yaml` shows an operator checking
+# a published image.
+COPY runtime/config.yaml /opt/plow/str/home/
+RUN install -m 0644 -t /var/lib/hermes/ /opt/plow/str/home/config.yaml
 
 # This agent's own skill, under the base's bundled root rather than in the home.
 # tools/skills_sync.py rglobs /opt/hermes/skills for SKILL.md and reconciles
