@@ -60,7 +60,7 @@ skill maps the host — rather than piping these through `ssh` inline.
 - **Pull `--ff-only`, on `main` only.** A non-fast-forward means prod diverged; stop and investigate.
 - **Never** force-push, `--no-verify`, `git stash`, `git reset --hard`, `git clean`, or `git checkout -- <path>`.
 - **Never print secret values.** `/var/lib/hermes/.env` holds the Hostex and Seam credentials and the Plow chat *configuration*; the Plow credential itself is `~/.plow-credentials-str`. Check presence or last 3 chars in either, never `cat` them.
-- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls both from what the image bakes, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs under `properties/` are the vault's own: edit their prose there, it survives. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages on every nightly. Rename the page, don't edit the link. The vault seed no longer overlays into the vault at all ([#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)): the live `AGENTS.md` and `.env` belong to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the home binding is not in it at all — that is `PLOW_HOME_CHANNEL`, from the credential — so a rebuild cannot unbind the home chat.
+- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls the config from what the image bakes, and `plow-init` rewrites `SOUL.md` as the base persona followed by the image's `/opt/hermes/plow-seed/persona.md`, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs under `properties/` are the vault's own: edit their prose there, it survives. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages on every nightly. Rename the page, don't edit the link. The vault seed no longer overlays into the vault at all ([#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)): the live `AGENTS.md` and `.env` belong to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the home binding is not in it at all — that is `PLOW_HOME_CHANNEL`, from the credential — so a rebuild cannot unbind the home chat.
 
 ## 1. Confirm the checkout is deployable
 
@@ -153,11 +153,12 @@ An empty log means nothing new — say so rather than reporting a deploy.
 ## 3. Build the image
 
 There is no separate deploy step any more, and no hook whose output to check.
-`runtime/config.yaml` and `runtime/SOUL.md` are baked into the image, and
-`docker/cont-init.d/05-install-agent-payload.sh` reinstalls both into the home on
-every boot — unconditionally, because a named-volume home seeds from the image
-only while empty and would otherwise shadow every later revision
-(plow-hermes-agent#58). Applying a `runtime/` edit **is** the build.
+`runtime/config.yaml` and `runtime/persona.md` are baked into the image.
+`docker/cont-init.d/05-install-agent-payload.sh` reinstalls the config into the
+home on every boot — unconditionally, because a named-volume home seeds from the
+image only while empty and would otherwise shadow every later revision
+(plow-hermes-agent#58) — and `plow-init` recomposes `SOUL.md` from the seed
+halves just as unconditionally. Applying a `runtime/` edit **is** the build.
 
 ```sh
 docker compose build

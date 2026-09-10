@@ -51,12 +51,30 @@ IMAGE_CLAIMS = [
     # Persona and config on CONTENT, not size: the base ships its own at both
     # paths, so an existence check passes on an image carrying the generic
     # persona -- an agent that boots and answers as someone else.
+    #
+    # The persona at the SEED path, never /var/lib/hermes/SOUL.md: plow-init
+    # writes that file at every boot as the base persona followed by this one,
+    # so what the image carries there is the base's and says nothing about this
+    # agent.
     ("the persona is this agent's own",
-     "grep -qF 'short-term rentals' /var/lib/hermes/SOUL.md && echo yes", "yes"),
+     "grep -qF 'short-term rentals' /opt/hermes/plow-seed/persona.md && echo yes", "yes"),
     ("the persona is readable by the agent",
-     "stat -c %a /var/lib/hermes/SOUL.md", "644"),
+     "stat -c %a /opt/hermes/plow-seed/persona.md", "644"),
     ("the config is this agent's own",
      "grep -qF hostex /var/lib/hermes/config.yaml && echo yes", "yes"),
+    # The base's own seam, driven for real. Every row above reads a file this
+    # image placed; only plow-init writing the home's SOUL.md proves BOTH
+    # halves reach the agent, and nothing else in this repo can. RED until the
+    # FROM pin bumps to a base that composes -- that red is this draft's gate.
+    ("plow-init composes the identity from both halves",
+     "/opt/hermes/.venv/bin/python -c \"import importlib.util as u;"
+     "s=u.spec_from_file_location('p','/etc/s6-overlay/scripts/plow-init.py');"
+     "m=u.module_from_spec(s);s.loader.exec_module(m);m.compose_identity()\" "
+     ">/dev/null 2>/tmp/seam.err || tail -1 /tmp/seam.err; "
+     "grep -q '# Plow assistant' /var/lib/hermes/SOUL.md "
+     "&& grep -q 'short-term rentals' /var/lib/hermes/SOUL.md "
+     "&& echo composed || echo 'not composed'",
+     "composed"),
 ]
 
 
