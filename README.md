@@ -14,7 +14,7 @@ Uses the Plow base image (`plow-cloud-agents:base-<sha>`, built by
 [plow-hermes-agent](https://github.com/plow-pbc/plow-hermes-agent) on the
 official `nousresearch/hermes-agent` image) rather than a hand-rolled one: it
 adds `plow-init`, which asks Plow who this agent is at every boot. All state
-except the vault lives in `~/.hermes` on the host, mounted at `/var/lib/hermes`
+except the vault, which is a host bind; the home itself is a named volume mounted at `/var/lib/hermes`
 (the image's `HERMES_HOME`); the vault is `~/hermes-vault`, mounted in beside
 it. The image is stateless.
 
@@ -433,7 +433,7 @@ docker compose logs -f hermes        # container-level logs
 just down           # stop
 docker compose build && just up     # rebuild at the current pins
 
-tail -f ~/.hermes/logs/gateway.log               # gateway detail
+docker compose logs -f hermes                    # gateway detail
 docker compose exec hermes hermes pairing list   # who's allowed to text it
 ```
 
@@ -497,7 +497,7 @@ PLOW_CHAT_GROUP_UIDS=cht_owners=STR Owners,cht_cleaners=Cleaners
 PLOW_CHAT_APPROVAL_GROUP=STR Owners
 ```
 
-Add the variables to `~/.hermes/.env` and restart the gateway.
+Add the variables to `/var/lib/hermes/.env` (as root, inside the container — the home is a volume) and restart the gateway.
 `PLOW_CHAT_APPROVAL_GROUP` names which of those groups receives guest-reply
 drafts and whose members can approve them; the inbound poller resolves it to
 a chat id and refuses to install without it. Each group has

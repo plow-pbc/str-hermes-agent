@@ -147,8 +147,8 @@ hardware in a smoke test.
 Grep each pattern separately and require both. A single `grep -E 'A|B' | tail -2` is satisfied by two matches of the *same* alternative, and the pipe swallows grep's exit status so an empty log reads as a silent pass:
 
 ```sh
-grep -c '✓ plow_chat connected' ~/.hermes/logs/gateway.log
-grep -c 'websocket subscribed' ~/.hermes/logs/gateway.log
+docker compose exec -T hermes grep -c '✓ plow_chat connected' /var/lib/hermes/logs/agent.log
+docker compose exec -T hermes grep -c 'websocket connected' /var/lib/hermes/logs/agent.log
 ```
 
 The two lines have different owners, and only one of them is ours. `✓ plow_chat
@@ -173,8 +173,8 @@ the container actually started:
 
 ```sh
 docker inspect -f '{{.State.StartedAt}}' hermes
-grep '✓ plow_chat connected' ~/.hermes/logs/gateway.log | tail -1
-grep 'websocket subscribed' ~/.hermes/logs/gateway.log | tail -1
+docker compose exec -T hermes grep '✓ plow_chat connected' /var/lib/hermes/logs/agent.log | tail -1
+docker compose exec -T hermes grep 'websocket connected' /var/lib/hermes/logs/agent.log | tail -1
 ```
 
 **These two are in different zones — convert before comparing.** `StartedAt` is
