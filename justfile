@@ -64,8 +64,8 @@ restart:
 logs *ARGS:
     docker compose -f compose.yml logs {{ARGS}}
 
-ps:
-    docker compose -f compose.yml ps
+ps *ARGS:
+    docker compose -f compose.yml ps {{ARGS}}
 
 # A probe inside the container, with the boot environment loaded. s6 publishes
 # the agent's identity into /run/s6/container_environment; an exec'd process

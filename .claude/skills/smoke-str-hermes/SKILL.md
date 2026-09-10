@@ -17,7 +17,7 @@ surface. The same applies to a host
 `gateway_state.json`, which records the platform states written by the last
 gateway to shut down cleanly, not the running one.
 
-`just ps` showing `Up`, a green `agent-mgr up str`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
+`just ps` showing `Up`, a green `just up`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
 
 **What these probes do and do not prove.** `hermes chat` starts a *fresh
 process* inside the container, which reads `/var/lib/hermes/config.yaml` at its own
