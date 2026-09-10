@@ -41,10 +41,11 @@ test holds them together.
 """
 from __future__ import annotations
 
-import os
 import pathlib
 import shutil
+import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SNAPSHOT = ROOT / "agent-skills"
@@ -75,9 +76,25 @@ def refuse_in_the_deployed_clone(root: pathlib.Path) -> None:
 
 
 def skills_dir() -> pathlib.Path:
-    """The runtime skill store — `~/.hermes/skills` on the host."""
-    home = os.environ.get("HERMES_HOME", str(pathlib.Path.home() / ".hermes"))
-    return pathlib.Path(home) / "skills"
+    """The runtime skill store, copied out of the container that mounts it.
+
+    The home is a named volume: there is no host path to it. This used to read
+    the retired host home's skills directory, which still EXISTS on the deploy
+    host frozen at the cutover -- so it archived the store as it stood that
+    afternoon and silently missed every skill Hermes has written since, which is
+    the only thing this tool exists to preserve. Read-only, so a copy is enough.
+
+    `docker cp` by container name, not `scripts/compose`. This is the one tool
+    that REFUSES to run in the deploy clone (see above), and compose resolves its
+    project from the directory -- so from a development checkout it would name a
+    project with no container and fail before copying anything. `container_name`
+    is declared in compose.yml precisely so the running container has a handle
+    that does not depend on which checkout you are standing in.
+    """
+    staged = pathlib.Path(tempfile.mkdtemp(prefix="skills-snapshot-"))
+    subprocess.run(["docker", "cp", "hermes:/var/lib/hermes/skills",
+                    str(staged / "skills")], check=True)
+    return staged / "skills"
 
 
 def read_bundled(store: pathlib.Path) -> set[str]:
@@ -172,7 +189,7 @@ def mirror(store: pathlib.Path, skills: list[pathlib.Path],
 
     `symlinks=True` copies a link as a link. Following one would read whatever
     it points at into a file this workflow then asks the operator to commit,
-    and the store sits beside `.env` and `auth.json` in `~/.hermes` — so a link
+    and the store sits beside `.env` and `auth.json` in the home — so a link
     there is a live Hostex or OpenAI credential landing in git. Recorded as a
     link, it is a path in a text file and nothing more. `REVIEW.md`'s carve-out
     3 keeps a new artifact for the token to reach blocking, deferral or not.

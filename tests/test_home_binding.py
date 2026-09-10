@@ -17,12 +17,13 @@ def verdict(tmp_path, dotenv=None):
         hermes = tmp_path / ".hermes"
         hermes.mkdir()
         (hermes / ".env").write_text(dotenv)
-    # The script asks agent-mgr where this agent's home is rather than
-    # assuming it, so the stub is what makes $HOME still steer the test.
+    # The script reads the dotenv out of the container, so the stub stands in
+    # for docker and $HOME still steers the test. Exiting non-zero when the file
+    # is absent is what a real `compose exec` does against a home with no dotenv.
     stub_bin = tmp_path / "stub-bin"
     stub_bin.mkdir(exist_ok=True)
-    stub = stub_bin / "agent-mgr"
-    stub.write_text('#!/bin/sh\ncase "$1" in resolve) echo "AGENT_HOME=$HOME/.hermes" ;; esac\n')
+    stub = stub_bin / "docker"
+    stub.write_text('#!/bin/sh\ncat "$HOME/.hermes/.env" 2>/dev/null\n')
     stub.chmod(0o755)
     result = subprocess.run(
         [CHECK], env={"HOME": str(tmp_path), "PATH": f"{stub_bin}:/usr/bin:/bin"},

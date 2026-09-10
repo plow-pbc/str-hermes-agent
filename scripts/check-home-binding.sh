@@ -9,26 +9,22 @@
 # routinely contain spaces) would run as a command.
 set -uo pipefail
 
-# Asked of agent-mgr rather than assumed: it owns where an agent's state lives,
-# and a second copy of that path here is how the two drift.
+compose() { "$(dirname "$0")/compose" "$@"; }
+
+# Asked of the container rather than of a host path: the home is a named volume
+# now, and the only supported way in is through the container that mounts it.
+# $HERMES_HOME rather than a literal, because the boot contract decides it.
 #
-# Bound and checked before the /.env is appended. Swallowing the failure
-# collapses to `/.env` and prints "wrong host or account" -- naming a cause that
-# is not the cause, when agent-mgr simply could not resolve. Its own stderr is
-# left to reach the operator for the same reason.
-home="$(agent-mgr resolve str | sed -n 's/^AGENT_HOME=//p')"
-if [ -z "$home" ]; then
-  echo "home: agent-mgr cannot resolve str -- register it first: agent-mgr register str <repo>"
-  exit 0
-fi
-env_file="$home/.env"
-
-if [ ! -r "$env_file" ]; then
-  echo "home: NO DOTENV at $env_file — wrong host or account"
+# One verdict covers both "not up" and "no dotenv yet". They were separate while
+# the home was a host directory that could exist without a container; a volume
+# this script cannot reach is a volume it cannot judge, and inventing a
+# distinction it cannot actually observe names a cause that may not be the cause.
+if ! dotenv=$(compose exec -T hermes sh -c 'cat "$HERMES_HOME/.env"' 2>/dev/null); then
+  echo "home: NO DOTENV — the container is not up, or has none yet"
   exit 0
 fi
 
-get() { sed -n "s/^$1=//p" "$env_file" | tail -1 | tr -d "[:space:]\"'"; }
+get() { printf '%s\n' "$dotenv" | sed -n "s/^$1=//p" | tail -1 | tr -d "[:space:]\"'"; }
 
 home=$(get PLOW_CHAT_HOME_CHANNEL)
 private=$(get PLOW_CHAT_CHAT_UID)

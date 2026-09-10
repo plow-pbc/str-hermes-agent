@@ -37,10 +37,11 @@ def test_compose_does_not_shadow_the_installed_plugin():
     Asserted on the target rather than the source because the target is what
     shadows, whatever the source turns out to be.
     """
-    # The override, not compose.yml: agent-mgr owns the service definition now,
-    # and this repo can still add a mount that shadows the plugin.
-    compose = (ROOT / "compose.override.yml").read_text()
-    assert not re.search(r"^\s*- \S*:/opt/data/plugins", compose, re.M), (
-        "compose.override.yml mounts something over /opt/data/plugins, shadowing the "
-        "copy `agent-mgr install-plugin str` puts there from the pinned SHA"
+    compose = (ROOT / "compose.yml").read_text()
+    # Any `/plugins` segment, not one rooted at a specific home: the boot
+    # contract moved from /opt/data to /var/lib/hermes, and a pattern naming
+    # either one passes by inspecting nothing the day the other is in use.
+    assert not re.search(r"^\s*- \S*:\S*/plugins", compose, re.M), (
+        "compose.yml mounts something over the plugins directory, shadowing the "
+        "copy the image installs there from the pinned SHA"
     )

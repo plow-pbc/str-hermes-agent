@@ -54,7 +54,7 @@ operator.
 **Architectural commitments:**
 - Compose + the Plow base image (`plow-hermes-agent`, on the upstream
   `nousresearch/hermes-agent` image). No hand-rolled image beyond a thin
-  derived layer. All non-vault state in `~/.hermes` on the host; the vault is `~/hermes-vault`, mounted in.
+  derived layer. All non-vault state in the home volume at `/var/lib/hermes`; the vault is `~/hermes-vault`, a host bind mounted in.
 - Shell + small Python scripts. No application server, no framework, no
   database.
 - Generated vault content is data, not engineered code — job output, not
@@ -168,7 +168,7 @@ This is a posture on *hardening*, not a blanket security amnesty:
    call, a log or artifact the token lands in, a write that escapes the vault.
    `#7` does not accept new exfiltration surface.
 4. Destructive or unrecoverable data handling (clobbering the vault, force-push,
-   deleting `~/.hermes` state).
+   deleting `/var/lib/hermes` state).
 
 ### Contrast pairs
 

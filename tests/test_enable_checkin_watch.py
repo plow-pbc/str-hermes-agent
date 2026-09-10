@@ -27,7 +27,7 @@ EXISTING_JOB = f"  Name:      {NAME}"
 # than a real file, since the fake intercepts the whole
 # `agent-mgr ... exec ... sh -c '...'` argv before any shell inside a
 # container would see it.
-FAKE_AGENT_MGR = """#!/usr/bin/env bash
+FAKE_DOCKER = """#!/usr/bin/env bash
 case "$*" in
   *'printf %s "$HERMES_HOME"'*) printf '%s' "$STATE" ;;
   *"test -f"*)      exit ${OPS_TOML_EXIT:-0} ;;
@@ -56,8 +56,8 @@ def enable(tmp_path, *, ops_present=True, jobs_seed="", create_ok=0,
     # agent-mgr, not docker: the enable scripts reach the container through
     # it now, so that is the boundary the fake stands at. The case globs
     # below match on "$*", so the extra `compose str` words pass through.
-    fake = tmp_path / "agent-mgr"
-    fake.write_text(FAKE_AGENT_MGR)
+    fake = tmp_path / "docker"
+    fake.write_text(FAKE_DOCKER)
     fake.chmod(0o755)
     env = {**os.environ,
            "PATH": f"{tmp_path}:{os.environ['PATH']}",

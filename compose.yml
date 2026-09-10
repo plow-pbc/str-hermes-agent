@@ -1,12 +1,11 @@
 # This agent's own runtime surface, in the shape plow-agents' compose.example.yml
 # defines. This repository owns it from here.
 #
-# It lands BESIDE agent-mgr's compose.override.yml rather than replacing it:
-# agent-mgr is still the live path, and both existing at once is what keeps it
-# available as the rollback. They cannot run at the same time -- both name the
-# container `hermes` -- which is the point: two gateways on one home would share
-# a single auth.json and a single dotenv, and whichever started last would own
-# the chat.
+# It landed beside agent-mgr's compose.override.yml through the cutover, which
+# kept the outgoing path available as the rollback. That held, so this is the
+# only runtime surface now and the override is deleted. Only ever one at a time:
+# two gateways on one home would share a single auth.json and a single dotenv,
+# and whichever started last would own the chat.
 services:
   hermes:
     # Cold build needs the base first:
@@ -28,10 +27,24 @@ services:
     environment:
       # Who this agent is in the agent index.
       AGENT_ID: str
+      # Match the host account, the way life-assistant-sam-descriptor does. The
+      # image remaps the hermes user to this uid at boot and chowns only the
+      # directories it writes -- deliberately not `chown -R`, so a bind's host
+      # ownership survives (upstream #19788). Its stage2 hook names this the
+      # supported alternative to `--user`, which it refuses outright.
+      #
+      # Load-bearing here in a way it is not for course-qa or life-assistant:
+      # str binds ~/hermes-vault, a host git checkout the agent must WRITE. At
+      # the image's baked 10000 the gateway cannot -- the vault is 775 and owned
+      # by the host account -- so the nightly wiki chain ingests into a directory
+      # it has no permission for. `s6-setuidgid` re-derives supplementary groups
+      # from the account database, so compose's `group_add` cannot reach the
+      # gateway and does not solve this; matching the uid is what does.
+      HERMES_UID: "1000"
+      HERMES_GID: "1000"
       # Every schedule in this repo is a Pacific wall-clock expression. The base
       # sets no timezone, and under UTC `0 3 * * *` fires at 8 PM Pacific --
       # peak guest messaging, the one window the nightly chain exists to avoid.
-      # Stated here rather than inherited from agent.env, which is being retired.
       TZ: America/Los_Angeles
     volumes:
       # `.host`, not the path the agent reads: a bind carries this machine's

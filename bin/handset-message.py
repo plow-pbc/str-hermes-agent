@@ -132,8 +132,9 @@ def main():
             print(f"REPLY: {reply}")
             return 0
     print(f"TIMEOUT after {TIMEOUT:.0f}s — no reply carrying {nonce}. The message left this "
-          "Mac. Before suspecting the line, place the failure: grep "
-          "~/.hermes/logs/gateway.log on wakeup for an 'inbound message' line naming this "
+          "Mac. Before suspecting the line, place the failure: on wakeup run "
+          "`docker compose exec -T hermes grep 'inbound message' "
+          "/var/lib/hermes/logs/agent.log` for a line naming this "
           "chat after the send. Absent, it never arrived and the line and the pairing are "
           "where to look. Present, it did, and the fault is downstream of every leg this "
           "probe covers — re-run with a larger HANDSET_TIMEOUT before concluding which "

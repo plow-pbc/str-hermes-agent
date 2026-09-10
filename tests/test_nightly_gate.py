@@ -24,15 +24,6 @@ ROOT = Path(__file__).resolve().parent.parent
 GUARD = ROOT / "scripts" / "no-nightly-running"
 
 
-def test_the_guard_is_declared_as_the_pre_transition_hook():
-    """The declaration is what makes agent-mgr call it. Without it the guard is
-    a file nothing runs."""
-    settings = [l for l in (ROOT / "agent.env").read_text().splitlines()
-                if l.strip() and not l.lstrip().startswith("#")]
-    assert "AGENT_PRE_TRANSITION=scripts/no-nightly-running" in settings
-    assert GUARD.is_file() and GUARD.stat().st_mode & 0o111
-
-
 def _fake_docker(tmp_path, *, running=True, exec_status=1, container="hermes"):
     b = tmp_path / "bin"
     b.mkdir(exist_ok=True)

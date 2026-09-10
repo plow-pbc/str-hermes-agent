@@ -1,8 +1,8 @@
-"""This repo's own runtime surface, now that it has one.
+"""This repo's own runtime surface, which is now the only one.
 
-`compose.yml` lands beside agent-mgr's `compose.override.yml` rather than
-replacing it: agent-mgr stays the live path until the cutover, and both existing
-at once is what keeps it available as the rollback.
+`compose.yml` used to land beside agent-mgr's `compose.override.yml`, which kept
+the outgoing path available as the rollback through the cutover. The cutover
+held, so the deploy path it rolled back to is gone.
 """
 import pathlib
 import re
@@ -44,6 +44,10 @@ def test_every_transition_recipe_runs_the_nightly_veto():
             f"`just {recipe}` can stop the container without the veto"
         assert body.index("no-nightly-running") < body.index("docker compose"), \
             f"`just {recipe}` transitions before it asks"
+    # agent.env used to declare it as AGENT_PRE_TRANSITION and agent-mgr ran it.
+    # The recipes invoke it as a path now, so the bit is what makes it runnable.
+    guard = ROOT / "scripts" / "no-nightly-running"
+    assert guard.is_file() and guard.stat().st_mode & 0o111, "the veto is not executable"
 
 
 def test_no_transition_reaches_docker_compose_outside_a_vetoed_recipe():
@@ -91,3 +95,19 @@ def test_the_home_is_a_volume_and_the_vault_is_a_bind():
     vols = COMPOSE["volumes"]
     assert any(v.startswith("agent-home:/var/lib/hermes") for v in vols)
     assert any(v.endswith("/repo/vault") and v.startswith("${HOME}") for v in vols)
+
+
+
+def test_the_agent_uid_is_declared_so_it_can_write_the_vault():
+    """The vault is a host bind the agent WRITES -- the nightly ingests into it.
+
+    At the image's baked uid the gateway cannot: the vault is 775 and owned by
+    the host account. `s6-setuidgid` re-derives supplementary groups from the
+    account database, so compose's `group_add` never reaches the gateway; the
+    image's own stage2 hook names HERMES_UID as the supported way to match host
+    ownership, and refuses `--user` outright. Dropping these is silent -- the
+    boot is clean, the cron reports ok, and the vault simply stops changing.
+    """
+    for key in ("HERMES_UID", "HERMES_GID"):
+        assert COMPOSE["environment"].get(key), \
+            f"{key} is unset -- the agent cannot write the vault bind"

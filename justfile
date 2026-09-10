@@ -1,19 +1,13 @@
-# Short-term-rental operations agent -- DOMAIN recipes only.
+# Short-term-rental operations agent.
 #
-# Deployment lives in plow-pbc/agent-mgr, which owns the compose service, the
-# bring-up, the pins and the contract tests for every agent on this host:
+# Deployment is this repo's own, in compose.yml -- the shape plow-agents'
+# compose.example.yml defines. It used to live in plow-pbc/agent-mgr, which is
+# deprecated.
 #
-#   agent-mgr up str          agent-mgr logs str
-#   agent-mgr agent str "..." agent-mgr deploy str
-#
-# `agent-mgr agent` replaced this repo's `just agent`, which used
-# `docker compose run`. The image's s6 entrypoint starts a gateway whatever
-# command you pass it, so each of those turns booted a SECOND gateway against
-# ~/.hermes, evicted the live one from its chat websockets, and on exit posted a
-# shutdown notice into the owners' channel.
-#
-# What stays here is what only this agent has: the wiki vault pipeline and the
-# skills it writes for itself.
+# Never boot a second gateway to ask the agent something. The image's s6
+# entrypoint starts one whatever command you pass it, so a `docker compose run`
+# turn evicts the live gateway from its chat websockets and on exit posts a
+# shutdown notice into the owners' channel. Talk to the running one.
 
 # The container compose.yml declares. scripts/no-nightly-running asks docker
 # about it by name and refuses to guess one, so the two have to agree;
@@ -26,27 +20,20 @@ export AGENT_CONTAINER := "hermes"
 # Never reach for `docker compose` directly to stop or replace the container --
 # that is the bypass the veto exists to prevent.
 #
-# `-f compose.yml` is load-bearing, not tidiness: compose auto-loads
-# compose.override.yml whenever it sits beside compose.yml, and that override is
-# agent-mgr's -- it interpolates STR_REPO, STR_VAULT, AGENT_IMAGE and
-# AGENT_HOME_TARGET, which agent-mgr exports and nothing here does. Merged in,
-# every recipe below fails on a missing variable. Naming the one file is what
-# lets the outgoing path stay in the tree as the rollback.
-#
 # Why it refuses: a transition landing between a page write and its manifest
 # entry leaves the vault holding a page nothing recorded, and the next run
 # appends its facts a second time with nothing reporting it.
 up:
     ./scripts/no-nightly-running
-    docker compose -f compose.yml up -d
+    docker compose up -d
 
 down:
     ./scripts/no-nightly-running
-    docker compose -f compose.yml down
+    docker compose down
 
 restart:
     ./scripts/no-nightly-running
-    docker compose -f compose.yml up -d --force-recreate
+    docker compose up -d --force-recreate
 
 # The image first: tests/test_image_contents.py and tests/test_vault_guard.py
 # assert against this exact tag, and without it 16 of them fail from a clean
@@ -88,12 +75,12 @@ test-wiki:
     # `-v` at the same target replaces compose's mount instead of joining it, so
     # naming the canonical path is what makes production unreachable here.
     #
-    # Same variable compose resolves the real mount from -- agent-mgr exports
-    # it from the boot contract, so this recipe's scratch mount always lands
-    # on the target compose would have used, unopted or opted-in alike. A
-    # wrong guess here mounts the scratch vault somewhere production's mount
-    # does not replace, defeating the whole isolation this recipe exists for.
-    HH="${AGENT_HOME_TARGET:?set by agent-mgr from the boot contract}"
+    # The same boot contract compose.yml names as its mount target, and that
+    # tests/test_image_contents.py asserts against the real image. A wrong value
+    # here mounts the scratch vault somewhere production's mount does not replace,
+    # defeating the isolation this recipe exists for -- so it is stated once, in
+    # the one place a mount target can be stated, and checked there.
+    HH=/var/lib/hermes
     CV="$HH/repo/vault"
 
     # Empty, never delete: $V is a bind-mount source, and unlinking the inode
@@ -195,17 +182,17 @@ test-wiki:
     # SOUL at all. The vault mount above is the whole of what this run has to
     # keep off production.
     #
-    # Through agent-mgr, which owns the compose file list, the override and the
-    # env-file. Reaching for `docker compose` directly here would restate all
-    # three and drift from the deployment the gateway actually runs under.
+    # --entrypoint is load-bearing: the image's own entrypoint is the hermes
+    # CLI, so a bare path argument is swallowed as a subcommand -- and s6 would
+    # boot a gateway alongside the live one. agent-mgr used to reject a
+    # `compose run` that did not put it first; nothing enforces that now, so the
+    # ordering is this recipe's own responsibility. Keep it first.
     #
-    # --entrypoint is load-bearing and agent-mgr enforces it: the image's own
-    # entrypoint is the hermes CLI, so a bare path argument is swallowed as a
-    # subcommand -- and s6 would boot a gateway alongside the live one. It must
-    # come FIRST: agent_mgr/cli.py refuses a `compose run` whose first argument
-    # is anything else, so the previous ordering was rejected before docker was
-    # ever reached and this recipe could not launch at all.
-    agent-mgr compose str run --entrypoint bash --rm --no-deps -T -e VAULT="$CV" \
+    # `run`, and never a lifecycle verb: this creates a throwaway container
+    # rather than transitioning the live one, which is what the nightly veto on
+    # up/down/restart guards. --no-deps and --rm so it neither starts the real
+    # service nor outlives itself.
+    docker compose run --entrypoint bash --rm --no-deps -T -e VAULT="$CV" \
       -v "$PWD/$V:$CV" --user "$(id -u):$(id -g)" hermes \
       -c "$NIGHTLY" > /tmp/e2e-nightly.log 2>&1 \
       || fail "nightly chain failed — see /tmp/e2e-nightly.log"

@@ -7,10 +7,10 @@ description: Use to check the deployed Hermes container actually answers — "is
 
 Drive a real message through the container on `wakeup` and assert on what comes back.
 
-`agent-mgr compose str ps` showing `Up`, a green `agent-mgr up str`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
+`docker compose ps` showing `Up`, a green `just up`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
 
 **What these probes do and do not prove.** `hermes chat` starts a *fresh
-process* inside the container, which reads `~/.hermes/config.yaml` at its own
+process* inside the container, which reads `/var/lib/hermes/config.yaml` at its own
 startup. So a green run proves the config on disk is good and its integrations
 work — it does not prove the long-running gateway reloaded that config. The
 only check that exercises the *end-to-end Plow serving path* is a real message
@@ -49,7 +49,7 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 
 ## Guardrails
 
-- **`exec -T … < /dev/null`, not `run`.** `agent-mgr compose str run --rm hermes ...` starts a *throwaway* container from the image; it can pass while the deployed gateway is broken. `exec` runs inside the container that is serving. `-T` is required: without it Compose allocates a TTY and every probe dies with "the input device is not a TTY" from a non-interactive shell or over `ssh`, a false negative unrelated to agent health. `< /dev/null` belongs on every probe for the same reason a new one will: compose attaches stdin, `-T` suppresses only the TTY, and any probe inheriting a script on stdin eats it. (The one legitimate `run` is `auth list` in step 1, which needs `-T` too — it reads the shared `~/.hermes` mount and is the right tool precisely *because* `exec` is hung. It carries `--entrypoint` so that even this exception starts no gateway: the image's own entrypoint boots s6, and a rival gateway is the last thing a hung one needs. `agent-mgr` refuses a `compose run` without the flag for exactly that reason.)
+- **`exec -T … < /dev/null`, not `run`.** `docker compose run --rm hermes ...` starts a *throwaway* container from the image; it can pass while the deployed gateway is broken. `exec` runs inside the container that is serving. `-T` is required: without it Compose allocates a TTY and every probe dies with "the input device is not a TTY" from a non-interactive shell or over `ssh`, a false negative unrelated to agent health. `< /dev/null` belongs on every probe for the same reason a new one will: compose attaches stdin, `-T` suppresses only the TTY, and any probe inheriting a script on stdin eats it. (The one legitimate `run` is `auth list` in step 1, which needs `-T` too — it reads the shared `/var/lib/hermes` mount and is the right tool precisely *because* `exec` is hung. It carries `--entrypoint` so that even this exception starts no gateway: the image's own entrypoint boots s6, and a rival gateway is the last thing a hung one needs. `agent-mgr` refuses a `compose run` without the flag for exactly that reason.)
 - **Read-only probes.** Ask about reservations, locks, listings. Never `send_message`, never `unlock_door` — a smoke test must not text a guest or open a door.
 - **Never print secrets.** On failure report the failure, not the environment.
 - Allow a 240s timeout on steps 1–4: liveness is ~5s, a tool-backed probe up
@@ -61,17 +61,17 @@ cleanly against *that* box's container. If it fires, get a session on wakeup
 ## 1. Liveness — does the agent answer at all
 
 ```sh
-agent-mgr compose str exec -T hermes hermes chat -q 'Reply with exactly: PONG' < /dev/null
+docker compose exec -T hermes hermes chat -q 'Reply with exactly: PONG' < /dev/null
 ```
 
 Expect `PONG` in the reply box. This proves the container is serving, the model route resolves, and its credentials are valid.
 
-A hang means the model provider is unreachable or OAuth expired — check with `agent-mgr compose str run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `~/.hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
+A hang means the model provider is unreachable or OAuth expired — check with `docker compose run --rm -T --entrypoint /opt/hermes/.venv/bin/hermes hermes auth list < /dev/null` (the `run` exception above). An error naming a base URL or provider is the boot-owned route: `plow-init` writes `model`/`providers` into the live `/var/lib/hermes/config.yaml` from the base image's seed at every boot, so read that file and the container's boot log (`docker logs hermes`, the `plow-init` lines) — tracked `runtime/config.yaml` carries no route to compare against.
 
 ## 2. Tool reachability — does it still reach Hostex
 
 ```sh
-agent-mgr compose str exec -T hermes hermes chat -q \
+docker compose exec -T hermes hermes chat -q \
   'Use your Hostex tools to tell me how many reservations arrive in the next 30 days. Answer with just the number and the word reservations.' < /dev/null
 ```
 
@@ -100,13 +100,13 @@ Then check the server itself connects — a separate concern from the
 credential:
 
 ```sh
-agent-mgr compose str exec -T hermes hermes mcp test hostex < /dev/null
+docker compose exec -T hermes hermes mcp test hostex < /dev/null
 ```
 
 Expect `✓ Connected` and a tool count.
 
 **No probe here checks the credential.** Do not try to test it by overriding
-`HOSTEX_TOKEN` — the value comes from the mounted `~/.hermes/.env`, not the
+`HOSTEX_TOKEN` — the value comes from the mounted `/var/lib/hermes/.env`, not the
 process environment, so the override is ignored and the check still passes.
 The count in step 2 is suggestive of a live call; cross-checking it against
 Hostex would settle it, and nothing here does that. So do not report the
@@ -115,7 +115,7 @@ credential as verified on a smoke run alone.
 ## 3. Lock surface — is Seam configured
 
 ```sh
-agent-mgr compose str exec -T hermes hermes mcp test seam < /dev/null
+docker compose exec -T hermes hermes mcp test seam < /dev/null
 ```
 
 Expect every tool named in `runtime/config.yaml` under
@@ -147,8 +147,8 @@ hardware in a smoke test.
 Grep each pattern separately and require both. A single `grep -E 'A|B' | tail -2` is satisfied by two matches of the *same* alternative, and the pipe swallows grep's exit status so an empty log reads as a silent pass:
 
 ```sh
-grep -c '✓ plow_chat connected' ~/.hermes/logs/gateway.log
-grep -c 'websocket subscribed' ~/.hermes/logs/gateway.log
+docker compose exec -T hermes grep -c '✓ plow_chat connected' /var/lib/hermes/logs/agent.log
+docker compose exec -T hermes grep -c 'websocket connected' /var/lib/hermes/logs/agent.log
 ```
 
 The two lines have different owners, and only one of them is ours. `✓ plow_chat
@@ -173,20 +173,20 @@ the container actually started:
 
 ```sh
 docker inspect -f '{{.State.StartedAt}}' hermes
-grep '✓ plow_chat connected' ~/.hermes/logs/gateway.log | tail -1
-grep 'websocket subscribed' ~/.hermes/logs/gateway.log | tail -1
+docker compose exec -T hermes grep '✓ plow_chat connected' /var/lib/hermes/logs/agent.log | tail -1
+docker compose exec -T hermes grep 'websocket connected' /var/lib/hermes/logs/agent.log | tail -1
 ```
 
 **These two are in different zones — convert before comparing.** `StartedAt` is
-RFC3339 `Z`, always UTC; Docker emits nothing else. `gateway.log` prefixes
+RFC3339 `Z`, always UTC; Docker emits nothing else. `agent.log` prefixes
 `YYYY-MM-DD HH:MM:SS,mmm` through Python logging, which renders in the
-*container's* local time — and `AGENT_TZ` in `agent.env` sets that to
+*container's* local time — and `TZ` in `compose.yml` sets that to
 `America/Los_Angeles`, so the log reads Pacific and matches wakeup's own
 `date`:
 
 ```text
 StartedAt:   2026-07-31T23:46:54.015288458Z
-gateway.log: 2026-07-31 16:46:59,252 INFO gateway.run: ✓ plow_chat connected
+agent.log: 2026-07-31 16:46:59,252 INFO gateway.run: ✓ plow_chat connected
 ```
 
 Five seconds apart, not seven hours. Compare the fields directly and every
@@ -199,7 +199,7 @@ Before `TZ` was set the container ran UTC and both sides were
 directly comparable — which is why an older transcript of this step compares
 them with no conversion and still looks right.
 
-**This is a proxy for delivery, not proof.** It shows the gateway holds a websocket to Plow. It does not show that a text from the operator's phone reaches the agent and gets a reply — that involves the Plow line, the pairing, and the home binding in `~/.hermes/.env`, and only a real text exercises it.
+**This is a proxy for delivery, not proof.** It shows the gateway holds a websocket to Plow. It does not show that a text from the operator's phone reaches the agent and gets a reply — that involves the Plow line, the pairing, and the home binding in `/var/lib/hermes/.env`, and only a real text exercises it.
 
 ## 5. The serving gate — a real message from a handset
 
@@ -255,5 +255,5 @@ diagnostics alone.
 | Hostex `chat` | agent loop reached the tool | whether the call succeeded |
 | `mcp test hostex` | the server connects and registers tools | the credential |
 | `mcp test seam` | lock surface configured | whether locks respond |
-| Plow log | gateway holds the socket | delivery, and the home binding in `~/.hermes/.env` |
+| Plow log | gateway holds the socket | delivery, and the home binding in `/var/lib/hermes/.env` |
 | handset message | the whole path a real message takes, including the line and the pairing | Hostex guest intake |

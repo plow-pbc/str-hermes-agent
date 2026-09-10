@@ -33,7 +33,7 @@ def record(vault: Path, raw_file: Path) -> None:
     """
     manifest = vault / ".manifest.json"
     sources = json.loads(manifest.read_text())["sources"] if manifest.exists() else {}
-    sources[f"/opt/data/repo/vault/{raw_file.relative_to(vault)}"] = {
+    sources[f"/var/lib/hermes/repo/vault/{raw_file.relative_to(vault)}"] = {
         "content_hash": "sha256:" + hashlib.sha256(raw_file.read_bytes()).hexdigest()
     }
     manifest.write_text(json.dumps({"sources": sources}))
@@ -54,7 +54,7 @@ def vault(tmp_path):
 def run_ingest(tmp_path):
     """Run ingest-all against a vault and report what actually reached the agent.
 
-    `agent-mgr` is stubbed so no container is needed, and it records the prompt it
+    `docker` is stubbed so no container is needed, and it records the prompt it
     was invoked with — the only evidence of what was *fed*, as opposed to what
     the loop counted. The stub makes no progress, so the script's own stall
     detection bounds the run.
@@ -64,22 +64,18 @@ def run_ingest(tmp_path):
     fed = tmp_path / "fed.txt"
 
     def run(vault_path: Path, turn_exit: int = 0):
-        # agent-mgr, not docker: the host branch of ingest-all now reaches the
-        # container through it, so that is the boundary a stub has to stand at.
-        # The HERMES_HOME query is answered before $fed even sees it and
-        # without turn_exit applying to it: it is not a turn, so a
-        # failed-turn test would otherwise never reach the turn it means to
-        # fail (wrong diagnostic), and every fed-count assertion would be off
-        # by one call that fed nothing to the agent.
-        (stub / "agent-mgr").write_text(
+        # docker: the host branch of ingest-all reaches the container through
+        # `docker compose run` now, so that is the boundary a stub stands at.
+        # ingest-all no longer spawns a container to read HERMES_HOME back off
+        # the image, so there is no non-turn call to special-case here: every
+        # invocation the stub sees is a turn, and turn_exit applies to all of
+        # them.
+        (stub / "docker").write_text(
             '#!/bin/sh\n'
-            'case "$*" in\n'
-            '  *\'printf %s "${HERMES_HOME:?}"\'*) printf %s /opt/data; exit 0 ;;\n'
-            'esac\n'
             f'echo "$@" >> {fed}\n'
             f'exit {turn_exit}\n'
         )
-        (stub / "agent-mgr").chmod(0o755)
+        (stub / "docker").chmod(0o755)
         result = subprocess.run(
             [str(INGEST_ALL), str(vault_path)],
             capture_output=True,
@@ -371,8 +367,8 @@ def test_a_duplicate_archived_record_names_no_pages(vault, run_ingest):
     assert "manifest covers everything in scope" in result.stdout
     assert fed == "", "nothing should have been fed"
     sources = sources_of(vault)
-    assert sources["/opt/data/repo/vault/_raw/_archived/0-111-1.md"]["pages_produced"] == []
-    assert sources["/opt/data/repo/vault/_raw/hostex/0-111.md"]["pages_produced"] == [
+    assert sources["/var/lib/hermes/repo/vault/_raw/_archived/0-111-1.md"]["pages_produced"] == []
+    assert sources["/var/lib/hermes/repo/vault/_raw/hostex/0-111.md"]["pages_produced"] == [
         "operations/thermostat-and-hvac.md",
         "people/key-people.md",
     ]
@@ -401,8 +397,8 @@ def test_a_url_in_the_body_is_not_provenance(vault, run_ingest):
     run_ingest(vault)
 
     sources = sources_of(vault)
-    assert sources["/opt/data/repo/vault/_raw/hostex/0-999.md"]["pages_produced"] == []
-    assert sources["/opt/data/repo/vault/_raw/hostex/0-111.md"]["pages_produced"] == [
+    assert sources["/var/lib/hermes/repo/vault/_raw/hostex/0-999.md"]["pages_produced"] == []
+    assert sources["/var/lib/hermes/repo/vault/_raw/hostex/0-111.md"]["pages_produced"] == [
         "operations/thermostat-and-hvac.md"
     ]
 

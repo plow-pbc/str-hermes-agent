@@ -1,6 +1,6 @@
 ---
 name: deploy-str-hermes
-description: Use when deploying this repo to wakeup — "deploy hermes", "deploy the STR agent", "push this to wakeup", "update the prod clone", "restart the gateway with the new config". Fast-forwards ~/services/sams-str-hermes-agent to merged main, applies runtime/ to ~/.hermes, brings up the Compose service, and verifies the container is actually serving.
+description: Use when deploying this repo to wakeup — "deploy hermes", "deploy the STR agent", "push this to wakeup", "update the prod clone", "restart the gateway with the new config". Fast-forwards ~/services/sams-str-hermes-agent to merged main, applies runtime/ to /var/lib/hermes, brings up the Compose service, and verifies the container is actually serving.
 ---
 
 # Deploy STR Hermes
@@ -12,11 +12,11 @@ Deploy merged `main` to the container that actually runs on `wakeup`.
 | Host | `wakeup` |
 | Checkout | `~/services/sams-str-hermes-agent` — **this is what runs** |
 | Container | `hermes`, Docker Compose, `restart: unless-stopped` |
-| State | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
+| State | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes`. There is no host path — a stale `/var/lib/hermes` from before the cutover may still exist and is NOT what the agent reads |
 
 This is the **redeploy** path: an existing host, already bootstrapped. First-time
-setup of a host — credentials, installing and registering `agent-mgr`,
-OAuth, Plow activation — is the README's `Restoring runtime config` section, and
+setup of a host — credentials, cloning the vault,
+OAuth, Plow activation — is the README's `Bringing it up` section, and
 is not duplicated here.
 
 ## Where these run
@@ -59,8 +59,8 @@ skill maps the host — rather than piping these through `ssh` inline.
 - **Never deploy past a `STOP` from `./scripts/check-deploy-clean.sh`.** The vault lives outside the checkout now (`~/hermes-vault`), so nothing in a prod clone is exempt — any dirty path means someone edited production directly, or recreated a vault inside the checkout — stop and ask.
 - **Pull `--ff-only`, on `main` only.** A non-fast-forward means prod diverged; stop and investigate.
 - **Never** force-push, `--no-verify`, `git stash`, `git reset --hard`, `git clean`, or `git checkout -- <path>`.
-- **Never print secret values.** `~/.hermes/.env` holds the Hostex and Seam credentials and the Plow chat *configuration*; the Plow credential itself is `~/.plow-credentials-str`. Check presence or last 3 chars in either, never `cat` them.
-- **Restore replaces `~/.hermes/config.yaml` and `~/.hermes/SOUL.md` wholesale** — the SOUL is installed verbatim from `runtime/SOUL.md` (it only names the vault's `index.md`, it does not contain it), so a host-side edit to it is lost; edit `runtime/SOUL.md` instead. It also overlays the deploy-owned seed into the runtime vault — `AGENTS.md` and `.env` — so an edit made to those *in the vault* is lost on the next deploy; edit `runtime/vault-seed/` instead. The property hubs under `properties/` are the vault's own: edit their prose there, it survives a deploy. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages immediately after the overlay, and again on every nightly. Rename the page, don't edit the link. `agent-mgr deploy str` installs the pinned Plow Chat plugin as part of the same command, so it is the whole of "apply `runtime/`". What it does not touch is the agent's `.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a redeploy does not unbind the home chat.
+- **Never print secret values.** `/var/lib/hermes/.env` holds the Hostex and Seam credentials and the Plow chat *configuration*; the Plow credential itself is `~/.plow-credentials-str`. Check presence or last 3 chars in either, never `cat` them.
+- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls both from what the image bakes, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs under `properties/` are the vault's own: edit their prose there, it survives. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages on every nightly. Rename the page, don't edit the link. The vault seed no longer overlays into the vault at all ([#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)): the live `AGENTS.md` and `.env` belong to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the `/sethome` home target lives there as `PLOW_CHAT_HOME_CHANNEL`, so a rebuild does not unbind the home chat.
 
 ## 1. Confirm the checkout is deployable
 
@@ -76,11 +76,11 @@ entirely outside the checkout, at `~/hermes-vault`, mounted in rather than
 tracked. A clean prod clone is the normal state; any dirty path, `vault/`
 included, means someone edited production directly or recreated a vault
 inside the checkout. The Plow Chat plugin is no longer part of this
-tree — it is installed into `~/.hermes/plugins` from a pinned upstream SHA, so
+tree — it is installed into `/var/lib/hermes/plugins` from a pinned upstream SHA, so
 a file hand-dropped *there* is running in production and this check cannot see
-it. The plugin install inside `agent-mgr deploy str` (step 3) rewrites only the files it
+it. The plugin install baked into the image (step 3) rewrites only the files it
 manages under `plugins/plow-chat-platform/`, so it bounds drift in *that*
-plugin and nothing more — a sibling directory dropped into `~/.hermes/plugins`
+plugin and nothing more — a sibling directory dropped into `/var/lib/hermes/plugins`
 is loaded by the gateway and is checked by neither this gate nor the installer.
 
 **A `STOP` → stop and ask.** It prints what it found. Do not clean it.
@@ -150,87 +150,43 @@ reports "Already up to date" and deploys code that was never merged.
 
 An empty log means nothing new — say so rather than reporting a deploy.
 
-## 3. Build, then apply the tracked runtime config
+## 3. Build the image
 
-Build first. `agent-mgr deploy` derives the boot contract — the home target
-the vault seed's `.env` and every mount are written against — from the image
-that is present locally, and it only builds one when none is. On a redeploy
-the stale image is present, so a deploy before the build would seed the vault
-for the old contract and the recreate below would then boot the new one over
-it. The build is safe before anything knows the contract: nothing in it reads
-`AGENT_HOME_TARGET`.
-
-```sh
-agent-mgr compose str build
-```
+There is no separate deploy step any more, and no hook whose output to check.
+`runtime/config.yaml` and `runtime/SOUL.md` are baked into the image, and
+`docker/cont-init.d/05-install-agent-payload.sh` reinstalls both into the home on
+every boot — unconditionally, because a named-volume home seeds from the image
+only while empty and would otherwise shadow every later revision
+(plow-hermes-agent#58). Applying a `runtime/` edit **is** the build.
 
 ```sh
-(
-  test -f ./scripts/restore-runtime-config.sh || { echo "FATAL: restore script absent — wrong checkout, or this main predates it"; exit 1; }
-  test -x ./scripts/restore-runtime-config.sh || { echo "FATAL: restore script present but not executable — chmod +x it"; exit 1; }
-  # Both hooks asserted, not assumed. `resolve` prints only the keys agent-mgr
-  # itself owns, so this fails on a build that predates the pre-transition hook
-  # -- which would silently remove the nightly guard from every transition while
-  # agent.env still declared it and every test stayed green.
-  agent-mgr resolve str | grep -q '^AGENT_PRE_TRANSITION=' \
-    || { echo "FATAL: the installed agent-mgr does not implement AGENT_PRE_TRANSITION — the nightly guard would NOT run. Update ~/services/agent-mgr."; exit 1; }
-  agent-mgr resolve str | grep -q '^AGENT_LIVE=' \
-    || { echo "FATAL: the installed agent-mgr does not implement AGENT_LIVE — transitions would not ask first. Update ~/services/agent-mgr."; exit 1; }
-  # This repo declares AGENT_DEPLOY_HOOK, but nothing here can see whether
-  # agent-mgr honoured it. Unhonoured, config.yaml still
-  # lands, step 4 still recreates the container, and the gateway comes up
-  # listing its platforms over an un-overlaid vault, empty hub lists and a stale
-  # SOUL -- every check green, the deploy shipping nothing. The hook's own
-  # closing line is the one signal that it ran.
-  out=$(agent-mgr deploy str) || { printf '%s\n' "$out" >&2; echo "FATAL: agent-mgr deploy str failed"; exit 1; }
-  printf '%s\n' "$out" >&2
-  printf '%s\n' "$out" | grep -q '^Restored tracked Hermes configuration to ' \
-    || { echo "FATAL: agent-mgr deploy did not run this repo's AGENT_DEPLOY_HOOK — the vault seed, hubs and SOUL were NOT applied"; exit 1; }
-)
+docker compose build
 ```
 
-A subshell again, for the same reason as the preflight: a firing guard must
-not close the session.
+`build` explicitly, never a bare `up -d`: compose builds only when the tagged
+image is absent, and on a redeploy it never is. A bare `up` would recreate the
+container on the old image and report success — the same silent-no-op class the
+old `--force-recreate` note below guards against, one layer earlier.
 
-Absent and non-executable are separated because they need opposite repairs.
-If the *absent* guard fires, stop — do not continue to step 4. Check `pwd`
-first: these guards are cwd-relative, so the commonest cause is being outside
-the checkout. If you are in it, then this `main` predates the script —
-`runtime/` and it arrive together — so check out a `main` that contains them
-or deploy the branch that adds them. Either way, bringing the gateway up
-anyway means step 4 runs against whatever stale `~/.hermes/config.yaml` is
-already there.
+`runtime/config.yaml` is canonical for what this repo owns — the Hostex allowlist and the Seam server. The model route is not in it: the base image's `plow-init` writes `model`/`providers` into the live config from its seed at every boot, so a route problem is diagnosed in `/var/lib/hermes/config.yaml` and the container's boot log, never repaired in the tracked file. Editing the live copy for anything else is how the two drift, and the next boot silently wins.
 
-`runtime/config.yaml` is canonical for what this repo owns — the Hostex allowlist and the Seam server. The model route is not in it: the base image's `plow-init` writes `model`/`providers` into the live config from its seed at every boot, so a route problem is diagnosed in `~/.hermes/config.yaml` and the container's boot log, never repaired in the tracked file. Editing the live copy for anything else is how the two drift, and the next deploy silently wins.
-
-One command, because `agent-mgr` owns the deploy end to end: it creates the
-home, installs `runtime/config.yaml` (named by `AGENT_CONFIG` in `agent.env`)
-and the pinned plugin, then runs this repo's own deploy hook
-(`AGENT_DEPLOY_HOOK` → `scripts/restore-runtime-config.sh`) for the vault seed,
-the hub rebuild and the installed SOUL — and reloads the gateway once at the end.
-A failing hook fails the deploy, so a refusal cannot read as a landed deploy.
-
-It used to be the other way round: the script hardcoded the home and
-re-implemented the config install, which is how `agent-mgr deploy str` came to
-be broken without anyone noticing. It is a reconcile, not a first-time install —
-verified against the pinned installer rather than assumed: a second run
-rewrites every file it manages, so a bumped pin swaps the adapter and a
-hand-edited copy is reverted. It does *not* clear the directory first, so a
-stray inside `plugins/plow-chat-platform/`, and anything else under
-`~/.hermes/plugins`, survives every deploy and is still loaded.
-
-A non-zero exit here most commonly means the runtime vault is missing at
-`~/hermes-vault` — the script refuses rather than seeding a vault-less deploy,
-which would read as healthy while the agent had schema and no facts. It can
-also be the plugin install refusing agent-mgr's `runtime/plow-chat-plugin.ref` when it is
-not a 40-char SHA, or failing to fetch it; the message names which. See
-Troubleshooting.
+The vault is no longer this step's business either. `agent-mgr deploy` used to run
+`scripts/restore-runtime-config.sh`, which refused without a vault at
+`~/hermes-vault`; `docker/cont-init.d/04-require-vault-corpus.sh` enforces the
+same rule at boot instead. A boot check is strictly better: it runs every time
+rather than only on deploy, and it parks rather than coming up wrong.
 
 ## 4. Bring it up
 
 ```sh
-agent-mgr compose str up -d --force-recreate
+just restart
 ```
+
+`just restart`, not `docker compose up -d --force-recreate` directly. agent-mgr
+invoked `scripts/no-nightly-running` as `AGENT_PRE_TRANSITION` before every
+transition; compose has no such hook, so the justfile recipes are the only thing
+left that can refuse. Reaching for `docker compose` here is the bypass the veto
+exists to prevent.
 
 **Stop if it refuses.** Force-recreating the container mid-ingest can land
 between a page write and its manifest entry, and the vault keeps the page — so
@@ -238,33 +194,16 @@ the next run re-ingests that conversation and appends its facts a second time.
 Nothing reports it; the pages just quietly say things twice. Wait for the run to
 finish.
 
-Ordered right after the deploy, not before the build: the build is minutes
-long, and a 03:00 fire can start in anything sitting between the check and the
-transition it guards. agent-mgr owns when it runs; `agent.env` owns which
-script it is.
+Ordered after the build, not before: the build is minutes long, and a 03:00 fire
+can start in anything sitting between the check and the transition it guards.
+The recipe is what sequences the two.
 
-`--force-recreate`, not bare `up -d`: with the image unchanged, `up -d` is a
-no-op that prints `Container hermes Running` and leaves the gateway serving
-the configuration it loaded at its last start — including the one step 3 just
-replaced. And `up`, not `restart`, because Compose substitutes the environment
-at container create time.
+`--force-recreate` under the hood, not bare `up -d`: with the image unchanged,
+`up -d` is a no-op that prints `Container hermes Running` and leaves the gateway
+serving the configuration it loaded at its last start. And `up`, not Docker's
+`restart`, because Compose substitutes the environment at container create time.
 
-`build` ahead of it in step 3, and no `pull` at all. The image is derived here rather than
-tracked upstream: the Dockerfile layers `obsidian-wiki` onto the pinned base so
-the nightly wiki chain has the skills it runs on. `--force-recreate` recreates
-the container from whatever image already exists, so without the build a deploy
-carrying a Dockerfile change — or a change to the skill-linking script — ships
-the previous image and the chain runs against the wrong tooling. The build is a
-cache hit and costs seconds when nothing changed.
-
-Pulling would be wrong for the same reason it always was: every input is pinned,
-so `build` reproduces what is already running and picks up only this
-repository. Upgrading means bumping a pin deliberately, which is the README's
-own separate step.
-
-No `/sethome` afterwards. Hermes persists the home target to `~/.hermes/.env`
-(`PLOW_CHAT_HOME_CHANNEL`, `PLOW_CHAT_HOME_CHANNEL_THREAD_ID`), and step 3
-installs `config.yaml` and the installed `SOUL.md`, never `.env` — so the
+`/var/lib/hermes/.env` is untouched by any of this, so the `/sethome` home
 binding survives a redeploy untouched.
 
 ## 4.5 End the group's per-member sessions, once
@@ -296,7 +235,7 @@ job exists, so a redeploy recreates the container around the old job. `origin`
 is not in `cron list`, so an inspection cannot rule the second one out.
 
 ```sh
-agent-mgr compose str exec -T hermes hermes cron list
+docker compose exec -T hermes hermes cron list
 ```
 
 No `hostex-inbound` job — skip. A job predating either change is recreated, not
@@ -338,7 +277,7 @@ after is the confirmation and it prints the line rather than a verdict, because
 ## 5. Verify
 
 ```sh
-agent-mgr compose str ps --format '{{.Name}} {{.Status}}'
+docker compose ps --format '{{.Name}} {{.Status}}'
 ```
 
 Expect `hermes Up ...`. `Restarting` is a crash loop — see Troubleshooting.
@@ -361,10 +300,10 @@ verified once it does.
 
 | Symptom | Cause | Move |
 |---|---|---|
-| `Restarting` loop | bad config or missing credential | `agent-mgr compose str logs --tail 50 hermes`; `~/.hermes/logs/gateway.log` |
+| `Restarting` loop | bad config or missing credential | `docker compose logs --tail 50 hermes`; `docker compose exec -T hermes tail -50 /var/lib/hermes/logs/agent.log` |
 | `mcp test seam` says not found | live config predates the Seam block, or step 3's script was missing | re-run steps 3 and 4; confirm `mcp_servers.seam` is in `runtime/config.yaml` |
-| Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls ~/.hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
-| `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `~/.hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
-| Files in `~/.hermes` owned by `501`, or by another account | the container was created by a different account, or by hand outside `agent-mgr` | agent-mgr takes the ids from `id -u`/`id -g` at every invocation, so there is nothing to edit: re-own the directory (`sudo chown -R $(id -u):$(id -g) ~/.hermes`), then `agent-mgr compose str up -d --force-recreate` — `restart` will not re-substitute |
-| Agent ignores the home chat | home binding unset or stale in `~/.hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
-| `restore: no runtime vault at …` | `~/hermes-vault` absent — first deploy on this host, or it was moved/deleted | clone it per the README's § Restoring runtime config — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 3 |
+| Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
+| `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
+| Files in the home volume owned by an account the agent does not run as | the home was migrated off a bind mount, where it carried the host account's ids | `compose.yml` sets `HERMES_UID`/`HERMES_GID`, so the agent runs as the host account's ids -- **read them off `compose.yml` rather than trusting this row**, which is how it went stale the last time they changed. Re-own from inside — **pruning the vault**, which is a host bind holding the operator's own checkout: `docker compose exec -u root hermes find /var/lib/hermes -path /var/lib/hermes/repo/vault -prune -o -exec chown "$(id -u)":"$(id -g)" {} +`, then `just restart`. `-prune`, not `chown -R` and not `find -xdev`: the bind shares a device with the volume (`stat -c %D` reports `10302` for both), so `-xdev` crosses it and a bare `-R` re-owns 316 vault files out from under the host account |
+| Agent ignores the home chat | home binding unset or stale in `/var/lib/hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
+| boot parks on `vault has no index.md` / `vault/.git is inside the worktree` | `~/hermes-vault` absent, empty, or cloned the wrong way — first bring-up on this host, or it was moved/deleted | clone it per the README's § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 4. `docker/cont-init.d/04-require-vault-corpus.sh` is what refuses |

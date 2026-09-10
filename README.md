@@ -14,7 +14,7 @@ Uses the Plow base image (`plow-cloud-agents:base-<sha>`, built by
 [plow-hermes-agent](https://github.com/plow-pbc/plow-hermes-agent) on the
 official `nousresearch/hermes-agent` image) rather than a hand-rolled one: it
 adds `plow-init`, which asks Plow who this agent is at every boot. All state
-except the vault lives in `~/.hermes` on the host, mounted at `/var/lib/hermes`
+except the vault, which is a host bind; the home itself is a named volume mounted at `/var/lib/hermes`
 (the image's `HERMES_HOME`); the vault is `~/hermes-vault`, mounted in beside
 it. The image is stateless.
 
@@ -67,13 +67,19 @@ token and the ability to open doors.
 | Runtime | Docker Compose, container `hermes` |
 | Deployed checkout | `~/services/sams-str-hermes-agent` — **this is what actually runs** |
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
-| Persistent state | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
+| Persistent state | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes` |
 | Runtime vault | `~/hermes-vault` — outside every checkout, never a git repo |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
 *scheduled* — the nightly wiki job, the message poller — must point at
 `~/services`. The two clones drift (a dev clone can be on a feature branch,
 unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
+
+**Every `/var/lib/hermes/...` path below is inside the container.** The home is
+a volume, so there is no host path to it: read and edit through
+`docker compose exec` (as root for anything `plow-init` owns). A `~/.hermes`
+directory left over from before the cutover may still exist on the host — it is
+not what the agent reads, and a check pointed at it reports on a dead home.
 
 ## Status
 
@@ -176,15 +182,13 @@ between the two; #46 records why the allowlist never was.
 
 | Path | What |
 |---|---|
-| `agent.env` | This agent's descriptor — home, container, build context, timezone |
-| `compose.override.yml` | What this agent adds to agent-mgr's service: the derived image, the vault and `bin/` mounts |
-| `bin/` | Scripts Hermes' scheduler runs, mounted at `/var/lib/hermes/scripts` |
-| `mcp-seam/` | Seam lock-control MCP server, bind-mounted read-only into the data volume |
+| `compose.yml` | This agent's runtime surface: the image, the home volume, the vault bind, the timezone |
+| `bin/` | Scripts Hermes' scheduler runs. Baked to `/opt/plow/str/bin` and symlinked to `/var/lib/hermes/scripts` — root-owned, so a turn can read them and cannot rewrite them |
+| `mcp-seam/` | Seam lock-control MCP server. Baked to `/opt/plow/str/mcp-seam` and symlinked into the home the same way |
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
-| `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `~/.hermes` |
-| `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`, installed into the runtime vault at deploy. The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
-| `scripts/restore-runtime-config.sh` | This agent's deploy hook, run **by** `agent-mgr deploy str` (declared as `AGENT_DEPLOY_HOOK`): seeds the runtime vault from `runtime/vault-seed/`, rebuilds the property hubs, publishes `SOUL.md` (via `scripts/publish-soul`), and refuses without a vault at `~/hermes-vault`. Not a standalone entry point. |
-| `scripts/publish-soul` | Installs `runtime/SOUL.md` verbatim as `~/.hermes/SOUL.md`, from the HOST, at deploy. Composes nothing. Before the agent's first boot this is a plain write; afterwards `plow-init` owns the file as root, so it escalates through the running container. Nothing else writes the SOUL — the nightly does not. |
+| `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `/var/lib/hermes` |
+| `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`. Baked to `/opt/plow/str/vault-seed/` as the reference copy; the live files belong to the vault repo, which is the operator's git checkout, so apply an edit there (see [#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)). The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
+| `scripts/publish-soul` | Installs `runtime/SOUL.md` verbatim from the HOST, for an edit that must land without a rebuild. The image bakes the same file and `docker/cont-init.d/05-install-agent-payload.sh` reinstalls it on every boot, so the durable edit is `runtime/SOUL.md` plus a rebuild. Composes nothing. Before the agent's first boot this is a plain write; afterwards `plow-init` owns the file as root, so it escalates through the running container. Nothing else writes the SOUL — the nightly does not. |
 | `.env.example` | The environment-key contract, with no values |
 | [`.claude/skills/deploy-str-hermes/`](.claude/skills/deploy-str-hermes/SKILL.md) | Redeploy to `wakeup` — reseat, deploy, force-recreate |
 | [`.claude/skills/smoke-str-hermes/`](.claude/skills/smoke-str-hermes/SKILL.md) | Prove the deployed container answers, and what that does not prove |
@@ -195,14 +199,14 @@ between the two; #46 records why the allowlist never was.
 | Location | Contents | Backed up in git? |
 |---|---|---|
 | repository `runtime/` | declarative config | yes |
-| `~/.hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
-| `~/.hermes/auth.json` | OpenAI/Codex OAuth | no |
-| `~/.hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
-| `~/.hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
-| `~/.hermes/skills/` | bundled + boot-linked skills, plus any Hermes wrote itself | only the ones Hermes wrote — see below |
-| remaining `~/.hermes` state | sessions, databases, logs, caches | no |
+| `/var/lib/hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
+| `/var/lib/hermes/auth.json` | OpenAI/Codex OAuth | no |
+| `/var/lib/hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
+| `/var/lib/hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
+| `/var/lib/hermes/skills/` | bundled + boot-linked skills, plus any Hermes wrote itself | only the ones Hermes wrote — see below |
+| remaining `/var/lib/hermes` state | sessions, databases, logs, caches | no |
 
-`~/.hermes/channel_directory.json` is derived state: it is **not backed up**
+`/var/lib/hermes/channel_directory.json` is derived state: it is **not backed up**
 and Hermes regenerates/refreshes it. Do not copy it into `runtime/` or restore
 it manually.
 
@@ -218,7 +222,7 @@ its own skills, and says so in chat:
 
 > 💾 Self-improvement review: Patched SKILL.md in skill 'property-guest-messaging' (1 replacement).
 
-That line is the only trace. The write lands in `~/.hermes/skills/`, which no
+That line is the only trace. The write lands in `/var/lib/hermes/skills/`, which no
 git repo covers, the deploy does not install, and a rebuilt host does not
 reproduce — so the rules Hermes learned from a real correction live on exactly
 one disk, and change with no diff and no review.
@@ -248,7 +252,7 @@ and `#66` already record for other paths. So for a skill the image does not
 carry, restoring after a rebuild is a deliberate copy:
 
 ```sh
-cp -R agent-skills/. "$(agent-mgr resolve str | sed -n 's/^AGENT_HOME=//p')/skills/"
+docker compose cp agent-skills/. hermes:/var/lib/hermes/skills/
 ```
 
 The order matters when you commit one: an edit Hermes made lands in the image
@@ -263,96 +267,100 @@ so nothing that quotes a guest may land in it. And a rule Hermes writes for itse
 disagree, SOUL is the one under review, so fix the skill or fold the rule into
 SOUL rather than leaving both.
 
-## Restoring runtime config
+## Bringing it up
 
 Covers both the fresh-host bootstrap and re-applying `runtime/` to a running
-host. On a fresh host, run this as the account that will own `~/.hermes`:
+host. On a fresh host, run this as the account that will own the home volume:
 
 ```bash
 git clone https://github.com/plow-pbc/str-hermes-agent.git ~/services/sams-str-hermes-agent
 cd ~/services/sams-str-hermes-agent
-# agent-mgr, which owns deployment for every agent on this host, and the
-# registration that lets `agent-mgr <cmd> str` find this checkout. It also sets
-# HERMES_UID/HERMES_GID on every invocation, so there is no repo-root .env to
-# write any more: agent-mgr's template has no default for them and refuses to
-# start without them, because s6 remaps the hermes user to that uid at boot and
-# chowns the data directory — a wrong value re-owns ~/.hermes in place rather
-# than just affecting new files.
-git clone git@github.com:plow-pbc/agent-mgr.git ~/services/agent-mgr
-ln -s ~/services/agent-mgr/agent-mgr ~/.local/bin/agent-mgr
-agent-mgr register str "$PWD"
 # The runtime vault, cloned outside the checkout with its own git dir kept
 # outside the worktree too — a plain `git clone` here would put `.git` inside
-# the vault, reachable from the container and reproducing #89. The restore
-# script below refuses to run without this vault in place.
+# the vault, reachable from the container and reproducing #89.
+# docker/cont-init.d/04-require-vault-corpus.sh parks the boot without it, and
+# parks again if `.git` is inside: the clone form below is enforced, not advised.
 git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
 mkdir -p ~/hermes-vault
 git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
-# Build before deploy, always: `agent-mgr deploy` derives the boot contract
-# from the image present locally (building one only when none is), and writes
-# the vault seed's paths against it. The same order the deploy skill uses on
-# a redeploy, where a stale image would otherwise decide.
-agent-mgr compose str build
-agent-mgr deploy str
-# No dotenv install here: `agent-mgr deploy` seeds one from THIS repo's
-# .env.example (it prefers an instance's own over the fleet template), so the
-# home gets all five keys below at mode 600 — verified, not assumed. It never
-# clobbers an existing one. Fill HOSTEX_TOKEN and SEAM_API_KEY from 1Password.
-# Activation replaces the blank PLOW_CHAT_CHAT_UID in place; the credential
-# itself lands in ~/.plow-credentials-str, not the dotenv.
-# Activate BEFORE up: this image boots through plow-init, which needs the
-# credential activation writes (PLOW_AGENT_TOKEN and PLOW_API_BASE) before
-# agent-mgr will create the container at all. Activation runs on the host and
-# polls until the code is texted back; it reloads a running gateway itself,
-# and here there is none yet.
-agent-mgr activate str
-agent-mgr up str
-# The codex OAuth the compression fallback uses, added INSIDE the running
-# container under the host uid, the way `agent-mgr sign-in` does it -- but not
-# through `sign-in` itself, which reads the provider off the live config and
-# would add `plow`, the main route, which needs no sign-in: it is the Plow
-# credential activation wrote. Then `up` again: a current-contract agent has no
-# restart, and cont-init only runs at container creation.
-agent-mgr compose str exec --user "$(id -u):$(id -g)" -it hermes hermes auth add openai-codex
-agent-mgr up str
+# The Plow credential. `login` is once per host and texts a code back; `mint`
+# is per agent and writes the file compose binds at
+# /var/lib/plow/credentials.host. Nothing else is needed before the first boot:
+# plow-init reads that file and publishes PLOW_AGENT_TOKEN and PLOW_API_BASE
+# into the container itself.
+plow-agents login
+plow-agents mint <line-uid> --credential-file ~/.plow-credentials-str
+# First boot. compose builds here because `build: .` is declared and the tagged
+# image is absent; `pull_policy: never` forbids a registry copy winning it. The
+# home volume initialises from what the image bakes.
+just up
+```
+
+Then the two secrets this repo cannot mint. `plow-init` writes
+`/var/lib/hermes/.env` as **root** when none exists — merging its own keys and
+keeping every other line — so the file exists after the first boot and is
+root-owned inside a home the agent cannot rename over. Add to it as root, then
+recreate so the gateway reads them:
+
+```sh
+docker compose exec -u root hermes sh -c 'cat >> /var/lib/hermes/.env'   # HOSTEX_TOKEN, SEAM_API_KEY — from 1Password
+just restart
+```
+
+`.env.example` is the key contract with no values. `PLOW_CHAT_CHAT_UID` and the
+group keys arrive through activation rather than by hand — see § Private/home
+chat activation.
+
+Last, the codex OAuth the compression fallback uses. Added INSIDE the running
+container under the host uid, and not through any `sign-in` wrapper that reads
+the provider off the live config: that would add `plow`, the main route, which
+needs no sign-in — it is the credential `mint` wrote. `cont-init` only runs at
+container creation, so this is `restart`, not a reload:
+
+```sh
+docker compose exec --user "$(id -u):$(id -g)" -it hermes hermes auth add openai-codex
+just restart
 ```
 
 After pairing and activating the private Plow chat, send `/sethome` in the
 desired chat. Hermes persists that host-specific home target to the dotenv as
 `PLOW_CHAT_HOME_CHANNEL` and `PLOW_CHAT_HOME_CHANNEL_THREAD_ID`; it is
-intentionally not tracked.
+intentionally not tracked, and `plow-init` keeps it — it rewrites only the keys
+it owns and copies every other line through.
 
 <a name="applying-a-runtime-edit"></a>
-Applying a `runtime/` edit — or re-running the deploy for any other reason:
+Applying a `runtime/` edit — `config.yaml` or the `SOUL.md` persona:
 
 ```sh
-agent-mgr deploy str
+docker compose build     # `up` alone will NOT rebuild: it only builds when the
+just restart             # tagged image is absent, and this one never is
 ```
 
-`deploy` returns before the gateway is serving, and there is no healthcheck
-to wait on, so watch `agent-mgr logs str` until it lists its
-platforms. `agent-mgr deploy` installs `config.yaml`, and the script publishes `SOUL.md`; it
-never touches `~/.hermes/.env`, so the home target survives.
+Both files are baked into the image, and
+`docker/cont-init.d/05-install-agent-payload.sh` reinstalls them into the home
+on every boot — unconditionally, because a named-volume home seeds from the
+image only while empty and would otherwise shadow every later revision
+(plow-hermes-agent#58). So a rebuild is what applies a `runtime/` edit, and a
+host-side edit to `/var/lib/hermes/SOUL.md` is lost at the next boot. Edit
+`runtime/SOUL.md`.
 
-Skip the `hermes auth add openai-codex` step only when a valid
-`~/.hermes/auth.json` was restored through a separate secure backup. The
-runtime restoration script copies the tracked configuration and publishes
-`SOUL.md` verbatim; it does not create secrets, OAuth, sessions, or derived
-gateway state.
+`up` returns before the gateway is serving and there is no healthcheck to wait
+on, so watch `docker compose logs -f hermes` until it lists its platforms.
+Nothing in that path touches `/var/lib/hermes/.env`, so the home target and both
+secrets survive.
 
-`SOUL.md` is **installed, not preserved, and not composed**. It is
-`runtime/SOUL.md` byte for byte; `scripts/publish-soul` writes it at deploy and
-nothing else writes it. A host-side edit is lost at the next deploy — edit
-`runtime/SOUL.md` instead.
+`scripts/publish-soul` remains for an edit that must land without a rebuild. It
+writes the same file from the host and is overwritten by the next boot, so it is
+a stopgap, not the way to change the persona.
 
-The vault index is deliberately **not** in it. The base image treats `SOUL.md`
-as provisioned identity: `plow-init` seeds it only when absent, then chowns it
-`root:root` and chmods it `0644` inside a home it owns and marks sticky, at
-every container start. Pushing a nightly-changing corpus through that freeze
-takes root escalation and a schedule; naming the file does not. So the persona
-carries the path — `$HERMES_HOME/repo/vault/index.md` — and the nightly keeps
-that file current in the vault the agent already reads. Identity stays frozen,
-knowledge stays live.
+The vault index is deliberately **not** in the SOUL. The base image treats
+`SOUL.md` as provisioned identity: `plow-init` seeds it only when absent, then
+chowns it `root:root` and chmods it `0644` inside a home it owns and marks
+sticky, at every container start. Pushing a nightly-changing corpus through that
+freeze takes root escalation and a schedule; naming the file does not. So the
+persona carries the path — `$HERMES_HOME/repo/vault/index.md` — and the nightly
+keeps that file current in the vault the agent already reads. Identity stays
+frozen, knowledge stays live.
 
 ## Before you write code here
 
@@ -393,10 +401,12 @@ Not here:
 - **A Hermes runtime fix.** It goes to the fork and upstream, not into a
   workaround here — this repo takes it as the image digest bump the Dockerfile
   pins.
-- **Deployment, provisioning, and container lifecycle**, including the bring-up
-  sequence documented below: the compose template, skill replay, and the
-  fleet's plugin pin are [`agent-mgr`](https://github.com/plow-pbc/agent-mgr)'s,
-  and this repo only declares its own facts in `agent.env`.
+- **Deployment, provisioning, and container lifecycle** were
+  [`agent-mgr`](https://github.com/plow-pbc/agent-mgr)'s, which is deprecated.
+  They are this repo's now: `compose.yml` is the service, the justfile is the
+  lifecycle, and the image carries the payload. The shape is
+  `plow-agents`' `compose.example.yml`, so changes belong upstream there when
+  they are fleet-wide and here when they are only this agent's.
 
 Examples:
 
@@ -412,30 +422,32 @@ Examples:
 
 ## Day-to-day
 
-`agent-mgr` resolves this agent by name through its registry, so these run from
-anywhere once `agent-mgr register str ~/services/sams-str-hermes-agent` has been
-done on the host. **How deployment works — the compose service, UID/GID ownership, the Plow Chat
-plugin pin — belongs to [agent-mgr](https://github.com/plow-pbc/agent-mgr)
+These run from the deployed checkout, `~/services/sams-str-hermes-agent` —
+compose resolves the project from the directory, which is what makes the
+container and the `sams-str-hermes-agent_agent-home` volume the ones they name.
+**How deployment works — the compose service, the home volume, the Plow Chat
+plugin pin — belongs to this repo now, not to
+[agent-mgr](https://github.com/plow-pbc/agent-mgr)
 (`docs/HOWTO.md`), not here.** This agent's *image* is the exception: agent-mgr
 pins the upstream one fleet-wide, but this agent derives its own on top of it,
 so that pin lives in this repo's `Dockerfile`. This section lists only what you
 run.
 
 ```sh
-agent-mgr up str          # start the gateway
-agent-mgr logs str        # container-level logs
-agent-mgr down str           # stop
-agent-mgr compose str build && agent-mgr up str     # rebuild at the current pins
+just up          # start the gateway
+docker compose logs -f hermes        # container-level logs
+just down           # stop
+docker compose build && just up     # rebuild at the current pins
 
-tail -f ~/.hermes/logs/gateway.log               # gateway detail
-agent-mgr compose str exec hermes hermes pairing list   # who's allowed to text it
+docker compose logs -f hermes                    # gateway detail
+docker compose exec hermes hermes pairing list   # who's allowed to text it
 ```
 
 A `runtime/` edit — the plugin pin included — is not one of these; `up -d` is a
 no-op for an unchanged image. Use [Applying a `runtime/` edit](#applying-a-runtime-edit).
 
 Rebuilding is not upgrading. Every input is pinned — the base image by digest,
-`obsidian-wiki` by version — so `agent-mgr compose str build`
+`obsidian-wiki` by version — so `docker compose build`
 reproduces what is already running and picks up only changes to this repo. To
 upgrade, bump a pin in the `Dockerfile` and then rebuild; that way the version
 that moved is a line in a diff rather than whatever happened to be current on
@@ -444,8 +456,8 @@ the day someone rebuilt.
 Interactive one-offs run inside the live gateway container, which must be up:
 
 ```sh
-agent-mgr agent str 'hello'
-agent-mgr compose str exec hermes hermes auth list
+docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'hello'
+docker compose exec hermes hermes auth list
 ```
 
 ## Plow group chats
@@ -491,7 +503,7 @@ PLOW_CHAT_GROUP_UIDS=cht_owners=STR Owners,cht_cleaners=Cleaners
 PLOW_CHAT_APPROVAL_GROUP=STR Owners
 ```
 
-Add the variables to `~/.hermes/.env` and restart the gateway.
+Add the variables to `/var/lib/hermes/.env` (as root, inside the container — the home is a volume) and restart the gateway.
 `PLOW_CHAT_APPROVAL_GROUP` names which of those groups receives guest-reply
 drafts and whose members can approve them; the inbound poller resolves it to
 a chat id and refuses to install without it. Each group has
@@ -518,7 +530,7 @@ carries the exact `<cht_ id>=<display name>` entry to paste in. Adopted groups
 are labelled from their chat id, never from a name the agent picks, because
 nothing re-checks the
 uniqueness rule above on that path. To address one by a friendlier name, alias it
-in `~/.hermes/channel_aliases.json` — `{"plow_chat": {"<cht_ id>": "<name>"}}`.
+in `/var/lib/hermes/channel_aliases.json` — `{"plow_chat": {"<cht_ id>": "<name>"}}`.
 The upstream image re-applies that overlay on every directory build and every
 load, so `send_message` resolves the alias even though the group's own label
 stays the id-derived one, and unlike the derived `channel_directory.json` it is
@@ -550,33 +562,38 @@ For a new Plow private/home chat, run upstream's activation helper at the pinned
 SHA and follow the Plow instructions. It writes `PLOW_CHAT_CHAT_UID` and
 `PLOW_CHAT_TOKEN` into the dotenv of whichever data directory `--data-dir` names:
 
-```sh
-agent-mgr activate str
-```
+> **This recipe does not currently work — [#44](https://github.com/plow-pbc/str-hermes-agent/issues/44).**
+> Two independent breaks, both verified rather than inferred: the pin file the
+> command below reads (`~/services/agent-mgr/runtime/plow-chat-activate.ref`) no
+> longer exists, so the URL substitutes an empty SHA; and `--data-dir` has no host
+> path to name now that the home is a named volume. Running the helper inside the
+> container instead does not work either — the image ships `bash` but no `curl`.
+> str is activated and serving, so this bites only on a re-activation or a new
+> host. The rest of this section is kept because it still describes the targeting
+> rule correctly, which is the part that is dangerous to get wrong.
 
 **`--data-dir` is the whole targeting mechanism, and it has no default that
 protects you.** The deleted local script honoured a `HERMES_DOTENV` env var;
 upstream's does not, so exporting it does nothing and the `--data-dir` value is
 what decides which agent gets rewritten. Pointing a second agent's activation at
-`~/.hermes` overwrites *this* agent's credentials in place — replacing rather
+a home that is not its own overwrites *this* agent's credentials in place — replacing rather
 than shadowing them — and leaves it off its chat until `/sethome` is sent again.
 Activating a second number means naming that agent's data directory:
 
 ```sh
-# The raw script, not `agent-mgr activate`: that refuses any home but this
-# agent's, which is the point of it. The pin comes from agent-mgr, the one
-# place the fleet's plugin SHA lives.
-bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plow-chat/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir ~/.hermes-second
+# The pin came from agent-mgr, which is deprecated and no longer carries the
+# file -- see #44 before running this.
+bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plow-chat/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir /var/lib/hermes-second
 ```
 
 The rest of this section pairs *this* agent, through the `hermes` container and
-its `~/.hermes` mount. A second agent continues in its own compose project,
+its own home volume. A second agent continues in its own compose project,
 against the home that container mounts; the commands below cannot reach it.
 
 On a host whose gateway is **already running**, restart it before pairing:
 
 ```sh
-agent-mgr restart str
+just restart
 ```
 
 The gateway reads its dotenv only at
@@ -588,7 +605,7 @@ Then text its private number and approve the pairing code returned in that
 conversation:
 
 ```sh
-agent-mgr compose str exec hermes hermes pairing approve plow_chat <CODE>
+docker compose exec hermes hermes pairing approve plow_chat <CODE>
 ```
 
 Then send `/sethome` in that desired private chat. The ID shown by
@@ -615,7 +632,7 @@ which stages conversations from a shell script (see below).
 Config lives in `runtime/config.yaml` under `mcp_servers.hostex` — edit it
 there, never the live copy, which the next deploy overwrites. Apply an edit
 the way [applying a `runtime/` edit](#applying-a-runtime-edit) describes.
-The token is `HOSTEX_TOKEN` in `~/.hermes/.env`, substituted into the
+The token is `HOSTEX_TOKEN` in `/var/lib/hermes/.env`, substituted into the
 `Authorization` header at connect time; its source of truth is the 1Password
 *Shared* vault → **Hostex** → the `daniel hermes api key` field.
 
@@ -630,15 +647,15 @@ stands in for a gate. Reservation cancel/decline/create, finance, staff, and
 knowledge-base tools are reachable by the token but deliberately not offered.
 
 `include` shapes what the agent is *offered*, not what it can *reach*: the
-agent also holds `terminal` and can read `HOSTEX_TOKEN` from `~/.hermes/.env`
+agent also holds `terminal` and can read `HOSTEX_TOKEN` from `/var/lib/hermes/.env`
 and call the REST API directly. Treat it as ergonomics and blast-radius
 reduction, not as a security boundary (#46).
 
 ```sh
-agent-mgr compose str exec hermes hermes mcp test hostex     # connectivity + tool list
+docker compose exec hermes hermes mcp test hostex     # connectivity + tool list
 # note: this reports the server's full surface, not the `include` selection —
 # use `hermes tools list | grep hostex` to see what the agent actually gets
-agent-mgr agent str 'Read my most recent Hostex message.'
+docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'Read my most recent Hostex message.'
 ```
 
 ### Finding a capability that isn't allowlisted
@@ -708,7 +725,7 @@ same as being unable to; see below.
 - No quiet hours. A 3am message texts the group like any other; Do Not
   Disturb knows when the owners are asleep and this code does not.
 
-State is one file, `~/.hermes/hostex-poll-cursor.json` — conversation id to
+State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id to
 last announced timestamp, deliberately separate from the nightly pipeline's
 watermark. Guest text is never persisted. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
@@ -733,8 +750,8 @@ HMAC where Hostex sends a static header token. Revisit at hardening.
 One-time, on the deployed checkout:
 
 ```sh
-agent-mgr deploy str                           # 1 — reloads the gateway
-agent-mgr compose str up -d --force-recreate    # 2
+docker compose build     # 1 — runtime/ is baked, so the build is the deploy
+just restart             # 2 — through the nightly veto
 ```
 
 Wait for the gateway to serve — see [applying a `runtime/`
@@ -776,7 +793,7 @@ anyone waiting was marked seen. `cron create` echoes the job it
 made — name, schedule, next run — which is what confirms the enable landed.
 
 Day to day: `hermes cron run hostex-inbound` fires a one-shot tick and
-`hermes cron runs` shows durable history, both via `agent-mgr compose str exec`.
+`hermes cron runs` shows durable history, both via `docker compose exec`.
 
 <a name="owners-group-migration"></a>
 **One-time: point an existing job at the owners' group, and stamp its origin.**
@@ -785,7 +802,7 @@ a job created before the delivery mirror has no `origin` — which is what scope
 the mirror, so its drafts never reach the session that approves them. Nothing in
 a redeploy changes either: the enable script refuses to run while a job exists,
 so restoring config and recreating the container leaves the old job in place.
-One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `~/.hermes/.env`,
+One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `/var/lib/hermes/.env`,
 restart the gateway, then follow the recreate recipe below. Read the delivery
 target back afterwards; it is the one thing the enable script cannot confirm.
 
@@ -815,7 +832,7 @@ on, and leaves the transcript readable. (`hermes sessions archive` is not a
 substitute — it sets `archived`, which that query does not look at.)
 
 ```sh
-agent-mgr compose str exec hermes /opt/hermes/.venv/bin/python - <<'PY'
+docker compose exec hermes /opt/hermes/.venv/bin/python - <<'PY'
 from hermes_state import SessionDB
 db = SessionDB()
 stale = [s for s in db.list_gateway_sessions(platform="plow_chat")
@@ -860,7 +877,7 @@ trigger. In order:
 2. Recreate the job:
 
    ```sh
-   agent-mgr compose str exec hermes hermes cron remove hostex-inbound
+   docker compose exec hermes hermes cron remove hostex-inbound
    ./scripts/enable-hostex-inbound.sh
    ```
 
@@ -869,7 +886,7 @@ trigger. In order:
    `Deliver:`, and the whole hazard here is a job baked with the *old* UID:
 
    ```sh
-   agent-mgr compose str exec hermes hermes cron list
+   docker compose exec hermes hermes cron list
    ```
 
    Its `Deliver:` must carry the UID the dotenv now holds. Get this wrong and
@@ -1026,14 +1043,14 @@ disk. Measured 2026-08-26: 18 pages rewritten and 6 new ones since the
 2026-08-04 commit — 22 days of compiled guest knowledge, unpushed.
 
 ```sh
-agent-mgr compose str exec hermes date                      # must print PDT/PST, not UTC
+docker compose exec hermes date                      # must print PDT/PST, not UTC
 ./scripts/enable-wiki-nightly.sh
-agent-mgr compose str exec hermes hermes cron list          # confirm it is registered
-agent-mgr compose str exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
+docker compose exec hermes hermes cron list          # confirm it is registered
+docker compose exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
 ```
 
 The `date` line comes first because everything below it is written in wall-clock
-time. `TZ` comes from `AGENT_TZ` in `agent.env`, but a timezone only resolves if the image
+time. `TZ` comes from `compose.yml`, but a timezone only resolves if the image
 carries `/usr/share/zoneinfo` — and when it does not, glibc falls back to UTC
 silently, with no error and nothing downstream reading as broken. The pinned
 base does carry it, so this is a confirmation rather than a risk; it belongs
@@ -1051,7 +1068,7 @@ which carries vault content distilled from guest mail, out of an agent's
 instruction channel (#44).
 
 The schedule is a cron expression, which this CLI accepts alongside `30m` and
-`every 2h` forms. It is read in the container's timezone, which `agent.env`
+`every 2h` forms. It is read in the container's timezone, which `compose.yml`
 sets to `America/Los_Angeles` — so `0 3 * * *` is 3 AM where the properties
 are. Left unset the container is UTC and the same expression fires at 8 PM
 Pacific, in the middle of the evening guest traffic the job is scheduled
@@ -1102,10 +1119,11 @@ vault holding a page nothing recorded — the next run re-ingests that
 conversation and appends its facts a second time. Nothing reports it; the pages
 just quietly say things twice.
 
-`agent.env` declares `scripts/no-nightly-running` as this agent's
-`AGENT_PRE_TRANSITION` guard, and **agent-mgr invokes it before every container
-transition** — `up`, `down`, `restart`, `deploy`, and a `compose` passthrough
-whose subcommand transitions. Nothing here restates it **except the
+The justfile's `up`, `down` and `restart` recipes run
+`scripts/no-nightly-running` before they touch the container, and **they are the
+only thing left that can refuse**: `agent.env` used to declare it as
+`AGENT_PRE_TRANSITION` and agent-mgr invoked it, but compose has no such hook, so
+reaching for `docker compose` directly is a bypass. Nothing here restates it **except the
 manual-nightly recovery below**, which runs `nightly.sh` through an `exec`
 passthrough and so fires no hook — there it guards a second concurrent ingest
 rather than a transition.
@@ -1133,10 +1151,9 @@ conversations again and appends their facts a second time. Run it directly
 instead, where nothing is watching the clock:
 
 ```sh
-agent-mgr compose str exec hermes hermes cron remove wiki-nightly
-AGENT_CONTAINER=$(agent-mgr resolve str | sed -n 's/^AGENT_CONTAINER=//p') \
-  ./scripts/no-nightly-running \
-  && agent-mgr compose str exec -u hermes hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
+docker compose exec hermes hermes cron remove wiki-nightly
+AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
+  && docker compose exec -u hermes hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
 ./scripts/enable-wiki-nightly.sh
 ```
 
@@ -1238,10 +1255,10 @@ It refuses without `HERMES_HOME`, without an `ops.toml` in the vault, and if a
 `checkin-watch` job already exists. Read the job back:
 
 ```sh
-agent-mgr compose str exec -T hermes hermes cron list
+docker compose exec -T hermes hermes cron list
 ```
 
-Schedule is `0 12 * * *` — noon in the container's timezone (`agent.env` pins
+Schedule is `0 12 * * *` — noon in the container's timezone (`compose.yml` pins
 `America/Los_Angeles`), three hours ahead of the earliest standard check-in.
 
 **Trade-off: an approved early check-in does not move the noon check.** The
@@ -1331,7 +1348,7 @@ it cannot touch a real device. So unlike Hostex, this is a first-party stdio
 server (`mcp-seam/server.py`, a thin wrapper over the official `seam` SDK),
 bind-mounted into the data volume and launched by Hermes with `uv`.
 
-`SEAM_API_KEY` goes in `~/.hermes/.env`. Generate it in the Seam Console
+`SEAM_API_KEY` goes in `/var/lib/hermes/.env`. Generate it in the Seam Console
 (Settings → API Keys); it is scoped to one workspace, so make sure the
 workspace is the one your locks are connected to.
 
@@ -1344,13 +1361,13 @@ runs on your host against a faked Seam client, not in the container against
 the real API, so both commands below matter and neither substitutes for the
 other.
 
-`~/.hermes/config.yaml` and `~/.hermes/.env` are read at gateway start, so
+`/var/lib/hermes/config.yaml` and `/var/lib/hermes/.env` are read at gateway start, so
 after editing `runtime/config.yaml` apply it the way
 [applying a `runtime/` edit](#applying-a-runtime-edit) describes — then:
 
 ```sh
-agent-mgr compose str exec hermes hermes mcp test seam     # connectivity + tool list
-agent-mgr agent str 'Which of my doors are unlocked?'
+docker compose exec hermes hermes mcp test seam     # connectivity + tool list
+docker compose exec -T --user "$(id -u):$(id -g)" hermes hermes chat -q 'Which of my doors are unlocked?'
 ```
 
 ### Known exposure
@@ -1414,10 +1431,10 @@ boot and writes the answer into the home: the `plow` entry under
 when `mcp_url` comes back null) and `PLOW_MCP_URL` in the dotenv. The same
 token is the relay credential, so there is no Latch pair to mint and nothing
 carried by hand; a token minted before relay access existed answers 403 on
-the relay and needs a fresh activation (`agent-mgr activate str`) on an
+the relay and needs a fresh activation (§ Private/home chat activation, #44) on an
 agent-mgr that keeps `relay:call` when it narrows (plow-pbc/agent-mgr#157).
 
-Verify from wakeup: `agent-mgr compose str exec -T hermes hermes mcp test plow`
+Verify from wakeup: `docker compose exec -T hermes hermes mcp test plow`
 lists the Mac's tools. Widening the agent's reach to the Mac is deliberate
 (§ Review priority, "Tool reach is deliberate") — every action still lands in
 Latch's approval UI and audit log on the Mac.
