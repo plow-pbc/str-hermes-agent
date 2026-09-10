@@ -9,19 +9,14 @@
 # whose git dir sits beside the worktree. Pages reach git when the host-side
 # scripts/promote-vault runs; none of it reaches this repo's `main`.
 #
-# Two rules shape the error handling:
-#   1. A message is sent on every path, because it doubles as the liveness
-#      signal — a routine failure must not look like the job dying. On a normal
-#      night that message is the wiki-digest; on an abort it is a one-line
-#      status, since the vault may not be in a state worth summarising.
+# One rule shapes the error handling: something is PRINTED on every path,
+# because the message doubles as the liveness signal — a routine failure must
+# not look like the job dying. On a normal night that is the wiki-digest; on an
+# abort it is a one-line status, since the vault may not be worth summarising.
 #
-#      Delivery is bounded, so silence is not quite proof of death. Sending is
-#      an agent turn, and an unreachable channel makes it search rather than
-#      fail — one such turn ran two hours holding the vault. Past the bound the
-#      run writes the message to the log and exits non-zero instead. So silence
-#      means the job died OR the channel was unreachable, and the cron log
-#      tells them apart. Blocking on delivery is worse: a job wedged all night
-#      is a job that did not run tomorrow either.
+# This script does not deliver. The scheduler does, from the job's stdout, and
+# an empty stdout is delivered as nothing — which is why every path prints.
+# `notify()` carries the rest of that contract.
 set -uo pipefail
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
