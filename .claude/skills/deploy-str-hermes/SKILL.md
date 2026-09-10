@@ -1,6 +1,6 @@
 ---
 name: deploy-str-hermes
-description: Use when deploying this repo to wakeup — "deploy hermes", "deploy the STR agent", "push this to wakeup", "update the prod clone", "restart the gateway with the new config". Fast-forwards ~/services/sams-str-hermes-agent to merged main, applies runtime/ to ~/.hermes, brings up the Compose service, and verifies the container is actually serving.
+description: Use when deploying this repo to wakeup — "deploy hermes", "deploy the STR agent", "push this to wakeup", "update the prod clone", "restart the gateway with the new config". Fast-forwards ~/services/sams-str-hermes-agent to merged main, applies runtime/ to /var/lib/hermes, brings up the Compose service, and verifies the container is actually serving.
 ---
 
 # Deploy STR Hermes
@@ -12,7 +12,7 @@ Deploy merged `main` to the container that actually runs on `wakeup`.
 | Host | `wakeup` |
 | Checkout | `~/services/sams-str-hermes-agent` — **this is what runs** |
 | Container | `hermes`, Docker Compose, `restart: unless-stopped` |
-| State | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes`. There is no host path — a stale `~/.hermes` from before the cutover may still exist and is NOT what the agent reads |
+| State | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes`. There is no host path — a stale `/var/lib/hermes` from before the cutover may still exist and is NOT what the agent reads |
 
 This is the **redeploy** path: an existing host, already bootstrapped. First-time
 setup of a host — credentials, installing and registering `agent-mgr`,
@@ -76,11 +76,11 @@ entirely outside the checkout, at `~/hermes-vault`, mounted in rather than
 tracked. A clean prod clone is the normal state; any dirty path, `vault/`
 included, means someone edited production directly or recreated a vault
 inside the checkout. The Plow Chat plugin is no longer part of this
-tree — it is installed into `~/.hermes/plugins` from a pinned upstream SHA, so
+tree — it is installed into `/var/lib/hermes/plugins` from a pinned upstream SHA, so
 a file hand-dropped *there* is running in production and this check cannot see
 it. The plugin install baked into the image (step 3) rewrites only the files it
 manages under `plugins/plow-chat-platform/`, so it bounds drift in *that*
-plugin and nothing more — a sibling directory dropped into `~/.hermes/plugins`
+plugin and nothing more — a sibling directory dropped into `/var/lib/hermes/plugins`
 is loaded by the gateway and is checked by neither this gate nor the installer.
 
 **A `STOP` → stop and ask.** It prints what it found. Do not clean it.
@@ -302,8 +302,8 @@ verified once it does.
 |---|---|---|
 | `Restarting` loop | bad config or missing credential | `docker compose logs --tail 50 hermes`; `/var/lib/hermes/logs/gateway.log` |
 | `mcp test seam` says not found | live config predates the Seam block, or step 3's script was missing | re-run steps 3 and 4; confirm `mcp_servers.seam` is in `runtime/config.yaml` |
-| Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls ~/.hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
+| Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
 | Files in the home volume owned by `1000`, or by another account | the home was migrated off a bind mount, where it carried the host account's ids | the image runs the agent as `10000:10000` and no longer takes the ids from the invoking account, so re-own it from inside — **pruning the vault**, which is a host bind holding the operator's own checkout: `docker compose exec -u root hermes find /var/lib/hermes -path /var/lib/hermes/repo/vault -prune -o -exec chown 10000:10000 {} +`, then `just restart`. `-prune`, not `chown -R` and not `find -xdev`: the bind shares a device with the volume (`stat -c %D` reports `10302` for both), so `-xdev` crosses it and a bare `-R` re-owns 316 vault files to a uid the host account cannot write |
-| Agent ignores the home chat | home binding unset or stale in `~/.hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
+| Agent ignores the home chat | home binding unset or stale in `/var/lib/hermes/.env` | `./scripts/check-home-binding.sh` for the verdict; `/sethome` fixes UNSET and STALE, and takes effect live |
 | boot parks on `vault has no index.md` / `vault/.git is inside the worktree` | `~/hermes-vault` absent, empty, or cloned the wrong way — first bring-up on this host, or it was moved/deleted | clone it per the README's § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 4. `docker/cont-init.d/04-require-vault-corpus.sh` is what refuses |

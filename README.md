@@ -67,13 +67,19 @@ token and the ability to open doors.
 | Runtime | Docker Compose, container `hermes` |
 | Deployed checkout | `~/services/sams-str-hermes-agent` — **this is what actually runs** |
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
-| Persistent state | `~/.hermes` on the host, mounted at `/var/lib/hermes` |
+| Persistent state | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes` |
 | Runtime vault | `~/hermes-vault` — outside every checkout, never a git repo |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
 *scheduled* — the nightly wiki job, the message poller — must point at
 `~/services`. The two clones drift (a dev clone can be on a feature branch,
 unbuilt, or missing its `.env`), and a runtime aimed at one breaks silently.
+
+**Every `/var/lib/hermes/...` path below is inside the container.** The home is
+a volume, so there is no host path to it: read and edit through
+`docker compose exec` (as root for anything `plow-init` owns). A `~/.hermes`
+directory left over from before the cutover may still exist on the host — it is
+not what the agent reads, and a check pointed at it reports on a dead home.
 
 ## Status
 
@@ -180,7 +186,7 @@ between the two; #46 records why the allowlist never was.
 | `bin/` | Scripts Hermes' scheduler runs. Baked to `/opt/plow/str/bin` and symlinked to `/var/lib/hermes/scripts` — root-owned, so a turn can read them and cannot rewrite them |
 | `mcp-seam/` | Seam lock-control MCP server. Baked to `/opt/plow/str/mcp-seam` and symlinked into the home the same way |
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
-| `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `~/.hermes` |
+| `runtime/` | Sanitized, restorable `config.yaml` and the `SOUL.md` persona — the declarative half of `/var/lib/hermes` |
 | `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`. Baked to `/opt/plow/str/vault-seed/` as the reference copy; the live files belong to the vault repo, which is the operator's git checkout, so apply an edit there (see [#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)). The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
 | `scripts/publish-soul` | Installs `runtime/SOUL.md` verbatim from the HOST, for an edit that must land without a rebuild. The image bakes the same file and `docker/cont-init.d/05-install-agent-payload.sh` reinstalls it on every boot, so the durable edit is `runtime/SOUL.md` plus a rebuild. Composes nothing. Before the agent's first boot this is a plain write; afterwards `plow-init` owns the file as root, so it escalates through the running container. Nothing else writes the SOUL — the nightly does not. |
 | `.env.example` | The environment-key contract, with no values |
@@ -193,14 +199,14 @@ between the two; #46 records why the allowlist never was.
 | Location | Contents | Backed up in git? |
 |---|---|---|
 | repository `runtime/` | declarative config | yes |
-| `~/.hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
-| `~/.hermes/auth.json` | OpenAI/Codex OAuth | no |
-| `~/.hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
-| `~/.hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
-| `~/.hermes/skills/` | bundled + boot-linked skills, plus any Hermes wrote itself | only the ones Hermes wrote — see below |
-| remaining `~/.hermes` state | sessions, databases, logs, caches | no |
+| `/var/lib/hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
+| `/var/lib/hermes/auth.json` | OpenAI/Codex OAuth | no |
+| `/var/lib/hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
+| `/var/lib/hermes/SOUL.md` | system prompt; **installed verbatim from `runtime/SOUL.md` at deploy**, so edits here are lost | no — edit `runtime/SOUL.md` |
+| `/var/lib/hermes/skills/` | bundled + boot-linked skills, plus any Hermes wrote itself | only the ones Hermes wrote — see below |
+| remaining `/var/lib/hermes` state | sessions, databases, logs, caches | no |
 
-`~/.hermes/channel_directory.json` is derived state: it is **not backed up**
+`/var/lib/hermes/channel_directory.json` is derived state: it is **not backed up**
 and Hermes regenerates/refreshes it. Do not copy it into `runtime/` or restore
 it manually.
 
@@ -216,7 +222,7 @@ its own skills, and says so in chat:
 
 > 💾 Self-improvement review: Patched SKILL.md in skill 'property-guest-messaging' (1 replacement).
 
-That line is the only trace. The write lands in `~/.hermes/skills/`, which no
+That line is the only trace. The write lands in `/var/lib/hermes/skills/`, which no
 git repo covers, the deploy does not install, and a rebuilt host does not
 reproduce — so the rules Hermes learned from a real correction live on exactly
 one disk, and change with no diff and no review.
@@ -335,7 +341,7 @@ Both files are baked into the image, and
 on every boot — unconditionally, because a named-volume home seeds from the
 image only while empty and would otherwise shadow every later revision
 (plow-hermes-agent#58). So a rebuild is what applies a `runtime/` edit, and a
-host-side edit to `~/.hermes/SOUL.md` is lost at the next boot. Edit
+host-side edit to `/var/lib/hermes/SOUL.md` is lost at the next boot. Edit
 `runtime/SOUL.md`.
 
 `up` returns before the gateway is serving and there is no healthcheck to wait
@@ -524,7 +530,7 @@ carries the exact `<cht_ id>=<display name>` entry to paste in. Adopted groups
 are labelled from their chat id, never from a name the agent picks, because
 nothing re-checks the
 uniqueness rule above on that path. To address one by a friendlier name, alias it
-in `~/.hermes/channel_aliases.json` — `{"plow_chat": {"<cht_ id>": "<name>"}}`.
+in `/var/lib/hermes/channel_aliases.json` — `{"plow_chat": {"<cht_ id>": "<name>"}}`.
 The upstream image re-applies that overlay on every directory build and every
 load, so `send_message` resolves the alias even though the group's own label
 stays the id-derived one, and unlike the derived `channel_directory.json` it is
@@ -570,18 +576,18 @@ SHA and follow the Plow instructions. It writes `PLOW_CHAT_CHAT_UID` and
 protects you.** The deleted local script honoured a `HERMES_DOTENV` env var;
 upstream's does not, so exporting it does nothing and the `--data-dir` value is
 what decides which agent gets rewritten. Pointing a second agent's activation at
-`~/.hermes` overwrites *this* agent's credentials in place — replacing rather
+a home that is not its own overwrites *this* agent's credentials in place — replacing rather
 than shadowing them — and leaves it off its chat until `/sethome` is sent again.
 Activating a second number means naming that agent's data directory:
 
 ```sh
 # The pin came from agent-mgr, which is deprecated and no longer carries the
 # file -- see #44 before running this.
-bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plow-chat/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir ~/.hermes-second
+bash <(curl -fsSL "https://raw.githubusercontent.com/plow-pbc/hermes-plow-chat/$(cat ~/services/agent-mgr/runtime/plow-chat-activate.ref)/ref/scripts/create_plow_chat_curl.sh") --data-dir /var/lib/hermes-second
 ```
 
 The rest of this section pairs *this* agent, through the `hermes` container and
-its `~/.hermes` mount. A second agent continues in its own compose project,
+its own home volume. A second agent continues in its own compose project,
 against the home that container mounts; the commands below cannot reach it.
 
 On a host whose gateway is **already running**, restart it before pairing:
@@ -626,7 +632,7 @@ which stages conversations from a shell script (see below).
 Config lives in `runtime/config.yaml` under `mcp_servers.hostex` — edit it
 there, never the live copy, which the next deploy overwrites. Apply an edit
 the way [applying a `runtime/` edit](#applying-a-runtime-edit) describes.
-The token is `HOSTEX_TOKEN` in `~/.hermes/.env`, substituted into the
+The token is `HOSTEX_TOKEN` in `/var/lib/hermes/.env`, substituted into the
 `Authorization` header at connect time; its source of truth is the 1Password
 *Shared* vault → **Hostex** → the `daniel hermes api key` field.
 
@@ -641,7 +647,7 @@ stands in for a gate. Reservation cancel/decline/create, finance, staff, and
 knowledge-base tools are reachable by the token but deliberately not offered.
 
 `include` shapes what the agent is *offered*, not what it can *reach*: the
-agent also holds `terminal` and can read `HOSTEX_TOKEN` from `~/.hermes/.env`
+agent also holds `terminal` and can read `HOSTEX_TOKEN` from `/var/lib/hermes/.env`
 and call the REST API directly. Treat it as ergonomics and blast-radius
 reduction, not as a security boundary (#46).
 
@@ -719,7 +725,7 @@ same as being unable to; see below.
 - No quiet hours. A 3am message texts the group like any other; Do Not
   Disturb knows when the owners are asleep and this code does not.
 
-State is one file, `~/.hermes/hostex-poll-cursor.json` — conversation id to
+State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id to
 last announced timestamp, deliberately separate from the nightly pipeline's
 watermark. Guest text is never persisted. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
@@ -796,7 +802,7 @@ a job created before the delivery mirror has no `origin` — which is what scope
 the mirror, so its drafts never reach the session that approves them. Nothing in
 a redeploy changes either: the enable script refuses to run while a job exists,
 so restoring config and recreating the container leaves the old job in place.
-One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `~/.hermes/.env`,
+One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `/var/lib/hermes/.env`,
 restart the gateway, then follow the recreate recipe below. Read the delivery
 target back afterwards; it is the one thing the enable script cannot confirm.
 
@@ -1342,7 +1348,7 @@ it cannot touch a real device. So unlike Hostex, this is a first-party stdio
 server (`mcp-seam/server.py`, a thin wrapper over the official `seam` SDK),
 bind-mounted into the data volume and launched by Hermes with `uv`.
 
-`SEAM_API_KEY` goes in `~/.hermes/.env`. Generate it in the Seam Console
+`SEAM_API_KEY` goes in `/var/lib/hermes/.env`. Generate it in the Seam Console
 (Settings → API Keys); it is scoped to one workspace, so make sure the
 workspace is the one your locks are connected to.
 
@@ -1355,7 +1361,7 @@ runs on your host against a faked Seam client, not in the container against
 the real API, so both commands below matter and neither substitutes for the
 other.
 
-`~/.hermes/config.yaml` and `~/.hermes/.env` are read at gateway start, so
+`/var/lib/hermes/config.yaml` and `/var/lib/hermes/.env` are read at gateway start, so
 after editing `runtime/config.yaml` apply it the way
 [applying a `runtime/` edit](#applying-a-runtime-edit) describes — then:
 
