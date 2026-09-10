@@ -7,15 +7,10 @@ description: Use to check the deployed Hermes container actually answers — "is
 
 Drive a real message through the container on `wakeup` and assert on what comes back.
 
-**Read the container's log stream, never a file under the old host home.**
-Since #39 the home is the `agent-home` volume, so a `logs/` directory left on
-the host is a leftover of the last agent-mgr boot: frozen, and still full of
-plausible-looking lines. A probe that greps it answers a question about a
-generation that ended, and it fails *quietly* — the file is present and
-parseable, so nothing tells you the answer is stale. `just logs hermes` is the live
-surface. The same applies to a host
-`gateway_state.json`, which records the platform states written by the last
-gateway to shut down cleanly, not the running one.
+**Read the container's log stream, never a host file.** `just logs hermes` is
+the live surface; a `logs/` directory or `gateway_state.json` left on the host
+is pre-#39 and frozen. `deploy-str-hermes` § the home explains which shape is
+live and how to check — one owner for that, since a second copy is what drifts.
 
 `just ps` showing `Up`, a green `just up`, and a `websocket subscribed` log line are all necessary and none of them are evidence. The container can be up with a model route that 401s, an MCP server missing from its config, or an expired credential — each invisible to process state, and each visible the moment you ask it something.
 

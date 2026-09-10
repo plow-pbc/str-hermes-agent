@@ -29,5 +29,7 @@ fi
 if docker exec "$CONTAINER" test -s "$BOOT_ENV" 2>/dev/null; then
   echo "home: bound — the gateway holds a home channel from its credential"
 else
-  echo "home: UNSET — plow-init published no home channel; re-mint the credential (README § Plow Chat)"
+  echo "home: UNSET — plow-init published no home channel. Re-mint with plow-pbc/plow-agents"
+  echo "      ('plow-agents mint <line-uid> --credential-file ~/.plow-credentials-str', then 'just restart')."
+  echo "      Not /sethome: without PLOW_HOME_CHANNEL the plugin does not load, so it cannot receive it."
 fi
