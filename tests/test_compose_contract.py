@@ -116,3 +116,18 @@ def test_the_agent_mgr_deploy_path_stays_deleted():
     compose.yml and fail every recipe on a variable nothing here exports."""
     survivors = [name for name in RETIRED if (ROOT / name).exists()]
     assert not survivors, f"agent-mgr deploy surface is back: {survivors}"
+
+
+def test_the_agent_uid_is_declared_so_it_can_write_the_vault():
+    """The vault is a host bind the agent WRITES -- the nightly ingests into it.
+
+    At the image's baked uid the gateway cannot: the vault is 775 and owned by
+    the host account. `s6-setuidgid` re-derives supplementary groups from the
+    account database, so compose's `group_add` never reaches the gateway; the
+    image's own stage2 hook names HERMES_UID as the supported way to match host
+    ownership, and refuses `--user` outright. Dropping these is silent -- the
+    boot is clean, the cron reports ok, and the vault simply stops changing.
+    """
+    for key in ("HERMES_UID", "HERMES_GID"):
+        assert COMPOSE["environment"].get(key), \
+            f"{key} is unset -- the agent cannot write the vault bind"

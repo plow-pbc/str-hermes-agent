@@ -27,6 +27,21 @@ services:
     environment:
       # Who this agent is in the agent index.
       AGENT_ID: str
+      # Match the host account, the way life-assistant-sam-descriptor does. The
+      # image remaps the hermes user to this uid at boot and chowns only the
+      # directories it writes -- deliberately not `chown -R`, so a bind's host
+      # ownership survives (upstream #19788). Its stage2 hook names this the
+      # supported alternative to `--user`, which it refuses outright.
+      #
+      # Load-bearing here in a way it is not for course-qa or life-assistant:
+      # str binds ~/hermes-vault, a host git checkout the agent must WRITE. At
+      # the image's baked 10000 the gateway cannot -- the vault is 775 and owned
+      # by the host account -- so the nightly wiki chain ingests into a directory
+      # it has no permission for. `s6-setuidgid` re-derives supplementary groups
+      # from the account database, so compose's `group_add` cannot reach the
+      # gateway and does not solve this; matching the uid is what does.
+      HERMES_UID: "1000"
+      HERMES_GID: "1000"
       # Every schedule in this repo is a Pacific wall-clock expression. The base
       # sets no timezone, and under UTC `0 3 * * *` fires at 8 PM Pacific --
       # peak guest messaging, the one window the nightly chain exists to avoid.
