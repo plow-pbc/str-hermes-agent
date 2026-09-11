@@ -76,6 +76,34 @@ auxiliary:
       model: gpt-5.5
       timeout: 300
 
+# A session that never ends carries its own past as instructions. This agent's
+# DM with the owner ran 42 days and 2,223 messages, and on 2026-09-11 it answered
+# "do you see the invoice from the cleaners?" by re-running a credential recipe
+# out of that history — the legacy chat-token env alias the base has stripped
+# since plow-hermes-agent#56 — and reported the resulting 401 to the owner as "my
+# Plow Chat API token is still unauthorized". Nothing was revoked: the
+# PLOW_AGENT_TOKEN plow-init publishes answered the same GET /v1/chats with 200
+# on that box, and the agent's own plow-chat-api-operations skill names it. Six
+# weeks of context outvoted the skill, and the owner was told their agent was
+# locked out of a route that was working.
+#
+# The image stopped auto-resetting by default in July 2026, so nothing bounded
+# how stale a recipe in context could get. A silent day would have: that DM had
+# been quiet for 44 hours when the question landed.
+#
+# `idle` rather than `daily` or `both`, because this key has no per-chat-type
+# form here — reset_by_type is read only from the legacy gateway.json — so one
+# policy governs the owners' group too. Deliveries carry draft ids now (#29), but
+# the wording an owner approves is the mirrored delivery sitting in that group
+# session, and a fixed 4am boundary would drop an overnight draft out of the
+# session that has to send it unchanged. A day of silence cannot land mid-draft.
+#
+# What a reset keeps is the durable half: memories/, persona.md, skills, and
+# session_search over the old transcript, which stays readable. What it drops is
+# verbatim context — where the dead recipe lived.
+session_reset:
+  mode: idle
+  idle_minutes: 1440
 group_sessions_per_user: false
 plugins:
   enabled:

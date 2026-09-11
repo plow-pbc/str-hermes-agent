@@ -47,6 +47,31 @@ def test_tracked_config_pins_the_model_route_uses_env_secrets_and_enables_plow()
     assert "PLOW_CHAT_TOKEN" not in config
 
 
+def test_the_tracked_config_bounds_how_stale_a_session_can_get():
+    """A session that never ends keeps August's recipes in front of September's
+    model. On 2026-09-11 a 42-day-old DM answered the owner by re-running a
+    credential recipe from its own history, using the env alias the base has
+    stripped since plow-hermes-agent#56, and reported the 401 as a token still
+    unauthorized — while the credential plow-init publishes answered the same
+    call 200 on that box.
+
+    Column 0 and the exact key names, for the reason group_sessions_per_user is
+    pinned below: the image reads this from the top level of this file or a
+    `gateway:` section, and a misspelt key is not an error. What a wrong name
+    leaves behind is the image's own default of "none" — the never-resets state
+    this key exists to leave — so it reads as configured while changing nothing.
+
+    `mode` is pinned to idle rather than merely present because daily and both
+    are the values that would cut the owners' group off mid-draft; reset_by_type,
+    which would scope this to DMs, is read only from the legacy gateway.json.
+    Text, not behaviour: proving a reset fires needs a live gateway and a day of
+    silence.
+    """
+    config = (ROOT / "runtime/config.yaml").read_text()
+    assert re.search(r"^session_reset:\n  mode: idle\n  idle_minutes: 1440$",
+                     config, re.MULTILINE)
+
+
 def test_every_first_party_mcp_server_is_in_the_restorable_config():
     """A backup that omits a shipped capability restores a lesser agent.
 
