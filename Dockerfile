@@ -69,7 +69,7 @@ RUN set -eu; \
 # plow-wiki commit whose `wiki` CLI runs on the owner's Mac, so the skill never
 # describes a CLI the Mac does not have. The CLI itself is not installed here:
 # the wiki is on the Mac, and the container reaches it only over the relay.
-ARG PLOW_WIKI_SHA=ad0625884916336f4e956518df09a9e2753c8df5
+ARG PLOW_WIKI_SHA=4dc157edef518c24dde2754588e7f7d4f8f8947c
 ADD https://raw.githubusercontent.com/plow-pbc/plow-wiki/${PLOW_WIKI_SHA}/skill.md /opt/hermes/skills/plow-wiki/SKILL.md
 RUN chmod -R a=rX,u+w /opt/hermes/skills/plow-wiki
 
