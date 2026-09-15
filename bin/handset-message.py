@@ -120,9 +120,12 @@ def main():
     # stderr passes through: a missing Messages automation approval is the most
     # likely failure here, and osascript names it. Capturing would leave the
     # operator a bare non-zero exit for the one symptom the skill triages on.
-    subprocess.run(
-        _applescript(LINE, f"{text}\n\n(Include {nonce} verbatim in your reply.)"),
-        check=True)
+    # No check=True: its CalledProcessError traceback prints the argv, and the argv
+    # carries the line. osascript's own stderr already names the failure.
+    sent = subprocess.run(
+        _applescript(LINE, f"{text}\n\n(Include {nonce} verbatim in your reply.)"))
+    if sent.returncode:
+        return sent.returncode
     # The line's tail only: this prints into terminals and agent transcripts, and
     # the tree already refuses to name a live line.
     print(f"sent to …{LINE[-3:]}, waiting for {nonce}", flush=True)
