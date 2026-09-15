@@ -77,39 +77,32 @@ def write(path: str, content: str) -> None:
     call("plow_write_file", {"path": path, "content": content})
 
 
-def _until(status: str, poll, deadline: float, what: str) -> dict:
-    result = poll()
+def run(argv: list[str], write_paths=(), network: bool = False, timeout: float = 600) -> tuple[int, str]:
+    """(exit code, output) of ARGV on the Mac.
+
+    A call Latch cannot finish inside WAIT_MS comes back `pending`, polled with
+    plow_get_result, or `running`, polled with plow_get_output. plow_get_result
+    wraps a ready result as {"status": "ready", "result": {...}}, which may itself
+    be running or already completed, so it is unwrapped before the status is read
+    again: the loop plow-say (plow-pbc/plow) follows.
+    """
+    deadline = time.monotonic() + timeout
+    what = " ".join(argv[:2])
+    result = call("plow_run_command", {
+        "argv": argv, "write_paths": list(write_paths), "network": network,
+        "wait_ms": WAIT_MS, "goal": f"str: {what}",
+    })
     while result.get("status") in ("pending", "running"):
         if time.monotonic() > deadline:
             raise RelayError(f"{what} still running at the deadline")
         time.sleep(POLL_S)
-        result = poll()
-    if result.get("status") != status:
-        raise RelayError(f"{what}: unexpected status {result.get('status')!r}")
-    return result
-
-
-def run(argv: list[str], write_paths=(), network: bool = False, timeout: float = 600) -> tuple[int, str]:
-    """(exit code, output) of ARGV on the Mac.
-
-    A call Latch cannot finish inside WAIT_MS comes back `pending`: its handle
-    resolves through plow_get_result to the command's own handle, whose output
-    plow_get_output reports once the command has exited.
-    """
-    deadline = time.monotonic() + timeout
-    what = " ".join(argv[:2])
-    first = call("plow_run_command", {
-        "argv": argv, "write_paths": list(write_paths), "network": network,
-        "wait_ms": WAIT_MS, "goal": f"str: {what}",
-    })
-    if first.get("status") == "pending":
-        started = _until("ready", lambda: call("plow_get_result", {"handle": first["handle"]}),
-                         deadline, what)
-        handle = started["result"]["handle"]
-        first = _until("completed", lambda: call("plow_get_output", {"handle": handle}), deadline, what)
-    elif first.get("status") != "completed":
-        raise RelayError(f"{what}: unexpected status {first.get('status')!r}")
-    return first["exit_code"], first["output"]
+        poll = "plow_get_result" if result["status"] == "pending" else "plow_get_output"
+        result = call(poll, {"handle": result["handle"]})
+        if result.get("status") == "ready":
+            result = result["result"]
+    if result.get("status") != "completed":
+        raise RelayError(f"{what} ended {result.get('status')!r}")
+    return result["exit_code"], result["output"]
 
 
 def main(argv: list[str] | None = None) -> int:

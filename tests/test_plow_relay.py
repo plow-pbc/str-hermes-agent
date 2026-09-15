@@ -87,13 +87,18 @@ RUNS = [
      {"plow_run_command": [_text({"exit_code": 1, "output": "people/x.md: missing required field: tags\n",
                                   "status": "completed"})]},
      1, "people/x.md: missing required field: tags\n", []),
-    ("pending, then resolved through the command's own handle",
+    ("pending, then ready wrapping a command still running",
      {"plow_run_command": [_text({"status": "pending", "handle": "OUTER", "retry_after_ms": 1000})],
       "plow_get_result": [_text({"status": "pending", "handle": "OUTER"}),
                           _text({"status": "ready", "result": {"handle": "INNER", "status": "running"}})],
-      "plow_get_output": [_text({"status": "running", "output": ""}),
+      "plow_get_output": [_text({"status": "running", "handle": "INNER", "output": ""}),
                           _text({"exit_code": 0, "output": "snapshot 62060f5\n", "status": "completed"})]},
      0, "snapshot 62060f5\n", ["INNER", "INNER"]),
+    ("pending, then ready wrapping a command already finished",
+     {"plow_run_command": [_text({"status": "pending", "handle": "OUTER"})],
+      "plow_get_result": [_text({"status": "ready", "result": {
+          "handle": "INNER", "exit_code": 0, "output": "wiki/index.md\n", "status": "completed"}})]},
+     0, "wiki/index.md\n", []),
 ]
 
 
