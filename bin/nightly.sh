@@ -76,6 +76,14 @@ checked() {
   esac
 }
 
+# Tonight's pages into the generated index and hub tables, then every citation on
+# them held against the manifest. The index comes first: provenance lists pages
+# from it, and a stale one cannot list a page written tonight.
+reconcile() {
+  checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki --wiki "$WIKI" index
+  checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
+}
+
 if ! "$BIN/hostex-raw" --vault "$VAULT"; then
   # Fetch failure leaves staging untouched and consistent — still report,
   # or the silence reads as death.
@@ -92,11 +100,9 @@ if ! "$BIN/ingest-all" "$VAULT" "$WIKI"; then
   # Stop, do not note-and-continue. Carrying on after a terminal ingest failure
   # reports a partially-ingested night as a normal one. But a failed turn can
   # have written a page and not its manifest record, which the next run would
-  # re-ingest into that page, so provenance runs first -- over a regenerated
-  # index, since the stale one cannot list a page written tonight.
+  # re-ingest into that page, so the notice says whether it did.
   echo "nightly: FAILED at ingest" >&2
-  checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki --wiki "$WIKI" index
-  checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
+  reconcile
   notify "Wiki nightly FAILED at ingest. No digest was generated. ${STATUS:-Every page it wrote has a manifest record.} See the cron log."
   exit 1
 fi
@@ -109,11 +115,8 @@ if find "$VAULT" -mindepth 2 -name '*.md' -not -path "$VAULT/_raw/*" | grep -q .
   note "ingest wrote pages into local staging instead of the wiki"
 fi
 
-# Hub operations tables and index.md are generated from page frontmatter, so
-# tonight's pages are listed before anything reads the index.
-checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki --wiki "$WIKI" index
+reconcile
 checked "wiki validation" "$RELAY" run -- wiki --wiki "$WIKI" validate
-checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
 # History lives beside the wiki on the Mac and is pushed off it: a compiled corpus
 # on one disk with no other copy is the exposure promote-vault was written to
 # close. `--push` scans what leaves for credentials, and refuses loudly when the
