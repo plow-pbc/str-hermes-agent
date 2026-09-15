@@ -483,8 +483,8 @@ the history read both go away.
 Something has to vouch for a room, and none of the usual things can: a Plow
 participant id is per-chat, so the pairing approval that authorizes you at home
 authorizes nobody in a new thread, and merely being *in* a room is not a choice
-you made — nothing gates `plow_start_group_message`, so an injected instruction
-can open a group with you in it. Sending a message there is a choice, and it is
+you made — nothing gates `plow_send_message` to a person, so an injected
+instruction can open a group with you in it. Sending a message there is a choice, and it is
 the one signal the model cannot manufacture. So a thread stays audible and
 untrusted — answered under the stay-quiet-unless-addressed policy, its members
 behind the normal pairing gate — until you say something in it. Then everyone in
@@ -521,7 +521,7 @@ instruction Hermes can act on; match what the group is called in iMessage. If
 two groups share a title, disambiguate here — the name has to be unique for
 `send_message` to resolve it to one chat.
 
-A thread Hermes starts itself, with `plow_start_group_message`, is not in that
+A thread Hermes opens itself, with `plow_send_message` to a person, is not in that
 list — it did not exist when the gateway read it. The adapter subscribes to it
 on the spot, so the thread answers immediately rather than on the next poll, and
 the tool result says which happened under `adoption`. A restart drops that
@@ -552,8 +552,10 @@ Invalid configuration prevents the Plow platform from starting; the gateway log
 names the entry it refused and why.
 
 Changing membership remains a manual Plow/operator task. Hermes can *start* a
-thread itself with `plow_start_group_message`, which is not idempotent — if the
-response is lost, list the chats and reconcile rather than retrying. Configuring a group lets its
+thread itself with `plow_send_message` to one or more handles, which lands in a
+group that includes you: an existing thread with those people is reused, else a
+new one is created. A lost response is not a retry — `plow_send_message` with
+`action=list` finds the thread to check. Configuring a group lets its
 current and future members ask this Hermes instance to use its configured tools,
 so list only trusted groups.
 
