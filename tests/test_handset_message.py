@@ -1,5 +1,6 @@
 import importlib.util
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -110,3 +111,18 @@ def test_the_thread_is_opened_read_only(seeded_db, monkeypatch):
                         lambda dsn, **kw: (opened.append(dsn), connect(dsn, **kw))[1])
     mod._rows(0)
     assert "mode=ro" in opened[0]
+
+
+@pytest.mark.parametrize(("send_status", "exit_code"), [(0, 0), (1, 1)],
+                         ids=["sent", "osascript refused"])
+def test_the_probe_never_prints_the_line(seeded_db, monkeypatch, capsys, send_status, exit_code):
+    """The output lands in terminals and agent transcripts, a failed send included."""
+    monkeypatch.setattr(mod.subprocess, "run",
+                        lambda argv, **kw: subprocess.CompletedProcess(argv, send_status))
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(mod, "_reply_after", lambda rows, nonce: f"PONG {nonce}")
+    monkeypatch.setattr(mod.sys, "argv", ["handset-message.py", "Reply with PONG"])
+    assert mod.main() == exit_code
+    captured = capsys.readouterr()
+    assert "+15551234567" not in captured.out + captured.err
+    assert ("sent to …567" in captured.out) is (send_status == 0)
