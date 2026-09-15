@@ -1207,9 +1207,17 @@ instead, where nothing is watching the clock:
 ```sh
 docker compose exec hermes hermes cron remove wiki-nightly
 AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
-  && docker compose exec -u hermes hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
+  && docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+       /command/s6-setuidgid hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
 ./scripts/enable-wiki-nightly.sh
 ```
+
+`s6-envdir` as root, then `s6-setuidgid hermes`: the chain's relay steps and its
+turns need the environment plow-init publishes, which only root can read, while
+the run itself must be the agent, or the raw cache it writes comes back
+root-owned. That is the order s6 starts the gateway in. A bare
+`exec -u hermes` has neither the relay nor the model credentials, so every step
+past fetch fails.
 
 Unregister first. Nothing excludes a 03:00 fire from landing inside a run that
 may take hours, and nothing stops the two from running at once — so they would
