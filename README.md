@@ -68,7 +68,7 @@ token and the ability to open doors.
 | Deployed checkout | `~/services/sams-str-hermes-agent` — **this is what actually runs** |
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
 | Persistent state | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes` |
-| Ingest staging | `~/hermes-vault` — the Hostex raw cache and the ingest manifest; outside every checkout, never a git repo |
+| Ingest staging | `~/hermes-vault` — the Hostex raw cache and the ingest manifest; outside every checkout, never a git repo (its history is `~/hermes-vault.git`, beside it) |
 | Operations wiki | `~/Plow/wiki` on the owner's Mac (mba), under `str/`, reached over the Latch relay |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
@@ -166,7 +166,10 @@ between the two; #46 records why the allowlist never was.
   review. The wiki is not in this checkout — str's pages live under `str/` in
   the owner's common plow-wiki at `~/Plow/wiki` on their Mac, which the nightly
   reaches over the Latch relay and snapshots with `wiki snapshot --push` behind
-  a credential scan. The wiki is stored as an Obsidian vault,
+  a credential scan. Ingest staging — the raw conversations and the manifest —
+  stays on `wakeup` in `~/hermes-vault`, which `scripts/promote-vault` commits
+  and pushes into the private `sams-str-vault` repo behind the same kind of
+  scan. The wiki is stored as an Obsidian vault,
   which is the "generated vault content" the `REVIEW.md` carve-outs are keyed
   on — one artifact, two names.
 
@@ -275,12 +278,13 @@ host. On a fresh host, run this as the account that will own the home volume:
 git clone https://github.com/plow-pbc/str-hermes-agent.git ~/services/sams-str-hermes-agent
 cd ~/services/sams-str-hermes-agent
 # Ingest staging: the Hostex raw cache and the manifest of what has been
-# distilled into the wiki. docker/cont-init.d/04-require-ingest-manifest.sh parks
-# the boot without a manifest, since staging without one re-ingests every
-# conversation into the wiki. Only a host whose wiki holds no str pages yet
-# starts from an empty one.
+# distilled into the wiki, cloned with its git dir kept outside the worktree — a
+# plain `git clone` here would put `.git` inside, reachable from the container
+# and reproducing #89. docker/cont-init.d/04-require-ingest-manifest.sh parks
+# the boot without the manifest, and again if `.git` is inside.
+git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
 mkdir -p ~/hermes-vault
-[ -s ~/hermes-vault/.manifest.json ] || echo '{"sources": {}}' > ~/hermes-vault/.manifest.json
+git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
 # The wiki is on the owner's Mac, not here: § Compiling the wiki nightly.
 # The Plow credential. `login` is once per host and texts a code back; `mint`
 # is per agent and writes the file compose binds at
@@ -953,9 +957,9 @@ fetch — no LLM, no page writing.
 ```
 
 `_raw/` is gitignored in this checkout, which holds none of it — staging lives
-outside this repo, in `~/hermes-vault`. It is not backed up: every conversation
-in it is re-fetchable from Hostex, and the pages compiled from it are pushed off
-the Mac by the nightly snapshot.
+outside this repo, in `~/hermes-vault`, where `_raw/` and the manifest are
+tracked, and `scripts/promote-vault` pushes them into the private
+`sams-str-vault` repo, verbatim guest conversations included.
 
 **It keeps no progress state.** Each raw file records the `last_message_at` it
 was built from, and a conversation is re-fetched when the listing disagrees with
@@ -965,9 +969,9 @@ from the tree is the entire recovery procedure**. There is no watermark to reset
 
 Removing a raw file is safe against loss while the API still has the
 conversation — it is re-fetched. In the one case where it does not, a
-conversation whose messages the API has stopped returning, copy it somewhere
-durable before removing it from `_raw/` (the pre-migration `sams-str-vault` repo
-tracks `_raw/`, and a hand commit there still works).
+conversation whose messages the API has stopped returning, commit it into
+`sams-str-vault` before removing it from `_raw/`: that repo tracks `_raw/` by
+design, so the commit survives even after the working copy is un-cached.
 Removing it from `_raw/` is also what un-caches it, since the cache index
 walks the whole tree. The fatal message names which conversations lost text.
 
@@ -1062,6 +1066,21 @@ one disk is how 22 days of guest knowledge once sat unpushed.
 
 Every step after ingest is note-and-continue, and a relay that could not reach
 the Mac is noted apart from a check that failed.
+
+**Staging is promoted from the host.** The raw cache and the manifest never
+cross the relay, so a **host-side** step, `scripts/promote-vault`, commits
+`~/hermes-vault` into the private `sams-str-vault` repo and pushes it, scheduled
+after the nightly window:
+
+```sh
+30 4 * * * cd ~/services/sams-str-hermes-agent && ./scripts/promote-vault >> ~/.promote-vault.log 2>&1
+```
+
+It is idempotent and quiet, refuses a `.git` inside the worktree, a new
+top-level path, and anything shaped like an API credential. Without it the
+manifest is on one disk, and losing it re-ingests every conversation into the
+wiki. The raw cache is the only copy of a conversation the API has stopped
+returning.
 
 ```sh
 docker compose exec hermes date                      # must print PDT/PST, not UTC
@@ -1200,8 +1219,8 @@ this a mechanism rather than three lines an operator has to remember.
 
 The same script the scheduler runs — the 3600s ceiling is a `hermes cron`
 property, not the script's, so running it directly is the identical chain with
-nothing watching the clock. It snapshots and pushes at its end like any
-scheduled night.
+nothing watching the clock. It snapshots and pushes the wiki at its end like
+any scheduled night, and the next `scripts/promote-vault` promotes staging.
 
 Its preconditions are not restated here. `nightly.sh` and `ingest-all` both
 abort with a message naming the path and what to do about it, and a
@@ -1255,8 +1274,10 @@ cleaner_access_code_ids = ["code-uuid-1"]  # Seam ids that count as "cleaner"
 cleaners_thread = "Cleaners"          # display name in PLOW_CHAT_GROUP_UIDS
 ```
 
-Staging is not backed up, so keep a copy of `ops.toml` somewhere durable; a
-hand commit into the pre-migration `sams-str-vault` repo still works.
+The first commit of `ops.toml` into `sams-str-vault` is by hand, same as any
+new top-level file there — after that, `scripts/promote-vault` carries edits to
+it; its untracked-top-level refusal only catches paths that have never been
+committed.
 
 ### Enabling it
 

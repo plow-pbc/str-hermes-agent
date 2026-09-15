@@ -15,7 +15,7 @@ Deploy merged `main` to the container that actually runs on `wakeup`.
 | State | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes`. There is no host path — a stale `/var/lib/hermes` from before the cutover may still exist and is NOT what the agent reads |
 
 This is the **redeploy** path: an existing host, already bootstrapped. First-time
-setup of a host — credentials, creating ingest staging,
+setup of a host — credentials, cloning ingest staging,
 OAuth, Plow activation — is the README's `Bringing it up` section, and
 is not duplicated here.
 
@@ -268,34 +268,51 @@ The enabler echoes the job it made. Confirm `Deliver: plow_chat:cht_…`, and af
 the next run confirm the scheduler line `Job 'wiki-nightly': delivered to
 plow_chat:…`. Already `plow_chat:` — skip.
 
-## 4.7 Retire the host-side promote, and check the wiki push, once
+## 4.7 Register the host-side promote, once
 
-`scripts/promote-vault` is gone: the nightly's `wiki snapshot --push` commits
-and pushes the wiki from the owner's Mac. A host still carrying its cron line
-runs a script that no longer exists every morning.
+Ingest staging — the raw conversations and the manifest — never crosses the
+relay, and `~/hermes-vault.git` is not mounted into the container. Promoting it is
+a **host** cron entry, so nothing in steps 1–4 installs it, and a checkout that
+redeploys cleanly can still leave the manifest on one disk. That is how 22 days
+of compiled guest knowledge once went unpushed.
 
 ```sh
 crontab -l 2>/dev/null | grep promote-vault
 ```
 
-A line — remove it, keeping everything else, and read the result back:
+**Read the line, don't take a green word for it** — `grep -q` would pass a
+commented-out entry, or one pointing at a path this host does not have. What
+should come back is the README's line verbatim, uncommented, naming
+`~/services/sams-str-hermes-agent`.
+
+Nothing printed, or the wrong line — install it, keeping whatever else is in the
+crontab:
 
 ```sh
-crontab -l | grep -v promote-vault | crontab -
+{ crontab -l 2>/dev/null; \
+  echo '30 4 * * * cd ~/services/sams-str-hermes-agent && ./scripts/promote-vault >> ~/.promote-vault.log 2>&1'; \
+} | crontab -
 crontab -l | grep promote-vault
 ```
 
-Then confirm the push has somewhere to go, since a snapshot with no origin
-refuses every night. Through the relay, as root, because only root reads the
-container environment `plow_relay.py` needs:
+One line in, verbatim from README § [Nightly](../../../README.md). The `grep`
+after is the confirmation and it prints the line rather than a verdict, because
+`crontab -` exits 0 whether or not what you piped it landed.
+
+## 4.8 Check the wiki push has an origin, once
+
+The nightly's `wiki snapshot --push` pushes the wiki from the owner's Mac and
+refuses every night while the history repo there has no origin. Read it through
+the relay, as root, because only root reads the container environment
+`plow_relay.py` needs:
 
 ```sh
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
   /var/lib/hermes/scripts/plow_relay.py run -- git --git-dir ~/Plow/wiki.git remote get-url origin
 ```
 
-It prints the remote. `exit 2` is the relay failing to reach the Mac, anything
-else non-zero is a history repo with no origin: add one on the Mac.
+It prints the remote. `exit 2` is the relay failing to reach the Mac; anything
+else non-zero is a history repo with no origin, so add one on the Mac.
 
 ## 5. Verify
 
@@ -329,4 +346,4 @@ verified once it does.
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
 | Files in the home volume owned by an account the agent does not run as | the home was migrated off a bind mount, where it carried the host account's ids | `compose.yml` sets `HERMES_UID`/`HERMES_GID`, so the agent runs as the host account's ids -- **read them off `compose.yml` rather than trusting this row**, which is how it went stale the last time they changed. Re-own from inside — **pruning ingest staging**, which is a host bind owned by the host account: `docker compose exec -u root hermes find /var/lib/hermes -path /var/lib/hermes/repo/vault -prune -o -exec chown "$(id -u)":"$(id -g)" {} +`, then `just restart`. `-prune`, not `chown -R` and not `find -xdev`: the bind shares a device with the volume (`stat -c %D` reports `10302` for both), so `-xdev` crosses it and a bare `-R` re-owns every staging file out from under the host account |
 | Agent ignores the home chat | plow-init published no `PLOW_HOME_CHANNEL` | `./scripts/check-home-binding.sh` — it prints the verdict and the remedy, and owns both |
-| boot parks on `has no ingest manifest` / `ingest staging must not be a git repository` | `~/hermes-vault` absent, empty, or holding a `.git` — first bring-up on this host, or it was moved/deleted | restore the manifest from wherever staging went; only a host whose wiki holds no str pages yet may start from `{"sources": {}}` (README § Bringing it up), since an empty manifest re-ingests every conversation. `docker/cont-init.d/04-require-ingest-manifest.sh` is what refuses |
+| boot parks on `has no ingest manifest` / `ingest staging must not be a git repository` | `~/hermes-vault` absent, empty, or holding a `.git` — first bring-up on this host, or it was moved/deleted | clone it per README § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the worktree (#89) — then re-run step 4. Never hand it an empty manifest: that re-ingests every conversation into the wiki. `docker/cont-init.d/04-require-ingest-manifest.sh` is what refuses |
