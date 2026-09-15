@@ -46,6 +46,15 @@ services:
       # sets no timezone, and under UTC `0 3 * * *` fires at 8 PM Pacific --
       # peak guest messaging, the one window the nightly chain exists to avoid.
       TZ: America/Los_Angeles
+      # Wiki recall (hermes-plugin-plow#176): the plugin registers its hook only
+      # with both of these set. The embedder is wakeup's Ollama, tailnet-only,
+      # by IP because the container resolves the bare hostname to loopback;
+      # plow-pbc/plow#1938 replaces it with the Bedrock broker.
+      PLOW_WIKI_EMBED_URL: http://100.117.41.64:11434
+      # Recall ranks chunks from `shared` roots plus this writer's own. Unset,
+      # str would recall the owner's shared pages but never str/operations or
+      # str/properties -- the facts a guest question is about (#73).
+      WIKI_WRITER: str
     volumes:
       # `.host`, not the path the agent reads: a bind carries this machine's
       # ownership in, and a root cont-init step in the image copies the file
