@@ -247,7 +247,7 @@ def test_the_draft_reaches_the_session_that_approves_it():
     # it (contract-drift finding, PR #3). These pins hold the owner's copy;
     # the reference pins live beside each consumer's other clauses.
     soul_src = " ".join((ROOT / "runtime/persona.md").read_text().split())
-    assert "verbatim from an unmarked vault" in soul_src
+    assert "verbatim from an unmarked wiki" in soul_src
     assert "commits the owners to nothing" in soul_src
     assert "SOUL.md veto-window test" in flowed
 
