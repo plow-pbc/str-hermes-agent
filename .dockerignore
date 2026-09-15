@@ -1,7 +1,6 @@
 # Allowlist, because the build context is the whole repo and the repo holds
 # verbatim guest conversations. `_raw/` carries names, phone numbers and
-# arrival dates; `.e2e-vault/` is a full copy of the same after a test run.
-# Both are gitignored, which keeps them out of history but not out of a build
+# arrival dates. It is gitignored, which keeps it out of history but not out of a build
 # context — every `docker compose build` would otherwise hand the daemon the
 # lot, and any later `COPY .` would bake it into a layer.
 #
@@ -11,11 +10,10 @@
 # by being named here.
 *
 !Dockerfile
-!docker/cont-init.d/04-require-vault-corpus.sh
+!docker/cont-init.d/04-require-ingest-manifest.sh
 !docker/cont-init.d/05-install-agent-payload.sh
 !runtime/persona.md
 !runtime/config.yaml
-!runtime/vault-seed
 !agent-skills/productivity/property-guest-messaging
 !bin
 !mcp-seam

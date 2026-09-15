@@ -44,14 +44,6 @@ REPO = Path(__file__).resolve().parents[1]
         # Written at the repo root by the README's bootstrap, for Compose.
         (".env", True),
         ("auth.json", True),
-        # Created in-tree by `just test-wiki`, every run, and holding a full
-        # copy of the staged conversations.
-        (".e2e-vault/_raw/hostex/0-1.md", True),
-        # Vault seed config — path, categories, page limits. No credentials,
-        # and the deploy installs it into the runtime vault. It is named `.env`
-        # only because that is how the obsidian-wiki tools find it, which puts
-        # it under the rule above; a negation carves it back out.
-        ("runtime/vault-seed/.env", False),
         # The `.env.*` half of the secrets block, which had no row either.
         (".env.local", True),
     ],

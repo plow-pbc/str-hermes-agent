@@ -15,7 +15,7 @@ Deploy merged `main` to the container that actually runs on `wakeup`.
 | State | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes`. There is no host path — a stale `/var/lib/hermes` from before the cutover may still exist and is NOT what the agent reads |
 
 This is the **redeploy** path: an existing host, already bootstrapped. First-time
-setup of a host — credentials, cloning the vault,
+setup of a host — credentials, cloning ingest staging,
 OAuth, Plow activation — is the README's `Bringing it up` section, and
 is not duplicated here.
 
@@ -60,7 +60,7 @@ skill maps the host — rather than piping these through `ssh` inline.
 - **Pull `--ff-only`, on `main` only.** A non-fast-forward means prod diverged; stop and investigate.
 - **Never** force-push, `--no-verify`, `git stash`, `git reset --hard`, `git clean`, or `git checkout -- <path>`.
 - **Never print secret values.** `/var/lib/hermes/.env` holds the Hostex and Seam credentials and the Plow chat *configuration*; the Plow credential itself is `~/.plow-credentials-str`. Check presence or last 3 chars in either, never `cat` them.
-- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls the config from what the image bakes, and `plow-init` rewrites `SOUL.md` as the base persona followed by the image's `/opt/hermes/plow-seed/persona.md`, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs under `properties/` are the vault's own: edit their prose there, it survives. One carve-out: a hub's `## Operations` list survives nowhere — `bin/build-hubs` regenerates it from the vault's own pages on every nightly. Rename the page, don't edit the link. The vault seed no longer overlays into the vault at all ([#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)): the live `AGENTS.md` and `.env` belong to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the home binding is not in it at all — that is `PLOW_HOME_CHANNEL`, from the credential — so a rebuild cannot unbind the home chat.
+- **Every boot replaces `/var/lib/hermes/config.yaml` and `SOUL.md` wholesale** — `docker/cont-init.d/05-install-agent-payload.sh` reinstalls the config from what the image bakes, and `plow-init` rewrites `SOUL.md` as the base persona followed by the image's `/opt/hermes/plow-seed/persona.md`, so a host-side edit to either is lost at the next boot; edit `runtime/` and rebuild. The property hubs live in the owner's wiki on their Mac, under `str/properties/`: edit their prose there, it survives. One carve-out: a hub's `## Operations` table survives nowhere — `wiki index` regenerates it from the operations pages whose `property:` links that hub. Retarget the page's `property:`, don't edit the table. str's extraction contract is `str/AGENTS.md` in that wiki; staging's `.env` belongs to the vault repo. What no boot touches is `/var/lib/hermes/.env`: the home binding is not in it at all — that is `PLOW_HOME_CHANNEL`, from the credential — so a rebuild cannot unbind the home chat.
 
 ## 1. Confirm the checkout is deployable
 
@@ -171,11 +171,12 @@ old `--force-recreate` note below guards against, one layer earlier.
 
 `runtime/config.yaml` is canonical for what this repo owns — the Hostex allowlist and the Seam server. The model route is not in it: the base image's `plow-init` writes `model`/`providers` into the live config from its seed at every boot, so a route problem is diagnosed in `/var/lib/hermes/config.yaml` and the container's boot log, never repaired in the tracked file. Editing the live copy for anything else is how the two drift, and the next boot silently wins.
 
-The vault is no longer this step's business either. `agent-mgr deploy` used to run
-`scripts/restore-runtime-config.sh`, which refused without a vault at
-`~/hermes-vault`; `docker/cont-init.d/04-require-vault-corpus.sh` enforces the
-same rule at boot instead. A boot check is strictly better: it runs every time
-rather than only on deploy, and it parks rather than coming up wrong.
+Ingest staging is not this step's business either:
+`docker/cont-init.d/04-require-ingest-manifest.sh` refuses at boot when
+`~/hermes-vault` has no manifest, which is strictly better than a deploy check —
+it runs every time, and it parks rather than coming up wrong. The wiki itself is
+on the owner's Mac and nothing here deploys it; README § Compiling the wiki
+nightly lists what the Mac needs.
 
 ## 4. Bring it up
 
@@ -190,7 +191,7 @@ left that can refuse. Reaching for `docker compose` here is the bypass the veto
 exists to prevent.
 
 **Stop if it refuses.** Force-recreating the container mid-ingest can land
-between a page write and its manifest entry, and the vault keeps the page — so
+between a page write and its manifest entry, and the wiki keeps the page — so
 the next run re-ingests that conversation and appends its facts a second time.
 Nothing reports it; the pages just quietly say things twice. Wait for the run to
 finish.
@@ -256,7 +257,7 @@ docker compose exec -T hermes hermes cron list
 ```
 
 `Deliver: local` under `wiki-nightly` means it predates the change. Recreate it —
-not while the 03:00 run is in flight, since the chain ingests into the vault:
+not while the 03:00 run is in flight, since the chain ingests into the wiki:
 
 ```sh
 docker compose exec -T hermes hermes cron remove wiki-nightly
@@ -269,12 +270,11 @@ plow_chat:…`. Already `plow_chat:` — skip.
 
 ## 4.7 Register the host-side promote, once
 
-`bin/nightly.sh` compiles the corpus inside the container and commits nothing —
-it cannot, since `~/hermes-vault.git` is not mounted there and the gateway holds
-no git credential. Promoting is a **host** cron entry, so nothing in steps 1–4
-installs it, and a checkout that redeploys cleanly can still leave every night's
-output on one disk. That is how 22 days of compiled guest knowledge went
-unpushed.
+Ingest staging — the raw conversations and the manifest — never crosses the
+relay, and `~/hermes-vault.git` is not mounted into the container. Promoting it is
+a **host** cron entry, so nothing in steps 1–4 installs it, and a checkout that
+redeploys cleanly can still leave the manifest on one disk. That is how 22 days
+of compiled guest knowledge once went unpushed.
 
 ```sh
 crontab -l 2>/dev/null | grep promote-vault
@@ -298,6 +298,21 @@ crontab -l | grep promote-vault
 One line in, verbatim from README § [Nightly](../../../README.md). The `grep`
 after is the confirmation and it prints the line rather than a verdict, because
 `crontab -` exits 0 whether or not what you piped it landed.
+
+## 4.8 Check the wiki push has an origin, once
+
+The nightly's `wiki snapshot --push` pushes the wiki from the owner's Mac and
+refuses every night while the history repo there has no origin. Read it through
+the relay, as root, because only root reads the container environment
+`plow_relay.py` needs:
+
+```sh
+docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+  /var/lib/hermes/scripts/plow_relay.py run -- git --git-dir ~/Plow/wiki.git remote get-url origin
+```
+
+It prints the remote. `exit 2` is the relay failing to reach the Mac; anything
+else non-zero is a history repo with no origin, so add one on the Mac.
 
 ## 5. Verify
 
@@ -329,6 +344,6 @@ verified once it does.
 | `mcp test seam` says not found | live config predates the Seam block, or step 3's script was missing | re-run steps 3 and 4; confirm `mcp_servers.seam` is in `runtime/config.yaml` |
 | Plow never connects | `PLOW_AGENT_TOKEN` missing from `~/.plow-credentials-str` — not the dotenv, which carries no Plow credential | check key presence only, never print values; if `ls /var/lib/hermes/plugins` is empty, re-run steps 3 and 4 — installing without the recreate leaves the plugin on disk and unloaded; if the credential itself is missing, re-mint it with `plow-pbc/plow-agents` — not README § Plow Chat activation, whose remedy cannot re-mint for an agent that already holds a line (plow-pbc/str-hermes-agent#31) |
 | `Restarting` loop, log names a `PLOW_CHAT_GROUP_UIDS` problem | a group entry in `/var/lib/hermes/.env` is malformed or collides | fix the entry the log names — entries are `<cht_ id>=<display name>`, README § Plow group chats; do **not** reactivate, the credentials are fine |
-| Files in the home volume owned by an account the agent does not run as | the home was migrated off a bind mount, where it carried the host account's ids | `compose.yml` sets `HERMES_UID`/`HERMES_GID`, so the agent runs as the host account's ids -- **read them off `compose.yml` rather than trusting this row**, which is how it went stale the last time they changed. Re-own from inside — **pruning the vault**, which is a host bind holding the operator's own checkout: `docker compose exec -u root hermes find /var/lib/hermes -path /var/lib/hermes/repo/vault -prune -o -exec chown "$(id -u)":"$(id -g)" {} +`, then `just restart`. `-prune`, not `chown -R` and not `find -xdev`: the bind shares a device with the volume (`stat -c %D` reports `10302` for both), so `-xdev` crosses it and a bare `-R` re-owns 316 vault files out from under the host account |
+| Files in the home volume owned by an account the agent does not run as | the home was migrated off a bind mount, where it carried the host account's ids | `compose.yml` sets `HERMES_UID`/`HERMES_GID`, so the agent runs as the host account's ids -- **read them off `compose.yml` rather than trusting this row**, which is how it went stale the last time they changed. Re-own from inside — **pruning ingest staging**, which is a host bind owned by the host account: `docker compose exec -u root hermes find /var/lib/hermes -path /var/lib/hermes/repo/vault -prune -o -exec chown "$(id -u)":"$(id -g)" {} +`, then `just restart`. `-prune`, not `chown -R` and not `find -xdev`: the bind shares a device with the volume (`stat -c %D` reports `10302` for both), so `-xdev` crosses it and a bare `-R` re-owns every staging file out from under the host account |
 | Agent ignores the home chat | plow-init published no `PLOW_HOME_CHANNEL` | `./scripts/check-home-binding.sh` — it prints the verdict and the remedy, and owns both |
-| boot parks on `vault has no index.md` / `vault/.git is inside the worktree` | `~/hermes-vault` absent, empty, or cloned the wrong way — first bring-up on this host, or it was moved/deleted | clone it per the README's § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the vault worktree (#89) — then re-run step 4. `docker/cont-init.d/04-require-vault-corpus.sh` is what refuses |
+| boot parks on `has no ingest manifest` / `ingest staging must not be a git repository` | `~/hermes-vault` absent, empty, or holding a `.git` — first bring-up on this host, or it was moved/deleted | clone it per README § Bringing it up — **not** a plain `git clone`, which puts `.git` inside the worktree (#89) — then re-run step 4. Never hand it an empty manifest: that re-ingests every conversation into the wiki. `docker/cont-init.d/04-require-ingest-manifest.sh` is what refuses |

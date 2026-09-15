@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Promote the nightly's output to the vault's remote.
+# Promote ingest staging to the vault repo's remote.
 #
-# Runs on the HOST, not in the container. bin/nightly.sh compiles the corpus and
-# commits nothing -- it cannot: ~/hermes-vault.git is not mounted into the
-# container and the gateway holds no git credential. So the promote is a
-# host-side step, scheduled after the nightly window.
+# Runs on the HOST, not in the container. The compiled pages live in the owner's
+# common wiki on their Mac, and the nightly's `wiki snapshot --push` pushes them
+# from there. What stays on this host is ingest staging: the Hostex raw cache,
+# which holds conversations the API can stop returning, and the manifest of what
+# has been distilled into the wiki. ~/hermes-vault.git is not mounted into the
+# container and the gateway holds no git credential, so this is a host-side step,
+# scheduled after the nightly window.
 #
-# Without it the corpus is the product of a nightly chain that leaves its only
-# copy on one disk. Measured 2026-08-26: 18 pages rewritten and 6 new ones since
-# the 2026-08-04 commit -- 22 days of compiled guest knowledge, unpushed.
+# Without it staging is on one disk, and losing the manifest means the next
+# nightly re-ingests every conversation into the wiki.
 #
 #   scripts/promote-vault [vault-worktree]
 #
@@ -45,9 +47,8 @@ v() { git --git-dir="$git_dir" --work-tree="$vault" "$@"; }
 # A new file under a directory git already tracks is what a nightly produces. A
 # new TOP-LEVEL path is not: it is a human decision, or a tool writing somewhere
 # nobody expected, and staging it blind is how an unrelated tree lands in a repo.
-# .gitignore already excludes the two non-corpus entries (/AGENTS.md, /.env);
-# the property hubs are corpus now that the seed ships none, so anything
-# reaching here is genuinely new.
+# .gitignore already excludes /.env, and the pages that moved to the wiki leave
+# as tracked deletions, so anything reaching here is genuinely new.
 #
 # NUL-framed: git applies core.quotePath, so a path holding any non-ASCII byte
 # prints as "op\303\251rations/x.md" -- and the pages are LLM-authored from

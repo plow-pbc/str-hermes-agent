@@ -18,10 +18,18 @@ FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-9ceb52041aa5138e72bc5b96521d
 # Installed into its own venv rather than the system python: the base image is
 # PEP 668 externally-managed, and an isolated venv also keeps obsidian-wiki's
 # dependency graph from colliding with Hermes' own.
-ARG OBSIDIAN_WIKI_VERSION=2026.7.10
+#
+# The build runs inside Hermes' project directory, so uv applies its 14-day
+# `exclude-newer` quarantine (/opt/hermes/pyproject.toml) to this install too.
+# 2026.9.1 is the version plow-wiki requires and is younger than that, so the
+# exception is scoped to this one package and dated to its release, the way
+# upstream scopes its own. Every dependency stays quarantined.
+ARG OBSIDIAN_WIKI_VERSION=2026.9.1
 ENV WIKI_VENV=/opt/wiki-venv
 RUN uv venv "$WIKI_VENV" \
-    && uv pip install --python "$WIKI_VENV/bin/python" "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
+    && uv pip install --python "$WIKI_VENV/bin/python" \
+         --exclude-newer-package "obsidian-wiki=2026-09-13T00:00:00Z" \
+         "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
     && "$WIKI_VENV/bin/obsidian-wiki" --help > /dev/null
 ENV PATH="/opt/wiki-venv/bin:${PATH}"
 
@@ -55,6 +63,15 @@ RUN set -eu; \
       cp -R "$src/$skill" /opt/hermes/skills/"$skill"; \
     done; \
     chmod -R a=rX,u+w /opt/hermes/skills/wiki-*
+
+# plow-wiki's own skill: where the owner's wiki is, which roots this agent may
+# write, and that the obsidian-wiki skills above are the how. Fetched at the
+# plow-wiki commit whose `wiki` CLI runs on the owner's Mac, so the skill never
+# describes a CLI the Mac does not have. The CLI itself is not installed here:
+# the wiki is on the Mac, and the container reaches it only over the relay.
+ARG PLOW_WIKI_SHA=ad0625884916336f4e956518df09a9e2753c8df5
+ADD https://raw.githubusercontent.com/plow-pbc/plow-wiki/${PLOW_WIKI_SHA}/skill.md /opt/hermes/skills/plow-wiki/SKILL.md
+RUN chmod -R a=rX,u+w /opt/hermes/skills/plow-wiki
 
 # Identity: only what is specific to this agent. plow-init writes the home's
 # SOUL.md on every boot as the base persona followed by this file, so nothing
@@ -97,8 +114,8 @@ COPY agent-skills/productivity/property-guest-messaging/ /opt/hermes/skills/prod
 RUN chmod -R a=rX,u+w /opt/hermes/skills/productivity/property-guest-messaging
 
 # What the host used to hand in: compose.override.yml bind-mounted bin/ and
-# mcp-seam/ off the deploy clone, and the deploy hook copied the vault seed from
-# it. A published image has no deploy clone, so it carries them.
+# mcp-seam/ off the deploy clone. A published image has no deploy clone, so it
+# carries them.
 #
 # Root-owned under /opt/plow, the pattern life-assistant-hermes-agent uses for
 # the same reason: everything under $HERMES_HOME/skills belongs to the agent's
@@ -106,16 +123,14 @@ RUN chmod -R a=rX,u+w /opt/hermes/skills/productivity/property-guest-messaging
 # rewrite. These the agent can read and cannot change.
 COPY bin/ /opt/plow/str/bin/
 COPY mcp-seam/ /opt/plow/str/mcp-seam/
-COPY runtime/vault-seed/ /opt/plow/str/vault-seed/
 RUN chown -R root:root /opt/plow \
  && find /opt/plow -type d -exec chmod 0755 {} + \
  && find /opt/plow -type f -exec chmod 0644 {} + \
  && find /opt/plow/str/bin -type f -exec chmod 0755 {} +
 
-# The vault's corpus check, moved off the host. `docker compose up -d` creates a
-# missing bind source as an empty root-owned directory, so this is what stands
-# between a typo'd vault path and an agent that comes up looking healthy while
-# knowing nothing.
+# The ingest staging check. `docker compose up -d` creates a missing bind source
+# as an empty root-owned directory, so this is what stands between a typo'd
+# staging path and a nightly that re-ingests every conversation into the wiki.
 #
 # S6_BEHAVIOUR_IF_STAGE2_FAILS is what makes it a refusal rather than a note.
 # The base ships 1, at which a cont-init script exiting non-zero prints one
@@ -128,7 +143,7 @@ RUN chown -R root:root /opt/plow \
 # builder the build dies here, before pytest collects. Both scripts are tracked
 # 100755 so the executable bit travels; the chmod below normalises the rest,
 # which a plain COPY would otherwise take from the builder's umask.
-COPY docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
+COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-require-ingest-manifest.sh
 
 # The one image-to-home seam. Everything above is authoritative under /opt/plow
 # and unreachable from where its consumers look: hermes cron refuses a script
@@ -137,7 +152,7 @@ COPY docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-v
 # receives the image's SOUL or config at all. One script closes all three rather
 # than three copies of the payload closing one each.
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
-RUN chmod 0755 /etc/cont-init.d/04-require-vault-corpus.sh \
+RUN chmod 0755 /etc/cont-init.d/04-require-ingest-manifest.sh \
                /etc/cont-init.d/05-install-agent-payload.sh
 
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2

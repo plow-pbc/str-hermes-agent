@@ -34,10 +34,10 @@ services:
       # supported alternative to `--user`, which it refuses outright.
       #
       # Load-bearing here in a way it is not for course-qa or life-assistant:
-      # str binds ~/hermes-vault, a host git checkout the agent must WRITE. At
-      # the image's baked 10000 the gateway cannot -- the vault is 775 and owned
-      # by the host account -- so the nightly wiki chain ingests into a directory
-      # it has no permission for. `s6-setuidgid` re-derives supplementary groups
+      # str binds ~/hermes-vault, ingest staging the agent must WRITE. At the
+      # image's baked 10000 the gateway cannot -- it is 775 and owned by the host
+      # account -- so the nightly fetches into a directory it has no permission
+      # for. `s6-setuidgid` re-derives supplementary groups
       # from the account database, so compose's `group_add` cannot reach the
       # gateway and does not solve this; matching the uid is what does.
       HERMES_UID: "1000"
@@ -61,11 +61,11 @@ services:
       # empty. `down -v` is forbidden on this agent: the home is 2.5 GB of
       # conversation state, not a throwaway.
       - agent-home:/var/lib/hermes
-      # The vault: per-property operations including access codes, never baked
-      # into an image. Declared AFTER the home so the nested mount resolves to
+      # Ingest staging: verbatim guest conversations and the manifest of what
+      # the wiki has distilled from them, never baked into an image. Declared AFTER the home so the nested mount resolves to
       # this bind rather than to a path inside the volume -- docker resolves
       # nested mounts longest-path-first, and this ordering makes that explicit
-      # rather than inherited. Verify it by reading a vault file from inside the
+      # rather than inherited. Verify it by reading a staging file from inside the
       # container; `docker inspect` cannot tell you.
       - ${HOME}/hermes-vault:/var/lib/hermes/repo/vault
     # Hermes interrupts in-flight work on SIGTERM, then checkpoints the session
