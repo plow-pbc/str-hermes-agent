@@ -128,10 +128,9 @@ RUN chown -R root:root /opt/plow \
  && find /opt/plow -type f -exec chmod 0644 {} + \
  && find /opt/plow/str/bin -type f -exec chmod 0755 {} +
 
-# The vault's corpus check, moved off the host. `docker compose up -d` creates a
-# missing bind source as an empty root-owned directory, so this is what stands
-# between a typo'd vault path and an agent that comes up looking healthy while
-# knowing nothing.
+# The ingest staging check. `docker compose up -d` creates a missing bind source
+# as an empty root-owned directory, so this is what stands between a typo'd
+# staging path and a nightly that re-ingests every conversation into the wiki.
 #
 # S6_BEHAVIOUR_IF_STAGE2_FAILS is what makes it a refusal rather than a note.
 # The base ships 1, at which a cont-init script exiting non-zero prints one
@@ -144,7 +143,7 @@ RUN chown -R root:root /opt/plow \
 # builder the build dies here, before pytest collects. Both scripts are tracked
 # 100755 so the executable bit travels; the chmod below normalises the rest,
 # which a plain COPY would otherwise take from the builder's umask.
-COPY docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-vault-corpus.sh
+COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-require-ingest-manifest.sh
 
 # The one image-to-home seam. Everything above is authoritative under /opt/plow
 # and unreachable from where its consumers look: hermes cron refuses a script
@@ -153,7 +152,7 @@ COPY docker/cont-init.d/04-require-vault-corpus.sh /etc/cont-init.d/04-require-v
 # receives the image's SOUL or config at all. One script closes all three rather
 # than three copies of the payload closing one each.
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
-RUN chmod 0755 /etc/cont-init.d/04-require-vault-corpus.sh \
+RUN chmod 0755 /etc/cont-init.d/04-require-ingest-manifest.sh \
                /etc/cont-init.d/05-install-agent-payload.sh
 
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2

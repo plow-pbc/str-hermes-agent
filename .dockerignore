@@ -11,7 +11,7 @@
 # by being named here.
 *
 !Dockerfile
-!docker/cont-init.d/04-require-vault-corpus.sh
+!docker/cont-init.d/04-require-ingest-manifest.sh
 !docker/cont-init.d/05-install-agent-payload.sh
 !runtime/persona.md
 !runtime/config.yaml
