@@ -91,7 +91,7 @@ RUNS = [
      {"plow_run_command": [_text({"status": "pending", "handle": "OUTER", "retry_after_ms": 1000})],
       "plow_get_result": [_text({"status": "pending", "handle": "OUTER"}),
                           _text({"status": "ready", "result": {"handle": "INNER", "status": "running"}})],
-      "plow_get_output": [_text({"status": "running", "handle": "INNER", "output": ""}),
+      "plow_get_output": [_text({"status": "running", "output": "", "output_length": 0}),
                           _text({"exit_code": 0, "output": "snapshot 62060f5\n", "status": "completed"})]},
      0, "snapshot 62060f5\n", ["INNER", "INNER"]),
     ("pending, then ready wrapping a command already finished",
@@ -99,6 +99,13 @@ RUNS = [
       "plow_get_result": [_text({"status": "ready", "result": {
           "handle": "INNER", "exit_code": 0, "output": "wiki/index.md\n", "status": "completed"}})]},
      0, "wiki/index.md\n", []),
+    # The shape measured 2026-09-15: running with a handle, then plow_get_output
+    # answering running with none, before the command completes.
+    ("running, polled by the handle the first answer carried",
+     {"plow_run_command": [_text({"status": "running", "handle": "H", "output": "", "output_length": 0})],
+      "plow_get_output": [_text({"status": "running", "output": "", "output_length": 0}),
+                          _text({"exit_code": 0, "output": "snapshot 6fe1097\n", "status": "completed"})]},
+     0, "snapshot 6fe1097\n", ["H", "H"]),
 ]
 
 
