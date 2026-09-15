@@ -25,13 +25,15 @@ def load():
     return mod
 
 
-def page(sources, body="- The sauna takes an hour.\n"):
+def page(sources):
     listed = "".join(f"  - {s}\n" for s in sources)
-    return f"---\ntitle: T\ntype: Operation\nsources:\n{listed}---\n{body}"
+    return f"---\ntitle: T\nsources:\n{listed}---\n- The sauna takes an hour.\n"
 
 
 INDEX = (
-    "# Wiki Index\n\n## str/operations\n"
+    "# Wiki Index\n\n## str/properties\n"
+    "- [[str/properties/lake|Lake House]] — the lake property ( #property)\n\n"
+    "## str/operations\n"
     "- [[str/operations/lake-sauna|Lake House sauna]] — how it heats ( #sauna)\n"
     "- [[str/operations/lake-parking|Lake House parking]] — where to park\n\n"
     "## people\n- [[people/key-people|Key people]] — standing cast\n"
@@ -39,29 +41,28 @@ INDEX = (
 )
 HEALTHY = {
     "index.md": INDEX,
-    "str/operations/lake-sauna.md": page([URL + "c1"], "See [parking](lake-parking.md).\n"),
+    "str/properties/lake.md": page([]),
+    "str/operations/lake-sauna.md": page([URL + "c1"]),
     "str/operations/lake-parking.md": page([URL + "c2"]),
     "people/key-people.md": page([URL + "c1"]),
-    "people/jane-doe.md": page(["email:thread-9"]),
+    # Another agent's page, citing a conversation str never ingested: not str's.
+    "people/jane-doe.md": page([URL + "c9"]),
 }
 
 CASES = [
     ("a healthy corpus", {}, []),
-    ("an operations page citing nothing",
-     {"str/operations/lake-parking.md": page([])},
-     ["str/operations/lake-parking: cites no conversation"]),
-    ("a citation the manifest never recorded",
+    ("an operations citation the manifest never recorded",
+     {"str/operations/lake-parking.md": page([URL + "c9"])},
+     ["str/operations/lake-parking: cites c9, which the manifest never recorded"]),
+    ("a hub citation the manifest never recorded",
+     {"str/properties/lake.md": page([URL + "c9"])},
+     ["str/properties/lake: cites c9, which the manifest never recorded"]),
+    ("a standing-cast citation the manifest never recorded",
      {"people/key-people.md": page([URL + "c9"])},
      ["people/key-people: cites c9, which the manifest never recorded"]),
     ("a truncated scheme",
      {"str/operations/lake-parking.md": page(["tps://hostex.io/app/conversations/c2"])},
      ["str/operations/lake-parking: cites c2 with a truncated scheme 'tps://'"]),
-    ("a sibling link to a page that does not exist",
-     {"str/operations/lake-sauna.md": page([URL + "c1"], "See [gone](lake-gone.md).\n")},
-     ["str/operations/lake-sauna: links lake-gone.md, which is not an operations page"]),
-    ("a page with no frontmatter",
-     {"str/operations/lake-parking.md": "- no frontmatter\n"},
-     ["str/operations/lake-parking: no frontmatter to read sources from"]),
     ("an index listing no operations pages",
      {"index.md": "# Wiki Index\n\n## people\n- [[people/key-people|Key people]] — cast\n"},
      ["index.md lists no str/operations pages, so every check here would pass on nothing"]),

@@ -1054,10 +1054,10 @@ What the Mac needs, once:
   pushes to
 
 `wiki index` generates `index.md` and each hub's `## Operations` table from page
-frontmatter. `wiki validate` owns the schema. `bin/wiki-provenance` holds every
-page's citations against the local manifest, since a cited conversation the
-manifest never recorded is one the next run re-ingests into a page that already
-holds its facts. `wiki snapshot --push` commits the wiki beside it and pushes off
+frontmatter. `wiki validate` owns the schema. `bin/wiki-provenance` holds the
+citations on str's pages (its two roots and `people/key-people.md`) against the
+local manifest, since a cited conversation the manifest never recorded is one
+the next run re-ingests into a page that already holds its facts. `wiki snapshot --push` commits the wiki beside it and pushes off
 the Mac, refusing anything shaped like an API credential. Door codes, lockbox
 codes and wifi passwords are the corpus and pass; a `ghp_…` or `sk-…` does not,
 because the pages are LLM-authored from raw guest threads. A snapshot with no
