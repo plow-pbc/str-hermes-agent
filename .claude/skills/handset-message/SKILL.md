@@ -10,10 +10,12 @@ reads the reply out of the Messages database.
 
 **This runs on the Mac, not on `wakeup`** — the opposite of every other skill in
 this repo. It needs Messages.app and `~/Library/Messages/chat.db`, neither of
-which exists on the server. From `wakeup` that is one hop:
+which exists on the server. From `wakeup` that is one hop, into the Mac's
+deployed clone (`~/services`, fast-forwarded first), never a dev slot under
+`~/Hacking`, whose branch and remote can be anything:
 
 ```sh
-ssh so@mbp 'cd ~/Hacking/str9 && HERMES_LINE=<the line Hermes answers on> ./bin/handset-message.py "Reply with PONG"'
+ssh so@mbp 'cd ~/services/sams-str-hermes-agent && git pull -q --ff-only && HERMES_LINE=<the line Hermes answers on> ./bin/handset-message.py "Reply with PONG"'
 ```
 
 **Verified over SSH**, which is the non-obvious part: AppleScript automation of
