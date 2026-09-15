@@ -44,9 +44,6 @@ REPO = Path(__file__).resolve().parents[1]
         # Written at the repo root by the README's bootstrap, for Compose.
         (".env", True),
         ("auth.json", True),
-        # Created in-tree by `just test-wiki`, every run, and holding a full
-        # copy of the staged conversations.
-        (".e2e-vault/_raw/hostex/0-1.md", True),
         # The `.env.*` half of the secrets block, which had no row either.
         (".env.local", True),
     ],

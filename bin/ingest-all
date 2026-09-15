@@ -58,8 +58,8 @@ else
   # already pins, plus a container spawn per run to consult it.
   CHOME=/var/lib/hermes
   CVAULT="$CHOME/repo/vault"
-  # --entrypoint bash, and therefore --user, for the reason test-wiki documents
-  # at length: without it the image's own entrypoint boots s6, s6 boots a
+  # --entrypoint bash, and therefore --user: without it the image's own
+  # entrypoint boots s6, s6 boots a
   # gateway, and this throwaway container joins the live agent's chat alongside
   # it — answering guests twice and, on exit, posting a shutdown notice into the
   # owners' channel. That shape ran here for months; agent-mgr now refuses

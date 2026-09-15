@@ -46,8 +46,8 @@ STATUS=""
 
 # Also to stderr, which is the cron log. $STATUS reaches one place — the digest
 # prompt — so a note was readable only by whoever read that message on the
-# night it went out; nothing outside the container, `just test-wiki` included,
-# could see that the run had noted anything at all.
+# night it went out; nothing outside the container could see that the run had
+# noted anything at all.
 note() { STATUS+="$1; "; echo "nightly: $1" >&2; }
 
 # Every abort reports by printing: the scheduler delivers this job's stdout, and

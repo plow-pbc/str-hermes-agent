@@ -27,9 +27,6 @@ channel_directory.json
 # elsewhere would otherwise be tracked.
 **/_raw/
 
-# Scratch vault the on-demand end-to-end run creates. It holds a full copy of
-# the verbatim conversations, so it is ignored for the same reason _raw/ is.
-.e2e-vault/
 
 # knightwatch materializes declared review siblings here during a review.
 .siblings/

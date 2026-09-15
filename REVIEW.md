@@ -54,15 +54,14 @@ operator.
 **Architectural commitments:**
 - Compose + the Plow base image (`plow-hermes-agent`, on the upstream
   `nousresearch/hermes-agent` image). No hand-rolled image beyond a thin
-  derived layer. All non-vault state in the home volume at `/var/lib/hermes`; the vault is `~/hermes-vault`, a host bind mounted in.
+  derived layer. All state in the home volume at `/var/lib/hermes`, except ingest staging (`~/hermes-vault`, a host bind) and the compiled wiki, which is the owner's plow-wiki on their Mac.
 - Shell + small Python scripts. No application server, no framework, no
   database.
 - Generated vault content is data, not engineered code — job output, not
-  reviewed as code. The vault is not in this checkout — the nightly writes its
-  pages to `~/hermes-vault`, and `scripts/promote-vault` commits and pushes
-  them into the private `sams-str-vault` repo on a host-side schedule, gated by
-  a credential scan rather than an operator read. None of it reaches this
-  repo's `main`.
+  reviewed as code. The wiki is not in this checkout — str's pages live under
+  `str/` in the owner's plow-wiki on their Mac, and the nightly's
+  `wiki snapshot --push` commits and pushes them behind a credential scan
+  rather than an operator read. None of it reaches this repo's `main`.
 
 **Update cadence:** Edit when the stage changes — first non-operator user, or a
 decision to actually harden the guest-text boundary. Otherwise static.

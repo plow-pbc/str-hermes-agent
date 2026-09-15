@@ -1,9 +1,9 @@
 # STR Hermes agent
 
 > [!IMPORTANT]
-> **This repo is code only.** The operations vault it compiles — guest
-> conversations, property access facts — lives in a separate private repo and
-> on the host, never here. Keep it that way: nothing under `runtime/` may name
+> **This repo is code only.** The operations wiki it compiles — property access
+> facts among them — lives in the owner's wiki on their Mac, and the guest
+> conversations it compiles from live on the host, never here. Keep it that way: nothing under `runtime/` may name
 > a real property, guest, or code.
 
 A [Hermes](https://howto.plow.co/hermes) agent — texted from iMessage — that
@@ -13,10 +13,10 @@ Raspberry Pi the upstream guide assumes.
 Uses the Plow base image (`plow-cloud-agents:base-<sha>`, built by
 [plow-hermes-agent](https://github.com/plow-pbc/plow-hermes-agent) on the
 official `nousresearch/hermes-agent` image) rather than a hand-rolled one: it
-adds `plow-init`, which asks Plow who this agent is at every boot. All state
-except the vault, which is a host bind; the home itself is a named volume mounted at `/var/lib/hermes`
-(the image's `HERMES_HOME`); the vault is `~/hermes-vault`, mounted in beside
-it. The image is stateless.
+adds `plow-init`, which asks Plow who this agent is at every boot. The home is a
+named volume mounted at `/var/lib/hermes` (the image's `HERMES_HOME`); ingest
+staging is `~/hermes-vault`, a host bind mounted in beside it; the compiled wiki
+is on the owner's Mac. The image is stateless.
 
 ## What this is for
 
@@ -38,7 +38,7 @@ The loop, end to end:
    and handyman have been saying in their group threads.
 4. It texts the draft to the **STR Owners** group over iMessage.
 5. Any owner approves, edits, or declines — a commitment-free draft grounded
-   verbatim in the vault instead announces a 30-minute veto window.
+   verbatim in the wiki instead announces a 30-minute veto window.
 6. **Nothing reaches the guest silently: an approval, or a veto window the
    owners let pass, is what sends.**
 
@@ -68,7 +68,8 @@ token and the ability to open doors.
 | Deployed checkout | `~/services/sams-str-hermes-agent` — **this is what actually runs** |
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
 | Persistent state | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes` |
-| Runtime vault | `~/hermes-vault` — outside every checkout, never a git repo |
+| Ingest staging | `~/hermes-vault` — the Hostex raw cache and the ingest manifest; outside every checkout, never a git repo |
+| Operations wiki | `~/Plow/wiki` on the owner's Mac (mba), under `str/`, reached over the Latch relay |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
 *scheduled* — the nightly wiki job, the message poller — must point at
@@ -86,10 +87,10 @@ not what the agent reads, and a check pointed at it reports on a dead home.
 | Capability | State |
 |---|---|
 | Read Hostex conversations | **Working** — Hostex hosted MCP, narrow tool allowlist (§ Hostex). Reactive: it reads when an owner asks. |
-| Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/lint/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the vault holding pages the manifest never recorded; #71 |
-| Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `$HERMES_HOME/repo/vault/index.md`, and a turn reads that to find the page it needs |
+| Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
+| Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `~/Plow/wiki/index.md`, and a turn reads that over the relay to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, vault-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Provisioned by the base image** — `plow-init` writes the `plow` MCP server from the agent's own Plow identity at every boot (§ Plow Latch) |
@@ -107,7 +108,7 @@ fact-check it against their own memory anyway.
 **2. Grounded drafting.** Landed: the wiki is reachable from the running
 gateway, and the agent has an operator persona that knows it manages these
 properties. Both arrive the same way — `SOUL.md` is the persona, which Hermes
-injects into every turn and which points at the vault's `index.md`, so
+injects into every turn and which points at the wiki's `index.md`, so
 "consult the wiki" is a standing instruction the agent carries rather than a
 step any one caller has to remember to add.
 
@@ -147,7 +148,7 @@ between the two; #46 records why the allowlist never was.
   original "per-message and explicit, no auto-send, no confidence threshold"
   decision (2026-08-31). Basis: a month of live corrections showed every
   owner edit targeted expectation-setting content, never commitment-free
-  wording, and the vault already defines the verified-fact class (an unmarked
+  wording, and the wiki already defines the verified-fact class (an unmarked
   bullet may be repeated to a guest verbatim). A draft whose facts are all
   verbatim unmarked-bullet quotes (or that has no facts) and that makes no
   commitment is announced to the owners' group — source bullets quoted — and
@@ -162,10 +163,10 @@ between the two; #46 records why the allowlist never was.
   The inbound poller is the deliberate exception: it runs before any agent
   turn exists, so it has no MCP client to call and speaks REST directly.
 - **Generated wiki content is data, not code.** It is job output, not code
-  review. The vault is not in this checkout — the nightly writes its pages to
-  `~/hermes-vault`, a plain directory with its own git history in the private
-  `sams-str-vault` repo, which `scripts/promote-vault` commits and pushes on a
-  host-side schedule behind a credential scan. The wiki is stored as an Obsidian vault,
+  review. The wiki is not in this checkout — str's pages live under `str/` in
+  the owner's common plow-wiki at `~/Plow/wiki` on their Mac, which the nightly
+  reaches over the Latch relay and snapshots with `wiki snapshot --push` behind
+  a credential scan. The wiki is stored as an Obsidian vault,
   which is the "generated vault content" the `REVIEW.md` carve-outs are keyed
   on — one artifact, two names.
 
@@ -182,12 +183,11 @@ between the two; #46 records why the allowlist never was.
 
 | Path | What |
 |---|---|
-| `compose.yml` | This agent's runtime surface: the image, the home volume, the vault bind, the timezone |
+| `compose.yml` | This agent's runtime surface: the image, the home volume, the ingest-staging bind, the timezone |
 | `bin/` | Scripts Hermes' scheduler runs. Baked to `/opt/plow/str/bin` and symlinked to `/var/lib/hermes/scripts` — root-owned, so a turn can read them and cannot rewrite them |
 | `mcp-seam/` | Seam lock-control MCP server. Baked to `/opt/plow/str/mcp-seam` and symlinked into the home the same way |
 | — | Phone-number activation is upstream's `create_plow_chat_curl.sh`; see § Private/home chat activation |
 | `runtime/` | Sanitized, restorable `config.yaml` — the declarative half of `/var/lib/hermes` — and `persona.md`, the half of the agent's identity this repo owns |
-| `runtime/vault-seed/` | The vault's hand-authored half — the schema (`AGENTS.md`) and its `.env`. Baked to `/opt/plow/str/vault-seed/` as the reference copy; the live files belong to the vault repo, which is the operator's git checkout, so apply an edit there (see [#43](https://github.com/plow-pbc/str-hermes-agent/issues/43)). The property hubs are the operator's and live in the runtime vault; each hub's `## Operations` list is not hand-authored: `bin/build-hubs` derives it from the pages that exist |
 | `.env.example` | The environment-key contract, with no values |
 | [`.claude/skills/deploy-str-hermes/`](.claude/skills/deploy-str-hermes/SKILL.md) | Redeploy to `wakeup` — reseat, deploy, force-recreate |
 | [`.claude/skills/smoke-str-hermes/`](.claude/skills/smoke-str-hermes/SKILL.md) | Prove the deployed container answers, and what that does not prove |
@@ -274,14 +274,14 @@ host. On a fresh host, run this as the account that will own the home volume:
 ```bash
 git clone https://github.com/plow-pbc/str-hermes-agent.git ~/services/sams-str-hermes-agent
 cd ~/services/sams-str-hermes-agent
-# The runtime vault, cloned outside the checkout with its own git dir kept
-# outside the worktree too — a plain `git clone` here would put `.git` inside
-# the vault, reachable from the container and reproducing #89.
-# docker/cont-init.d/04-require-vault-corpus.sh parks the boot without it, and
-# parks again if `.git` is inside: the clone form below is enforced, not advised.
-git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
+# Ingest staging: the Hostex raw cache and the manifest of what has been
+# distilled into the wiki. docker/cont-init.d/04-require-ingest-manifest.sh parks
+# the boot without a manifest, since staging without one re-ingests every
+# conversation into the wiki. Only a host whose wiki holds no str pages yet
+# starts from an empty one.
 mkdir -p ~/hermes-vault
-git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
+[ -s ~/hermes-vault/.manifest.json ] || echo '{"sources": {}}' > ~/hermes-vault/.manifest.json
+# The wiki is on the owner's Mac, not here: § Compiling the wiki nightly.
 # The Plow credential. `login` is once per host and texts a code back; `mint`
 # is per agent and writes the file compose binds at
 # /var/lib/plow/credentials.host. Nothing else is needed before the first boot:
@@ -353,14 +353,14 @@ on, so watch `docker compose logs -f hermes` until it lists its platforms.
 Nothing in that path touches `/var/lib/hermes/.env`, so the home target and both
 secrets survive.
 
-The vault index is deliberately **not** in the persona. The base image owns
+The wiki index is deliberately **not** in the persona. The base image owns
 `SOUL.md` outright: `plow-init` rewrites it from the two seed halves and chowns
 it `root:root` at `0644`, inside a home it owns and marks sticky, at every
 container start. Anything a nightly wrote into it is gone by the next boot, and
 pushing a nightly-changing corpus through that write takes root escalation and a
 schedule; naming the file does not. So the
-persona carries the path — `$HERMES_HOME/repo/vault/index.md` — and the nightly
-keeps that file current in the vault the agent already reads. Identity stays
+persona carries the path — `~/Plow/wiki/index.md` — and the nightly's
+`wiki index` keeps that file current in the wiki the agent already reads. Identity stays
 frozen, knowledge stays live.
 
 ## Before you write code here
@@ -889,7 +889,7 @@ trigger. In order:
    ```
 
    Skip any that `hermes cron list` does not show. Not while the 03:00 run is in
-   flight: the nightly chain ingests into the vault.
+   flight: the nightly chain ingests into the wiki.
 
 3. Read the delivery target back, which is the one thing the enable script
    cannot confirm — `cron create` echoes name, schedule and next run, not
@@ -952,10 +952,10 @@ fetch — no LLM, no page writing.
 ./bin/hostex-raw --vault ~/hermes-vault
 ```
 
-`_raw/` is gitignored in this checkout, which holds none of it — the vault
-itself lives outside this repo. In `~/hermes-vault`, `_raw/` and the rest of
-the corpus are tracked, and `scripts/promote-vault` pushes them into the
-private `sams-str-vault` repo, verbatim guest conversations included.
+`_raw/` is gitignored in this checkout, which holds none of it — staging lives
+outside this repo, in `~/hermes-vault`. It is not backed up: every conversation
+in it is re-fetchable from Hostex, and the pages compiled from it are pushed off
+the Mac by the nightly snapshot.
 
 **It keeps no progress state.** Each raw file records the `last_message_at` it
 was built from, and a conversation is re-fetched when the listing disagrees with
@@ -965,9 +965,9 @@ from the tree is the entire recovery procedure**. There is no watermark to reset
 
 Removing a raw file is safe against loss while the API still has the
 conversation — it is re-fetched. In the one case where it does not, a
-conversation whose messages the API has stopped returning, commit it into
-`sams-str-vault` before removing it from `_raw/`: that repo tracks `_raw/` by
-design, so the commit survives even after the working copy is un-cached.
+conversation whose messages the API has stopped returning, copy it somewhere
+durable before removing it from `_raw/` (the pre-migration `sams-str-vault` repo
+tracks `_raw/`, and a hand commit there still works).
 Removing it from `_raw/` is also what un-caches it, since the cache index
 walks the whole tree. The fatal message names which conversations lost text.
 
@@ -1028,29 +1028,40 @@ is unobserved, not harmless.
 ### Compiling the wiki nightly
 
 `bin/nightly.sh` is the whole chain — fetch, ingest to manifest coverage,
-lint, digest — and it runs inside the gateway container on Hermes' own
-scheduler. It commits nothing, and it cannot: `~/hermes-vault.git` is not
-mounted into the container and the gateway holds no git credential. Promoting
-the output is a **host-side** step, `scripts/promote-vault`, scheduled after the
-nightly window:
+`wiki index`, `wiki validate`, provenance, `wiki snapshot --push`, digest — and it
+runs inside the gateway container on Hermes' own scheduler.
 
-```sh
-30 4 * * * cd ~/services/sams-str-hermes-agent && ./scripts/promote-vault >> ~/.promote-vault.log 2>&1
-```
+**The wiki is the owner's common plow-wiki on their Mac.** str's pages live in
+`~/Plow/wiki` on mba under two roots it writes, `str/properties` (the hubs) and
+`str/operations`, with the standing cast in the shared `people/key-people.md`.
+Other agents share the same wiki. The container reaches it only over the Latch
+relay: the ingest and digest turns call `plow_read_file` / `plow_write_file`, and
+the `wiki` CLI steps go through `bin/plow_relay.py`, which runs the CLI on the
+Mac inside Latch's sandbox (writes need declared paths; a push declares network).
+What the Mac needs, once:
 
-It is idempotent and quiet — a night with nothing new exits 0 saying so — and it
-refuses three things rather than promoting through them: a `.git` inside the
-worktree (history lives outside it deliberately; an ingest turn once ran
-`git restore --source=HEAD` over pages it judged missing), a new **top-level**
-path the nightly does not write, and anything in tonight's output shaped like an
-API credential. Door codes, lockbox codes and wifi passwords are the corpus and
-pass; a `ghp_…` or `sk-…` does not, because the pages are LLM-authored from raw
-guest threads and a token pasted into one would otherwise be compiled into a
-page and pushed.
+- the `wiki` CLI at the commit the Dockerfile pins as `PLOW_WIKI_SHA`:
+  `uv tool install --force git+https://github.com/plow-pbc/plow-wiki@<sha>`
+- the wiki (`wiki init ~/Plow/wiki`), with `str/properties` and `str/operations`
+  declared in `wiki.toml` (writer `str`), their schemas under `_meta/schemas/str/`,
+  str's extraction contract at `str/AGENTS.md`, and the door-code owner exception
+  in the root `AGENTS.md`
+- an `origin` on the history repo beside it, `~/Plow/wiki.git`, which the nightly
+  pushes to
 
-Without this step the chain compiles the corpus and leaves its only copy on one
-disk. Measured 2026-08-26: 18 pages rewritten and 6 new ones since the
-2026-08-04 commit — 22 days of compiled guest knowledge, unpushed.
+`wiki index` generates `index.md` and each hub's `## Operations` table from page
+frontmatter. `wiki validate` owns the schema. `bin/wiki-provenance` holds every
+page's citations against the local manifest, since a cited conversation the
+manifest never recorded is one the next run re-ingests into a page that already
+holds its facts. `wiki snapshot --push` commits the wiki beside it and pushes off
+the Mac, refusing anything shaped like an API credential. Door codes, lockbox
+codes and wifi passwords are the corpus and pass; a `ghp_…` or `sk-…` does not,
+because the pages are LLM-authored from raw guest threads. A snapshot with no
+origin refuses loudly, and the refusal is in every digest: a compiled corpus on
+one disk is how 22 days of guest knowledge once sat unpushed.
+
+Every step after ingest is note-and-continue, and a relay that could not reach
+the Mac is noted apart from a check that failed.
 
 ```sh
 docker compose exec hermes date                      # must print PDT/PST, not UTC
@@ -1073,7 +1084,7 @@ The command here used to be a bare `cron create … --script nightly.sh`, which
 the CLI refuses — *"create requires either prompt or at least one skill"* — so
 following it created nothing while reading like it had. `--no-agent` says the
 script *is* the job, which is true: `nightly.sh` runs the whole chain. It also
-keeps the script's stdout, which carries vault content distilled from guest mail,
+keeps the script's stdout, which carries wiki content distilled from guest mail,
 out of an agent's instruction channel.
 
 The script does not deliver — the scheduler does, from that stdout, which is why
@@ -1096,18 +1107,16 @@ path into `/var/lib/hermes/repo/bin` is rejected at create time.
 
 It is not scheduled until you register it. A handoff that stops at "merged"
 leaves the chain inert while looking installed: the script is in the image's
-view of `/var/lib/hermes/scripts`, the vault is mounted, and nothing runs.
+view of `/var/lib/hermes/scripts`, staging is mounted, and nothing runs.
 
 The run needs both mounts. `bin/` arrives read-only at `/var/lib/hermes/scripts` so
 the scheduler will execute it and a turn processing guest text cannot rewrite
-it. `vault/` no longer exists in this repo. The runtime vault is `~/hermes-vault`
-on the host — a plain directory, never a git repository — mounted read-write at
-`/var/lib/hermes/repo/vault` because ingest rewrites pages and `hostex-raw` writes
-fetched conversations into it. Its history lives in the private `sams-str-vault`
-repo, whose git directory sits beside the worktree rather than inside it, and
-which `scripts/promote-vault` commits and pushes on a host-side schedule.
+it. Ingest staging is `~/hermes-vault` on the host — a plain directory, never a
+git repository — mounted read-write at `/var/lib/hermes/repo/vault` because
+`hostex-raw` writes fetched conversations into it and ingest records them in its
+manifest. No page is written there; the nightly notes one that is.
 
-The vault, and not the checkout around it. The checkout was mounted here once,
+Staging, and not the checkout around it. The checkout was mounted here once,
 and an ingest turn used the `.git` that came with it: finding pages missing
 from the working tree, it ran `git restore --source=HEAD` over them and then
 spent the round updating what it had restored (#89). The same mount also gave
@@ -1130,7 +1139,7 @@ should have hashed clean. Recorded in #71 rather than generalised here.
 **Check no nightly is mid-ingest before restarting the container.** Every
 container transition in this README kills whatever is running
 inside it, and a kill between a page write and its manifest entry leaves the
-vault holding a page nothing recorded — the next run re-ingests that
+wiki holding a page nothing recorded — the next run re-ingests that
 conversation and appends its facts a second time. Nothing reports it; the pages
 just quietly say things twice.
 
@@ -1150,7 +1159,7 @@ not see a table cell, a justfile recipe, or an imperative in prose. A hook the
 tool calls has no copies and no blind spots.
 
 That leaves a real, accepted window: deploy fetches the pinned plugin and
-rewrites the vault (`cp -a` over the seed, then `build-hubs`), so a 03:00 fire
+rewrites staging, so a 03:00 fire
 starting *during* deploy is not caught by a check that ran before it. Accepted
 rather than closed, because the nightly runs at one fixed hour and deploys are
 operator-driven — do not deploy at 03:00. The alternative is a gate inside the
@@ -1159,7 +1168,7 @@ agent-mgr, and that is the ownership inversion this migration removed.
 
 **Do not run that one on the scheduler.** A whole-corpus pass needs roughly
 three times the 3600s Hermes allows a job, and the kill lands mid-chain, leaving
-the vault holding pages the manifest never recorded. Nothing blocks the next
+the wiki holding pages the manifest never recorded. Nothing blocks the next
 night — the dirty-tree fence that used to is gone, along with the commit step it
 guarded — so the damage is quieter than an abort: re-running feeds those
 conversations again and appends their facts a second time. Run it directly
@@ -1191,15 +1200,11 @@ this a mechanism rather than three lines an operator has to remember.
 
 The same script the scheduler runs — the 3600s ceiling is a `hermes cron`
 property, not the script's, so running it directly is the identical chain with
-nothing watching the clock. It does not commit -- the next
-`scripts/promote-vault` promotes its output like any other night's, and the
-scheduled runs are incremental from there — a hand commit is fine, since the
-scan reads unsent history rather than the tree and picks one up as a patch. Do
-not `push` the vault by hand: that is the one path around the credential scan,
-which is the only thing standing between an LLM-authored page and the remote.
+nothing watching the clock. It snapshots and pushes at its end like any
+scheduled night.
 
 Its preconditions are not restated here. `nightly.sh` and `ingest-all` both
-abort with a message naming the vault path and what to do about it, and a
+abort with a message naming the path and what to do about it, and a
 paragraph re-describing those drifts out of sync the moment either changes.
 #71 tracks making the chain bound itself rather than relying on this note.
 
@@ -1232,7 +1237,7 @@ and nothing here can.
 ### `ops.toml`
 
 The durable model — which properties, which lock, which cleaner, which
-thread — is a hand-authored `ops.toml` at the top of the private vault:
+thread — is a hand-authored `ops.toml` at the top of ingest staging:
 `~/hermes-vault/ops.toml`, mounted into the container at
 `/var/lib/hermes/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
 YAML: the image ships no PyYAML and `tomllib` is stdlib.
@@ -1250,10 +1255,8 @@ cleaner_access_code_ids = ["code-uuid-1"]  # Seam ids that count as "cleaner"
 cleaners_thread = "Cleaners"          # display name in PLOW_CHAT_GROUP_UIDS
 ```
 
-The first commit of `ops.toml` into `sams-str-vault` is by hand, same as any
-new file there — after that, `scripts/promote-vault` carries edits to it like
-any other corpus page; its untracked-top-level refusal only catches paths that
-have never been committed.
+Staging is not backed up, so keep a copy of `ops.toml` somewhere durable; a
+hand commit into the pre-migration `sams-str-vault` repo still works.
 
 ### Enabling it
 
@@ -1266,7 +1269,7 @@ gives it. `ops.toml` is written. Then, on the deployed checkout:
 ./scripts/enable-checkin-watch.sh
 ```
 
-It refuses without `HERMES_HOME`, without an `ops.toml` in the vault, and if a
+It refuses without `HERMES_HOME`, without an `ops.toml` in staging, and if a
 `checkin-watch` job already exists. Read the job back:
 
 ```sh
