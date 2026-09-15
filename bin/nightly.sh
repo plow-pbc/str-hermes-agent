@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Nightly wiki chain. Runs INSIDE the container, invoked by `hermes cron`.
 #
-#   fetch → ingest → index → validate → provenance → snapshot → digest
+#   fetch → ingest → index → provenance → validate → snapshot → digest
 #
 # The wiki is the owner's common plow-wiki on their Mac (~/Plow/wiki), and str's
 # pages live under its str/ roots. The container reaches it only through the
