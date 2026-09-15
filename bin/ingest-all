@@ -257,7 +257,7 @@ while :; do
   # could rewrite a page the manifest never recorded — an unmanifested partial
   # that the next round then re-ingests, appending its facts twice.
   if [ "$rc" -ne 0 ]; then
-    echo "ingest-all: FATAL — the agent turn failed (rc=$rc) in round $round; see /tmp/ingest-round-$round.log. The wiki may hold a page this round wrote but did not record in the manifest — run \`bin/wiki-provenance $VAULT $WIKI\` before re-running, or the next run re-ingests it and appends its facts twice." >&2
+    echo "ingest-all: FATAL — the agent turn failed (rc=$rc) in round $round; see /tmp/ingest-round-$round.log. The wiki may hold a page this round wrote but did not record in the manifest; the nightly regenerates the index and runs wiki-provenance on the way out to name it. By hand: \`wiki index\`, then \`bin/wiki-provenance $VAULT $WIKI\`, before re-running, or the next run re-ingests it and appends its facts twice." >&2
     exit 1
   fi
 

@@ -28,7 +28,7 @@ def night(tmp_path):
     bin_dir.mkdir()
     shutil.copy(REPO / "bin" / "nightly.sh", bin_dir / "nightly.sh")
     _stub(bin_dir / "hostex-raw", 'exit "${FETCH_RC:-0}"')
-    _stub(bin_dir / "ingest-all", 'exit 0')
+    _stub(bin_dir / "ingest-all", 'exit "${INGEST_RC:-0}"')
     _stub(bin_dir / "wiki-provenance", 'exit "${PROVENANCE_RC:-0}"')
     _stub(bin_dir / "plow_relay.py",
           'case "$*" in *" index") exit "${INDEX_RC:-0}";; *" validate") exit "${VALIDATE_RC:-0}";;'
@@ -94,3 +94,19 @@ def test_a_failed_fetch_says_so_and_stops(night):
     assert result.returncode == 1
     assert "Wiki nightly FAILED at fetch" in result.stdout
     assert [c.split()[0] for c in calls] == ["hostex-raw"]
+
+
+def test_a_failed_ingest_names_any_page_it_left_unrecorded(night):
+    """A turn that wrote a page and then failed leaves a citation the manifest
+    never recorded. The index is regenerated first, or provenance reads one
+    that cannot list tonight's page."""
+    run, vault = night
+    result, calls = run(INGEST_RC=1, PROVENANCE_RC=1)
+    assert result.returncode == 1
+    assert "FAILED at ingest" in result.stdout
+    assert "provenance FAILED; see the cron log" in result.stdout
+    assert calls[1:] == [
+        f"ingest-all {vault} ~/Plow/wiki",
+        "plow_relay.py run --write ~/Plow/wiki -- wiki --wiki ~/Plow/wiki index",
+        f"wiki-provenance {vault} ~/Plow/wiki",
+    ]

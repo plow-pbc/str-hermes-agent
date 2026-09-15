@@ -90,9 +90,14 @@ fi
 # the manifest between rounds.
 if ! "$BIN/ingest-all" "$VAULT" "$WIKI"; then
   # Stop, do not note-and-continue. Carrying on after a terminal ingest failure
-  # reports a partially-ingested night as a normal one.
+  # reports a partially-ingested night as a normal one. But a failed turn can
+  # have written a page and not its manifest record, which the next run would
+  # re-ingest into that page, so provenance runs first -- over a regenerated
+  # index, since the stale one cannot list a page written tonight.
   echo "nightly: FAILED at ingest" >&2
-  notify "Wiki nightly FAILED at ingest. No digest was generated; the wiki is as the failed run left it. See the cron log."
+  checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki --wiki "$WIKI" index
+  checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
+  notify "Wiki nightly FAILED at ingest. No digest was generated. ${STATUS:-Every page it wrote has a manifest record.} See the cron log."
   exit 1
 fi
 
