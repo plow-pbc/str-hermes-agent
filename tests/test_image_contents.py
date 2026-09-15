@@ -42,9 +42,15 @@ IMAGE_CLAIMS = [
      *_present("/opt/hermes/skills/productivity/property-guest-messaging/SKILL.md")),
     ("the scheduler's scripts", *_present("/opt/plow/str/bin/nightly.sh")),
     ("the seam mcp server", *_present("/opt/plow/str/mcp-seam/server.py")),
-    ("the vault schema", *_present("/opt/plow/str/vault-seed/AGENTS.md")),
+    ("the relay client the nightly's wiki steps run through",
+     "test -x /opt/plow/str/bin/plow_relay.py && echo present || echo missing", "present"),
     *((f"wiki skill {name}", *_present(f"/opt/hermes/skills/{name}/SKILL.md"))
-      for name in ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest")),
+      for name in ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest", "plow-wiki")),
+    # plow-wiki requires it, and the manifest cache-check the ingest turn runs
+    # is this version's.
+    ("obsidian-wiki at the version plow-wiki requires",
+     "/opt/wiki-venv/bin/python -c 'import importlib.metadata as m; print(m.version(\"obsidian-wiki\"))'",
+     "2026.9.1"),
     # Not installed from the wheel; a second copy never reaches the agent.
     ("the theory skill, from the base",
      *_present("/opt/hermes/skills/research/llm-wiki/SKILL.md")),
