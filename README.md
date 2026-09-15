@@ -1065,7 +1065,18 @@ origin refuses loudly, and the refusal is in every digest: a compiled corpus on
 one disk is how 22 days of guest knowledge once sat unpushed.
 
 Every step after ingest is note-and-continue, and a relay that could not reach
-the Mac is noted apart from a check that failed.
+the Mac is noted apart from a check that failed. A failed ingest reconciles on
+its way out too: an ingest turn can write a page and fail before recording it,
+so the failure notice names any page the manifest never recorded. To reconcile
+by hand before re-running ingest — the CLI is on the Mac, so both go through the
+container, as root because only root reads the relay's environment:
+
+```sh
+docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+  /var/lib/hermes/scripts/plow_relay.py run --write '~/Plow/wiki' -- wiki --wiki '~/Plow/wiki' index
+docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+  /var/lib/hermes/scripts/wiki-provenance /var/lib/hermes/repo/vault '~/Plow/wiki'
+```
 
 **Staging is promoted from the host.** The raw cache and the manifest never
 cross the relay, so a **host-side** step, `scripts/promote-vault`, commits
