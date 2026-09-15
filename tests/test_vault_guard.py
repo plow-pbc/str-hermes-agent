@@ -23,7 +23,7 @@ import pytest
 IMAGE = "sams-str-hermes-agent:local"
 GUARD = "/etc/cont-init.d/04-require-ingest-manifest.sh"
 VAULT = "/tmp/scratch-home/repo/vault"
-MANIFEST = f"printf '{{\\"sources\\": {{}}}}\\n' > {VAULT}/.manifest.json"
+MANIFEST = f"""echo '{{"sources": {{}}}}' > {VAULT}/.manifest.json"""
 
 VAULT_SHAPES = [
     ("no staging directory at all", "", "no ingest manifest"),
