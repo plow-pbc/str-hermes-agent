@@ -111,3 +111,12 @@ def test_the_agent_uid_is_declared_so_it_can_write_the_vault():
     for key in ("HERMES_UID", "HERMES_GID"):
         assert COMPOSE["environment"].get(key), \
             f"{key} is unset -- the agent cannot write the vault bind"
+
+
+def test_wiki_recall_is_switched_on():
+    """The plugin registers its wiki-recall hook only with an embed URL set, and
+    ranks str's own roots only under its writer name. Dropping either is silent:
+    the gateway boots clean and drafts simply stop carrying operations facts.
+    """
+    assert COMPOSE["environment"].get("PLOW_WIKI_EMBED_URL", "").startswith("http")
+    assert COMPOSE["environment"].get("WIKI_WRITER") == "str"
