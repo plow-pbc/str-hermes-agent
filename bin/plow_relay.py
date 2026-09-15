@@ -84,7 +84,8 @@ def run(argv: list[str], write_paths=(), network: bool = False, timeout: float =
     plow_get_result, or `running`, polled with plow_get_output. plow_get_result
     wraps a ready result as {"status": "ready", "result": {...}}, which may itself
     be running or already completed, so it is unwrapped before the status is read
-    again: the loop plow-say (plow-pbc/plow) follows.
+    again: the loop plow-say (plow-pbc/plow) follows. A still-running
+    plow_get_output answer carries no handle, so the last one seen is kept.
     """
     deadline = time.monotonic() + timeout
     what = " ".join(argv[:2])
@@ -92,12 +93,14 @@ def run(argv: list[str], write_paths=(), network: bool = False, timeout: float =
         "argv": argv, "write_paths": list(write_paths), "network": network,
         "wait_ms": WAIT_MS, "goal": f"str: {what}",
     })
+    handle = None
     while result.get("status") in ("pending", "running"):
         if time.monotonic() > deadline:
             raise RelayError(f"{what} still running at the deadline")
         time.sleep(POLL_S)
+        handle = result.get("handle", handle)
         poll = "plow_get_result" if result["status"] == "pending" else "plow_get_output"
-        result = call(poll, {"handle": result["handle"]})
+        result = call(poll, {"handle": handle})
         if result.get("status") == "ready":
             result = result["result"]
     if result.get("status") != "completed":

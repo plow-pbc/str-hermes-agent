@@ -308,10 +308,11 @@ the relay, as root, because only root reads the container environment
 
 ```sh
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-  /var/lib/hermes/scripts/plow_relay.py run -- git --git-dir ~/Plow/wiki.git remote get-url origin
+  /var/lib/hermes/scripts/plow_relay.py run -- /bin/sh -c 'git --git-dir "$HOME/Plow/wiki.git" remote get-url origin'
 ```
 
-It prints the remote. `exit 2` is the relay failing to reach the Mac; anything
+Through `sh -c` because Latch runs a command without a shell: a bare
+`~/Plow/wiki.git` reaches git unexpanded. It prints the remote. `exit 2` is the relay failing to reach the Mac; anything
 else non-zero is a history repo with no origin, so add one on the Mac.
 
 ## 5. Verify
