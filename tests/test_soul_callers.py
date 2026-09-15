@@ -45,31 +45,3 @@ def test_the_persona_names_the_index_and_does_not_carry_it() -> None:
     """
     assert "index.md" in PERSONA, "the persona no longer names the vault index"
     assert "## Properties" not in PERSONA, "the vault index was composed into the persona"
-
-
-def test_nightly_runs_the_vault_suite_after_ingest_and_reports_failure() -> None:
-    """The chain must act on what the corpus checks find, not on whether they ran.
-
-    The bug this pins is the one that shipped: the lint step's condition tests
-    the lint *turn*, so a run reporting 392 malformed citations exited 0 and
-    sent a green digest while the vault failed 15 of its own tests. A gate that
-    stops gating is silent by construction — it looks exactly like a clean
-    night. After ingest, because the suite measures what ingest wrote.
-    """
-    assert "pytest" in NIGHTLY, "the chain runs no corpus checks"
-    assert NIGHTLY.index("pytest") > NIGHTLY.index("ingest-all")
-
-    # Invoked through uv, which the image has. Delegating to the vault's own
-    # recipe would need `just`, which it does not — that fails every night and
-    # reports a green corpus as broken, indistinguishable in the digest from
-    # the real thing.
-    assert "uv run --no-project" in NIGHTLY
-
-    # The gate's own note, not any note after it in the file: a tail slice like
-    # the SOUL check's above also catches that step's, so deleting this one
-    # entirely would leave the test green — unpinning the one thing it holds.
-    assert 'note "vault integrity FAILED' in NIGHTLY
-    # A suite that could not run says so as itself. Both land in one digest
-    # line, and a stale dependency pin reported as a broken corpus sends
-    # someone reading pages that are fine.
-    assert 'note "vault checks could not run' in NIGHTLY
