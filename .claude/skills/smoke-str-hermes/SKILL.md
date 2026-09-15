@@ -213,11 +213,7 @@ them with no conversion and still looks right.
 
 Steps 1–4 all run new processes or read logs. Run **`handset-message`**, which
 sends a genuine iMessage from the operator's Mac and reads the reply. From here that is
-one hop:
-
-```sh
-ssh so@mbp 'cd ~/Hacking/str9 && HERMES_LINE=<the line Hermes answers on> ./bin/handset-message.py "Reply with PONG"'
-```
+one hop into the Mac's `~/services` clone; that skill owns the exact command.
 
 A `REPLY:` line and exit 0 is the pass. Ask a tool question instead when the
 deploy touched a tool surface — see that skill, which owns the contract and the
