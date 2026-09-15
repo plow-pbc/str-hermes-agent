@@ -123,7 +123,9 @@ def main():
     subprocess.run(
         _applescript(LINE, f"{text}\n\n(Include {nonce} verbatim in your reply.)"),
         check=True)
-    print(f"sent to {LINE}, waiting for {nonce}", flush=True)
+    # The line's tail only: this prints into terminals and agent transcripts, and
+    # the tree already refuses to name a live line.
+    print(f"sent to …{LINE[-3:]}, waiting for {nonce}", flush=True)
     deadline = time.monotonic() + TIMEOUT
     while time.monotonic() < deadline:
         time.sleep(5)

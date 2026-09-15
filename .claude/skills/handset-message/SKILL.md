@@ -51,7 +51,7 @@ rc or the command line), never in this tree.
 Expect:
 
 ```text
-sent to +1555…567, waiting for 374c14ff
+sent to …567, waiting for 374c14ff
 REPLY: PONG 374c14ff
 ```
 

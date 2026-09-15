@@ -110,3 +110,15 @@ def test_the_thread_is_opened_read_only(seeded_db, monkeypatch):
                         lambda dsn, **kw: (opened.append(dsn), connect(dsn, **kw))[1])
     mod._rows(0)
     assert "mode=ro" in opened[0]
+
+
+def test_the_probe_names_the_line_by_its_tail_only(seeded_db, monkeypatch, capsys):
+    """The output lands in terminals and agent transcripts; the line never does."""
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(mod, "_reply_after", lambda rows, nonce: f"PONG {nonce}")
+    monkeypatch.setattr(mod.sys, "argv", ["handset-message.py", "Reply with PONG"])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "+15551234567" not in out
+    assert "sent to …567" in out
