@@ -10,14 +10,16 @@ a redirect.
 
   plow_relay.py read PATH                         the file's content on stdout
   plow_relay.py write PATH < CONTENT
-  plow_relay.py run [--write PATH]... -- ARGV...  the command's output; exits with its code
+  plow_relay.py run [--write PATH]... [--network] -- ARGV...
+                                                  the command's output; exits with its code
 
 Exit 2 means the relay could not answer: a transport failure, a refused tool
 call, or a command still running at the deadline. `wiki validate` exits 1 for
 invalid pages, so the two stay distinguishable.
 
-Latch sandboxes every command. A command that writes must name its write paths
-or the kernel refuses it (EPERM), and `~` is expanded on the Mac side.
+Latch sandboxes every command. A command that writes must name its write paths,
+and one that reaches the network must say so, or the kernel refuses it; `~` is
+expanded on the Mac side.
 """
 from __future__ import annotations
 
@@ -87,7 +89,7 @@ def _until(status: str, poll, deadline: float, what: str) -> dict:
     return result
 
 
-def run(argv: list[str], write_paths=(), timeout: float = 600) -> tuple[int, str]:
+def run(argv: list[str], write_paths=(), network: bool = False, timeout: float = 600) -> tuple[int, str]:
     """(exit code, output) of ARGV on the Mac.
 
     A call Latch cannot finish inside WAIT_MS comes back `pending`: its handle
@@ -97,7 +99,8 @@ def run(argv: list[str], write_paths=(), timeout: float = 600) -> tuple[int, str
     deadline = time.monotonic() + timeout
     what = " ".join(argv[:2])
     first = call("plow_run_command", {
-        "argv": argv, "write_paths": list(write_paths), "wait_ms": WAIT_MS, "goal": f"str: {what}",
+        "argv": argv, "write_paths": list(write_paths), "network": network,
+        "wait_ms": WAIT_MS, "goal": f"str: {what}",
     })
     if first.get("status") == "pending":
         started = _until("ready", lambda: call("plow_get_result", {"handle": first["handle"]}),
@@ -116,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     ops.add_parser("write").add_argument("path")
     run_op = ops.add_parser("run")
     run_op.add_argument("--write", action="append", default=[], metavar="PATH")
+    run_op.add_argument("--network", action="store_true")
     run_op.add_argument("argv", nargs="+")
     args = parser.parse_args(argv)
     try:
@@ -125,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.op == "write":
             write(args.path, sys.stdin.read())
             return 0
-        code, output = run(args.argv, args.write)
+        code, output = run(args.argv, args.write, args.network)
         sys.stdout.write(output)
         return code
     except (RelayError, OSError) as e:

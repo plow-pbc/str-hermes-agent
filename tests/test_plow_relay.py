@@ -102,10 +102,11 @@ def test_run_exits_with_the_commands_code_and_prints_its_output(
         relay, capsys, case, answers, code, output, polled):
     script, calls = relay
     script.update(answers)
-    assert plow_relay.main(["run", "--write", "~/Plow/wiki", "--", "wiki", "index"]) == code
+    assert plow_relay.main(["run", "--write", "~/Plow/wiki", "--network", "--", "wiki", "index"]) == code
     assert capsys.readouterr().out == output
     assert calls[0]["arguments"]["argv"] == ["wiki", "index"]
     assert calls[0]["arguments"]["write_paths"] == ["~/Plow/wiki"]
+    assert calls[0]["arguments"]["network"] is True
     assert [c["arguments"]["handle"] for c in calls if c["tool"] == "plow_get_output"] == polled
 
 

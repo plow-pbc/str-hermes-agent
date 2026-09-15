@@ -75,7 +75,8 @@ def test_the_digest_carries_what_every_post_ingest_step_found(night, case, rcs, 
         "plow_relay.py run --write ~/Plow/wiki -- wiki --wiki ~/Plow/wiki index",
         "plow_relay.py run -- wiki --wiki ~/Plow/wiki validate",
         f"wiki-provenance {vault} ~/Plow/wiki",
-        "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki --wiki ~/Plow/wiki snapshot --author str",
+        "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
+        " wiki --wiki ~/Plow/wiki snapshot --push --author str",
     ]
 
 
