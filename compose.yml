@@ -24,6 +24,10 @@ services:
     # local tag is absent, which would run a different image under this agent's
     # credentials than the one anyone inspected.
     pull_policy: never
+    # What `plow-agents mint` wrote: where Plow is and this agent's token. The
+    # base reads both from the environment (plow-hermes-agent#108); nothing
+    # copies a file into place any more.
+    env_file: ${HOME}/.plow-credentials-str
     environment:
       # Who this agent is in the agent index.
       AGENT_ID: str
@@ -56,12 +60,6 @@ services:
       # str/properties -- the facts a guest question is about (#73).
       WIKI_WRITER: str
     volumes:
-      # `.host`, not the path the agent reads: a bind carries this machine's
-      # ownership in, and a root cont-init step in the image copies the file
-      # into place as root itself. Outside the home on purpose -- this container
-      # fully controls the home, and could otherwise replace a path under it
-      # with a symlink to a sibling agent's credential.
-      - ${HOME}/.plow-credentials-str:/var/lib/plow/credentials.host:ro
       # The home, and the reason nothing here mounts over a path the boot
       # hardens: plow-init fchown()s SOUL.md and chmods the home and its skills
       # on every boot, and a read-only mount at one of those fails EROFS and
