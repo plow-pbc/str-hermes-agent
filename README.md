@@ -287,10 +287,9 @@ mkdir -p ~/hermes-vault
 git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
 # The wiki is on the owner's Mac, not here: § Compiling the wiki nightly.
 # The Plow credential. `login` is once per host and texts a code back; `mint`
-# is per agent and writes the file compose binds at
-# /var/lib/plow/credentials.host. Nothing else is needed before the first boot:
-# plow-init reads that file and publishes PLOW_AGENT_TOKEN and PLOW_API_BASE
-# into the container itself.
+# is per agent and writes the KEY=VALUE file compose loads as `env_file`, so
+# PLOW_API_BASE and PLOW_AGENT_TOKEN reach the container environment, which is
+# where the base reads them. Nothing else is needed before the first boot.
 plow-agents login
 plow-agents mint <line-uid> --credential-file ~/.plow-credentials-str
 # First boot. compose builds here because `build: .` is declared and the tagged
