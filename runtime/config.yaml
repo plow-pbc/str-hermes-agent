@@ -70,6 +70,23 @@ cron:
 # The chain entry keeps its own 300s: without one it inherits the 30s auxiliary
 # default, far too short for a summary.
 auxiliary:
+  # GLM-5.2 cannot see. OpenRouter answers an image part on that route with
+  # `404 No endpoints found that support image input`, verified against prod
+  # 2026-09-17 -- and a guest sending a photo of a broken appliance is this
+  # agent's ordinary traffic, not an edge case.
+  #
+  # Hermes routes images two ways: inline for a model that sees, otherwise
+  # `vision_analyze` first with the description prepended. The second path
+  # needs a backend named, and a `custom` provider has no default to fall back
+  # on, so without this the turn 404s instead of degrading. Sonnet 5 because a
+  # photo here is evidence about a property that the reply acts on.
+  #
+  # It lives here rather than in the base seed because this image reinstalls
+  # this file over the home on every boot (Dockerfile, 05-install-agent-payload),
+  # so a base-owned key would be overwritten on the next restart.
+  vision:
+    provider: plow
+    model: anthropic/claude-sonnet-5
   compression:
     fallback_chain:
     - provider: openai-codex

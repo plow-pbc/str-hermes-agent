@@ -31,6 +31,14 @@ services:
     environment:
       # Who this agent is in the agent index.
       AGENT_ID: str
+      # Measured on this fleet 2026-09-17: GLM-5.2 bills $0.117 per million
+      # prompt tokens where Sonnet 5 bills $0.222, caches the same, and scores
+      # 34 on Artificial Analysis against Sonnet's 38 -- the cheapest model that
+      # still holds up driving tools over a long conversation. It cannot see, so
+      # it ships with the vision lane in runtime/config.yaml and is meaningless
+      # without it. Named here rather than taken from the base seed because the
+      # base still defaults to Sonnet until its own image ships.
+      HERMES_MODEL: z-ai/glm-5.2
       # Match the host account, the way life-assistant-sam-descriptor does. The
       # image remaps the hermes user to this uid at boot and chowns only the
       # directories it writes -- deliberately not `chown -R`, so a bind's host
