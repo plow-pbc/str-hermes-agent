@@ -41,6 +41,13 @@ def test_tracked_config_pins_the_model_route_uses_env_secrets_and_enables_plow()
     assert "\nmodel:" not in f"\n{config}"
     assert "\nproviders:" not in f"\n{config}"
     assert "provider: openai-codex\n      model: gpt-5.5" in config
+    # Same class, sharper: the running model cannot see, so a vision lane that
+    # no-ops is the 404 it exists to prevent, and nothing says so at load time.
+    # Indentation is pinned along with the spelling because the failure mode is
+    # nesting, not typos -- Hermes reads `auxiliary.<task>` as a two-key dict
+    # (agent/auxiliary_client.py, `_get_auxiliary_task_config`), and a block one
+    # level out parses fine and is never looked at.
+    assert "  vision:\n    provider: plow\n    model: anthropic/claude-sonnet-5" in config
     assert "Authorization: Bearer ${HOSTEX_TOKEN}" in config
     assert "- search_conversations" in config   # only appears under include:
     assert "plow-chat-platform" in config
