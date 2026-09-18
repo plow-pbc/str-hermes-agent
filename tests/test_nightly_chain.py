@@ -44,7 +44,6 @@ def night(tmp_path):
         env = {**os.environ, "HERMES_HOME": str(tmp_path / "home"), "CALLS": str(calls),
                "PATH": f"{path_dir}:{os.environ['PATH']}", **{k: str(v) for k, v in rcs.items()}}
         env.pop("VAULT", None)
-        env.pop("STR_WIKI", None)
         result = subprocess.run([str(bin_dir / "nightly.sh")], capture_output=True, text=True,
                                 env=env, timeout=30)
         return result, calls.read_text().splitlines() if calls.exists() else []
@@ -72,11 +71,11 @@ def test_the_digest_carries_what_every_post_ingest_step_found(night, case, rcs, 
     assert calls[:-1] == [
         f"hostex-raw --vault {vault}",
         f"ingest-all {vault} ~/Plow/wiki",
-        "plow_relay.py run --write ~/Plow/wiki -- wiki --wiki ~/Plow/wiki index",
+        "plow_relay.py run --write ~/Plow/wiki -- wiki index",
         f"wiki-provenance {vault} ~/Plow/wiki",
-        "plow_relay.py run -- wiki --wiki ~/Plow/wiki validate",
+        "plow_relay.py run -- wiki validate",
         "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
-        " wiki --wiki ~/Plow/wiki snapshot --push --author str",
+        " wiki snapshot --push --author str",
     ]
 
 
@@ -107,6 +106,6 @@ def test_a_failed_ingest_names_any_page_it_left_unrecorded(night):
     assert "provenance FAILED; see the cron log" in result.stdout
     assert calls[1:] == [
         f"ingest-all {vault} ~/Plow/wiki",
-        "plow_relay.py run --write ~/Plow/wiki -- wiki --wiki ~/Plow/wiki index",
+        "plow_relay.py run --write ~/Plow/wiki -- wiki index",
         f"wiki-provenance {vault} ~/Plow/wiki",
     ]

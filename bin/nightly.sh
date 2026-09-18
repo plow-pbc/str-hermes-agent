@@ -39,7 +39,8 @@ exec 3>&1 1>&2
 HERMES_HOME="${HERMES_HOME:?nightly.sh: HERMES_HOME is unset in the container}"
 VAULT="${VAULT:-$HERMES_HOME/repo/vault}"
 # A path on the owner's Mac, so the `~` is theirs: quoted here, expanded there.
-WIKI="${STR_WIKI:-~/Plow/wiki}"
+# Fixed, not overridable: Latch's wiki plugin pins WIKI_PATH to this same path.
+WIKI='~/Plow/wiki'
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELAY="$BIN/plow_relay.py"
 STATUS=""
@@ -78,9 +79,10 @@ checked() {
 
 # Tonight's pages into the generated index and hub tables, then every citation on
 # them held against the manifest. The index comes first: provenance lists pages
-# from it, and a stale one cannot list a page written tonight.
+# from it, and a stale one cannot list a page written tonight. No `--wiki`: Latch
+# refuses anything but a bare subcommand.
 reconcile() {
-  checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki --wiki "$WIKI" index
+  checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki index
   checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
 }
 
@@ -116,15 +118,14 @@ if find "$VAULT" -mindepth 2 -name '*.md' -not -path "$VAULT/_raw/*" | grep -q .
 fi
 
 reconcile
-checked "wiki validation" "$RELAY" run -- wiki --wiki "$WIKI" validate
+checked "wiki validation" "$RELAY" run -- wiki validate
 # History lives beside the wiki on the Mac and is pushed off it: a compiled corpus
 # on one disk with no other copy is the exposure promote-vault was written to
 # close. `--push` scans what leaves for credentials, and refuses loudly when the
 # history repo has no origin, so a missing remote is in every digest, not a
 # silent single copy. Before the digest, so a failed snapshot is in the message
 # rather than only in the log.
-checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- \
-  wiki --wiki "$WIKI" snapshot --push --author str
+checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
 
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the wiki and writes a summary. The turn only has to PRINT it --

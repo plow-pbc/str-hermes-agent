@@ -1072,7 +1072,7 @@ container, as root because only root reads the relay's environment:
 
 ```sh
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-  /var/lib/hermes/scripts/plow_relay.py run --write '~/Plow/wiki' -- wiki --wiki '~/Plow/wiki' index
+  /var/lib/hermes/scripts/plow_relay.py run --write '~/Plow/wiki' -- wiki index
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
   /var/lib/hermes/scripts/wiki-provenance /var/lib/hermes/repo/vault '~/Plow/wiki'
 ```
