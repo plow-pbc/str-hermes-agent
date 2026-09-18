@@ -81,6 +81,7 @@ def test_creates_the_daily_job_delivering_to_the_owners_group(tmp_path):
     assert tokens[tokens.index("--name") + 1] == NAME
     assert tokens[tokens.index("--script") + 1] == SCRIPT
     assert tokens[tokens.index("--deliver") + 1] == "plow_chat:cht_x"
+    assert tokens[tokens.index("--failure-deliver") + 1] == "plow_chat"
 
 
 @pytest.mark.parametrize(

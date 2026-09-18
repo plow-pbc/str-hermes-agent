@@ -866,7 +866,8 @@ itself.
 
 <a name="hostex-reactivation"></a>
 **After re-creating the owners' group, every job that names it must be
-recreated** — `hostex-inbound`, `checkin-watch` and `wiki-nightly`.
+recreated** — `hostex-inbound` and `checkin-watch`. (`wiki-nightly` posts to
+the owner's direct chat, not the group.)
 `cron create` bakes the resolved chat UID in, so a job still points at the
 old group and its announcements go somewhere no one reads — and `hostex-inbound`
 with a stale target still advances the shared cursor, so the guest it consumed is
@@ -887,12 +888,9 @@ trigger. In order:
    ./scripts/enable-hostex-inbound.sh
    docker compose exec hermes hermes cron remove checkin-watch
    ./scripts/enable-checkin-watch.sh
-   docker compose exec hermes hermes cron remove wiki-nightly
-   ./scripts/enable-wiki-nightly.sh
    ```
 
-   Skip any that `hermes cron list` does not show. Not while the 03:00 run is in
-   flight: the nightly chain ingests into the wiki.
+   Skip any that `hermes cron list` does not show.
 
 3. Read the delivery target back, which is the one thing the enable script
    cannot confirm — `cron create` echoes name, schedule and next run, not
@@ -1119,8 +1117,13 @@ keeps the script's stdout, which carries wiki content distilled from guest mail,
 out of an agent's instruction channel.
 
 The script does not deliver — the scheduler does, from that stdout, which is why
-the job also needs `--deliver` (#49). So only the digest and an abort are printed;
-every step in between writes to the cron log instead. A **direct** manual run
+the job also needs `--deliver` (#49). The target is a bare `plow_chat`, the home
+channel: the owner's direct chat, not the owners' group, because the digest
+covers the whole shared wiki and its check failures are the operator's to fix.
+So only the digest and an abort are printed; every step in between writes to
+`$HERMES_HOME/logs/wiki-nightly.log` instead, which the digest names when a
+check failed. The scheduler keeps a job's stderr only on a non-zero exit, so
+that file is the only record of what a check found. A **direct** manual run
 prints to your terminal and delivers nowhere, which is the point of running it
 directly, but it means a manual recovery does not tell the owners anything.
 

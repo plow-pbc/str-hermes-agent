@@ -245,28 +245,38 @@ No `hostex-inbound` job — skip. A job predating either change is recreated, no
 diagnosed; work through README § [One-time: point an existing job at the owners'
 group](../../../README.md#owners-group-migration), which owns this path.
 
-## 4.65 Retarget the nightly digest, once
+## 4.65 Retarget the nightly digest and failure alerts, once
 
-A `wiki-nightly` job created before #52 has `Deliver: local`, so the chain runs,
-writes its pages, and tells nobody — which is exactly how 2026-09-10's digest was
-lost. Nothing above fixes it: `scripts/enable-wiki-nightly.sh` refuses while a job
-exists, so a redeploy recreates the container around the old registration.
+The nightly digest goes to the owner's direct chat (a bare `plow_chat`, the home
+channel), and the group jobs send their failure alerts there too
+(`--failure-deliver plow_chat`). A job registered before that still posts both
+into the owners' group, and a redeploy does not re-register it.
 
 ```sh
 docker compose exec -T hermes hermes cron list
 ```
 
-`Deliver: local` under `wiki-nightly` means it predates the change. Recreate it —
-not while the 03:00 run is in flight, since the chain ingests into the wiki:
+Any `Deliver:` under `wiki-nightly` other than a bare `plow_chat` means it
+predates the change: `local` (before #52, the digest goes nowhere) or
+`plow_chat:cht_…` (the owners' group). Recreate it, but not while the 03:00 run
+is in flight, since the chain ingests into the wiki:
 
 ```sh
 docker compose exec -T hermes hermes cron remove wiki-nightly
 ./scripts/enable-wiki-nightly.sh
 ```
 
-The enabler echoes the job it made. Confirm `Deliver: plow_chat:cht_…`, and after
-the next run confirm the scheduler line `Job 'wiki-nightly': delivered to
-plow_chat:…`. Already `plow_chat:` — skip.
+Edit the group jobs in place rather than recreating them. `hostex-inbound`'s
+enabler primes a cold cursor, and an edit keeps the job, cursor included:
+
+```sh
+docker compose exec -T hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
+docker compose exec -T hermes hermes cron edit checkin-watch --failure-deliver plow_chat
+```
+
+Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`
+under `wiki-nightly`, and after its next run confirm the scheduler line
+`Job 'wiki-nightly': delivered to plow_chat:…` names the home chat.
 
 ## 4.7 Register the host-side promote, once
 
