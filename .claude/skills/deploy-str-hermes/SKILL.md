@@ -256,9 +256,10 @@ into the owners' group, and a redeploy does not re-register it.
 docker compose exec -T hermes hermes cron list
 ```
 
-`Deliver: plow_chat:cht_…` under `wiki-nightly` means it predates the change.
-Recreate it, but not while the 03:00 run is in flight, since the chain ingests
-into the wiki:
+Any `Deliver:` under `wiki-nightly` other than a bare `plow_chat` means it
+predates the change: `local` (before #52, the digest goes nowhere) or
+`plow_chat:cht_…` (the owners' group). Recreate it, but not while the 03:00 run
+is in flight, since the chain ingests into the wiki:
 
 ```sh
 docker compose exec -T hermes hermes cron remove wiki-nightly
