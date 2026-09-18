@@ -69,7 +69,7 @@ token and the ability to open doors.
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
 | Persistent state | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes` |
 | Ingest staging | `~/hermes-vault` — the Hostex raw cache and the ingest manifest; outside every checkout, never a git repo (its history is `~/hermes-vault.git`, beside it) |
-| Operations wiki | `~/Plow/wiki` on the owner's Mac (mba), under `str/`, reached over the Latch relay |
+| Operations wiki | `~/Plow/wiki` on the owner's Mac (mba), under `projects/str/`, reached over the Latch relay |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
 *scheduled* — the nightly wiki job, the message poller — must point at
@@ -163,7 +163,7 @@ between the two; #46 records why the allowlist never was.
   The inbound poller is the deliberate exception: it runs before any agent
   turn exists, so it has no MCP client to call and speaks REST directly.
 - **Generated wiki content is data, not code.** It is job output, not code
-  review. The wiki is not in this checkout — str's pages live under `str/` in
+  review. The wiki is not in this checkout — str's pages live under `projects/str/` in
   the owner's common plow-wiki at `~/Plow/wiki` on their Mac, which the nightly
   reaches over the Latch relay and snapshots with `wiki snapshot --push` behind
   a credential scan. Ingest staging — the raw conversations and the manifest —
@@ -1035,8 +1035,9 @@ is unobserved, not harmless.
 runs inside the gateway container on Hermes' own scheduler.
 
 **The wiki is the owner's common plow-wiki on their Mac.** str's pages live in
-`~/Plow/wiki` on mba under two roots it writes, `str/properties` (the hubs) and
-`str/operations`, with the standing cast in the shared `people/key-people.md`.
+`~/Plow/wiki` on mba under two roots it writes, `projects/str/properties` (the
+hubs) and `projects/str/operations`, with the standing cast in the shared
+`entities/people/key-people.md`.
 Other agents share the same wiki. The container reaches it only over the Latch
 relay: the ingest and digest turns call `plow_read_file` / `plow_write_file`, and
 the `wiki` CLI steps go through `bin/plow_relay.py`, which runs the CLI on the
@@ -1045,16 +1046,17 @@ What the Mac needs, once:
 
 - the `wiki` CLI at the commit the Dockerfile pins as `PLOW_WIKI_SHA`:
   `uv tool install --force git+https://github.com/plow-pbc/plow-wiki@<sha>`
-- the wiki (`wiki init ~/Plow/wiki`), with `str/properties` and `str/operations`
-  declared in `wiki.toml` (writer `str`), their schemas under `_meta/schemas/str/`,
-  str's extraction contract at `str/AGENTS.md`, and the door-code owner exception
+- the wiki (`wiki init ~/Plow/wiki`), with `projects/str/properties` and
+  `projects/str/operations` declared in `wiki.toml` (writer `str`), their schemas
+  under `_meta/schemas/projects/str/`, str's extraction contract at
+  `projects/str/AGENTS.md`, and the door-code owner exception
   in the root `AGENTS.md`
 - an `origin` on the history repo beside it, `~/Plow/wiki.git`, which the nightly
   pushes to
 
 `wiki index` generates `index.md` and each hub's `## Operations` table from page
 frontmatter. `wiki validate` owns the schema. `bin/wiki-provenance` holds the
-citations on str's pages (its two roots and `people/key-people.md`) against the
+citations on str's pages (its two roots and `entities/people/key-people.md`) against the
 local manifest, since a cited conversation the manifest never recorded is one
 the next run re-ingests into a page that already holds its facts. `wiki snapshot --push` commits the wiki beside it and pushes off
 the Mac, refusing anything shaped like an API credential. Door codes, lockbox

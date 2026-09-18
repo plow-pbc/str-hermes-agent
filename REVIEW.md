@@ -59,7 +59,7 @@ operator.
   database.
 - Generated vault content is data, not engineered code — job output, not
   reviewed as code. The wiki is not in this checkout — str's pages live under
-  `str/` in the owner's plow-wiki on their Mac, and the nightly's
+  `projects/str/` in the owner's plow-wiki on their Mac, and the nightly's
   `wiki snapshot --push` commits and pushes them behind a credential scan
   rather than an operator read. None of it reaches this repo's `main`.
 

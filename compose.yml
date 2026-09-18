@@ -56,8 +56,8 @@ services:
       # plow-pbc/plow#1938 replaces it with the Bedrock broker.
       PLOW_WIKI_EMBED_URL: http://100.117.41.64:11434
       # Recall ranks chunks from `shared` roots plus this writer's own. Unset,
-      # str would recall the owner's shared pages but never str/operations or
-      # str/properties -- the facts a guest question is about (#73).
+      # str would recall the owner's shared pages but never projects/str/operations
+      # or projects/str/properties -- the facts a guest question is about (#73).
       WIKI_WRITER: str
     volumes:
       # The home, and the reason nothing here mounts over a path the boot
