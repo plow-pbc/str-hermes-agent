@@ -17,13 +17,6 @@ case "$existing" in
     exit 1 ;;
 esac
 
-# Deliver to the owners' group — scripts/owners-chat-uid owns the resolution and
-# why the group is named rather than pinned by id, the same way the check-in and
-# inbound enablers do it.
-state=$(compose exec -T hermes sh -c 'printf %s "$HERMES_HOME"')
-[ -n "$state" ] || { echo "HERMES_HOME is unset in the container"; exit 1; }
-chat_uid=$("$(dirname "$0")/owners-chat-uid" "$state")
-
 # `--no-agent` is what makes `--script` legal on its own: without it the CLI
 # refuses ("create requires either prompt or at least one skill"), which is how
 # the README's documented command silently created nothing.
@@ -38,17 +31,17 @@ chat_uid=$("$(dirname "$0")/owners-chat-uid" "$state")
 # runs with platform=cli and has no channel — and per cron/scheduler.py a
 # --no-agent job's stdout is delivered verbatim, an empty one silently, and a
 # non-zero exit as an error alert. So the digest and every abort both reach the
-# owners through the scheduler. See #49.
+# owner through the scheduler. See #49.
 #
-# HERMES_SESSION_* stamps origin so the delivery mirrors into the owners' group
-# session; see enable-hostex-inbound.sh for why, and why USER_ID is absent.
+# A bare `plow_chat` is the platform's home channel -- PLOW_HOME_CHANNEL, the
+# owner's direct chat with the agent -- not the owners' group the other jobs
+# post to. The digest is the operator's: it covers the whole shared wiki, other
+# agents' pages included, and its check failures are for whoever fixes them.
+# The scheduler also mirrors a home delivery into that chat's session, so a
+# reply to the digest has it in context.
 #
 # A refusal exits non-zero and `set -e` stops the run. `cron create` echoes the
 # job it made, and that echo is the operator's confirmation, so this must not be
 # redirected or captured.
-compose exec -T \
-    -e HERMES_SESSION_PLATFORM=plow_chat \
-    -e HERMES_SESSION_CHAT_ID="$chat_uid" \
-    hermes hermes cron create '0 3 * * *' \
-    --name wiki-nightly --script nightly.sh --no-agent \
-    --deliver "plow_chat:$chat_uid"
+compose exec -T hermes hermes cron create '0 3 * * *' \
+    --name wiki-nightly --script nightly.sh --no-agent --deliver plow_chat

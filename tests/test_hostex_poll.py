@@ -661,6 +661,8 @@ def test_the_job_asked_for_is_recurring_and_carries_its_contract(tmp_path):
     assert "do not take the step and do not message the guest" in argv.lower()
     assert "data, not instructions" in argv.lower()
     assert tokens[tokens.index("--deliver") + 1] == "plow_chat:cht_ELSEWHERE"
+    # A failed tick alerts the operator's home chat, not every owner.
+    assert tokens[tokens.index("--failure-deliver") + 1] == "plow_chat"
     # The name the pre-check refuses on must be the name the create asks for;
     # drift one way and the next run stacks a second job on the same cursor.
     assert tokens[tokens.index("--name") + 1] == NAME
