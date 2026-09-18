@@ -4,7 +4,7 @@
 #   fetch → ingest → index → provenance → validate → snapshot → digest
 #
 # The wiki is the owner's common plow-wiki on their Mac (~/Plow/wiki), and str's
-# pages live under its str/ roots. The container reaches it only through the
+# pages live under its projects/str/ roots. The container reaches it only through the
 # Latch relay: the ingest and digest turns use the plow_* tools, and the steps
 # that run the `wiki` CLI go through bin/plow_relay.py, which runs it on the Mac.
 # $VAULT is local ingest staging only: the Hostex raw cache and the manifest

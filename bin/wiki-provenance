@@ -31,7 +31,7 @@ import plow_relay
 
 # The pages str's ingest writes, as `wiki index` lists them: its two roots and
 # the standing cast. Other agents' people pages are not str's to hold here.
-LISTED = re.compile(r"\[\[((?:str/operations|str/properties)/[^|\]\\]+|people/key-people)[|\]]")
+LISTED = re.compile(r"\]\(/(projects/str/(?:operations|properties)/[^)]+|entities/people/key-people)\.md\)")
 # The scheme is captured on its own because the join is on the id alone: the
 # 2026-08-04 regeneration wrote 392 citations as `tps://…`, which satisfied
 # every id check while resolving nowhere.
@@ -41,8 +41,8 @@ CITED = re.compile(r"([A-Za-z]*:?/{0,2})hostex\.io/app/conversations/([\w-]+)")
 def problems(wiki: str, manifest: dict) -> list[str]:
     recorded = {Path(key).stem for key in manifest["sources"]}
     listed = sorted(set(LISTED.findall(plow_relay.read(f"{wiki}/index.md"))))
-    if not any(page.startswith("str/operations/") for page in listed):
-        return ["index.md lists no str/operations pages, so every check here would pass on nothing"]
+    if not any(page.startswith("projects/str/operations/") for page in listed):
+        return ["index.md lists no projects/str/operations pages, so every check here would pass on nothing"]
     found = []
     for page in listed:
         # Frontmatter only: a URL in the body is not provenance. A page with no
