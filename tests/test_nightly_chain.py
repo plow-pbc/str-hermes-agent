@@ -44,7 +44,6 @@ def night(tmp_path):
         env = {**os.environ, "HERMES_HOME": str(tmp_path / "home"), "CALLS": str(calls),
                "PATH": f"{path_dir}:{os.environ['PATH']}", **{k: str(v) for k, v in rcs.items()}}
         env.pop("VAULT", None)
-        env.pop("STR_WIKI", None)
         result = subprocess.run([str(bin_dir / "nightly.sh")], capture_output=True, text=True,
                                 env=env, timeout=30)
         return result, calls.read_text().splitlines() if calls.exists() else []

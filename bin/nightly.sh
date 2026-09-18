@@ -39,7 +39,8 @@ exec 3>&1 1>&2
 HERMES_HOME="${HERMES_HOME:?nightly.sh: HERMES_HOME is unset in the container}"
 VAULT="${VAULT:-$HERMES_HOME/repo/vault}"
 # A path on the owner's Mac, so the `~` is theirs: quoted here, expanded there.
-WIKI="${STR_WIKI:-~/Plow/wiki}"
+# Fixed, not overridable: Latch's wiki plugin pins WIKI_PATH to this same path.
+WIKI='~/Plow/wiki'
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELAY="$BIN/plow_relay.py"
 STATUS=""
@@ -78,8 +79,8 @@ checked() {
 
 # Tonight's pages into the generated index and hub tables, then every citation on
 # them held against the manifest. The index comes first: provenance lists pages
-# from it, and a stale one cannot list a page written tonight. No `--wiki`: Latch's
-# wiki plugin fixes WIKI_PATH to ~/Plow/wiki and refuses anything but a bare subcommand.
+# from it, and a stale one cannot list a page written tonight. No `--wiki`: Latch
+# refuses anything but a bare subcommand.
 reconcile() {
   checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki index
   checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
