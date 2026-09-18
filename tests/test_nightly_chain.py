@@ -29,15 +29,16 @@ def night(tmp_path):
     shutil.copy(REPO / "bin" / "nightly.sh", bin_dir / "nightly.sh")
     _stub(bin_dir / "hostex-raw", 'exit "${FETCH_RC:-0}"')
     _stub(bin_dir / "ingest-all", 'exit "${INGEST_RC:-0}"')
-    _stub(bin_dir / "wiki-provenance", 'exit "${PROVENANCE_RC:-0}"')
+    _stub(bin_dir / "wiki-provenance", 'echo "${PROVENANCE_SAYS:-}"; exit "${PROVENANCE_RC:-0}"')
     _stub(bin_dir / "plow_relay.py",
           'case "$*" in *" index") exit "${INDEX_RC:-0}";; *" validate") exit "${VALIDATE_RC:-0}";;'
           ' *snapshot*) exit "${SNAPSHOT_RC:-0}";; esac')
     path_dir = tmp_path / "path"
     path_dir.mkdir()
-    _stub(path_dir / "hermes", 'printf "%s\\n" "$3"')  # the digest turn prints its prompt
+    _stub(path_dir / "hermes", 'printf "%s\\n" "${@: -1}"')  # the digest turn prints its prompt
     vault = tmp_path / "home" / "repo" / "vault"
     (vault / "_raw" / "hostex").mkdir(parents=True)
+    (tmp_path / "home" / "logs").mkdir()
     calls = tmp_path / "calls"
 
     def run(**rcs):
@@ -53,11 +54,11 @@ def night(tmp_path):
 
 NIGHTS = [
     ("a clean night", {}, "'ok'"),
-    ("invalid pages", {"VALIDATE_RC": 1}, "wiki validation FAILED; see the cron log"),
-    ("an index that refused", {"INDEX_RC": 1}, "wiki index FAILED; see the cron log"),
-    ("a provenance defect", {"PROVENANCE_RC": 1}, "provenance FAILED; see the cron log"),
+    ("invalid pages", {"VALIDATE_RC": 1}, "wiki validation FAILED; see "),
+    ("an index that refused", {"INDEX_RC": 1}, "wiki index FAILED; see "),
+    ("a provenance defect", {"PROVENANCE_RC": 1}, "provenance FAILED; see "),
     ("a Mac that did not answer the snapshot", {"SNAPSHOT_RC": 2},
-     "wiki snapshot could not run: the owner's Mac did not answer; see the cron log"),
+     "wiki snapshot could not run: the owner's Mac did not answer; see "),
 ]
 
 
@@ -67,7 +68,7 @@ def test_the_digest_carries_what_every_post_ingest_step_found(night, case, rcs, 
     result, calls = run(**rcs)
     assert result.returncode == 0, result.stderr
     assert status in result.stdout, result.stdout
-    assert calls[-1].startswith("hermes chat -q Use the wiki-digest skill")
+    assert calls[-1].startswith("hermes chat -Q -q Use the wiki-digest skill")
     assert calls[:-1] == [
         f"hostex-raw --vault {vault}",
         f"ingest-all {vault} ~/Plow/wiki",
@@ -77,6 +78,19 @@ def test_the_digest_carries_what_every_post_ingest_step_found(night, case, rcs, 
         "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
         " wiki snapshot --push --author str",
     ]
+
+
+def test_what_a_check_found_is_in_the_log_the_message_names_not_the_message(night, tmp_path):
+    """The scheduler keeps a job's stderr only when it exits non-zero, and a
+    night that notes a failed check exits 0 -- so the log is the only place
+    the finding survives, and the message is what has to say where it is."""
+    run, _ = night
+    log = tmp_path / "home" / "logs" / "wiki-nightly.log"
+    result, _ = run(PROVENANCE_RC=1, PROVENANCE_SAYS="page-a: cites 20-abc, which the manifest never recorded")
+    assert result.returncode == 0, result.stderr
+    assert f"provenance FAILED; see {log}" in result.stdout
+    assert "cites 20-abc" not in result.stdout
+    assert "cites 20-abc" in log.read_text()
 
 
 def test_a_page_written_into_staging_is_reported(night):
@@ -103,7 +117,7 @@ def test_a_failed_ingest_names_any_page_it_left_unrecorded(night):
     result, calls = run(INGEST_RC=1, PROVENANCE_RC=1)
     assert result.returncode == 1
     assert "FAILED at ingest" in result.stdout
-    assert "provenance FAILED; see the cron log" in result.stdout
+    assert "provenance FAILED; See " in result.stdout
     assert calls[1:] == [
         f"ingest-all {vault} ~/Plow/wiki",
         "plow_relay.py run --write ~/Plow/wiki -- wiki index",

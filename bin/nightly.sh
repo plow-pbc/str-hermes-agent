@@ -20,16 +20,10 @@
 # `notify()` carries the rest of that contract.
 #
 # The corollary: stdout is the MESSAGE now, delivered verbatim. Fetch counts,
-# ingest progress and check output belong in the cron log, not the owners'
-# chat. So the routing is one policy rather than a redirect per command -- see
-# the `exec` below.
+# ingest progress and check output belong in $LOG, not the owner's chat. So the
+# routing is one policy rather than a redirect per command -- see the `exec`
+# below.
 set -uo pipefail
-
-# Stderr is the default, and fd 3 is the delivered channel. Everything this
-# script runs is diagnostics for the cron log; only `notify()` and the digest
-# write to fd 3, so a step added later is quiet by default rather than quiet
-# only if whoever added it remembered a redirect.
-exec 3>&1 1>&2
 
 # The image sets HERMES_HOME (/var/lib/hermes on the Plow base) -- indexing it
 # here, rather than hardcoding the literal, keeps VAULT correct across base
@@ -44,11 +38,19 @@ WIKI='~/Plow/wiki'
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELAY="$BIN/plow_relay.py"
 STATUS=""
+LOG="$HERMES_HOME/logs/wiki-nightly.log"
 
-# Also to stderr, which is the cron log. $STATUS reaches one place — the digest
-# prompt — so a note was readable only by whoever read that message on the
-# night it went out; nothing outside the container could see that the run had
-# noted anything at all.
+# Stderr is the default, and fd 3 is the delivered channel. Everything this
+# script runs is diagnostics for $LOG; only `notify()` and the digest write to
+# fd 3, so a step added later is quiet by default rather than quiet only if
+# whoever added it remembered a redirect. The tee is what makes $LOG exist: the
+# scheduler keeps a job's stderr only when it exits non-zero, and a night that
+# notes a failed check still exits 0.
+exec 3>&1 2> >(tee "$LOG" >&2) 1>&2
+
+# Also to $LOG. $STATUS reaches one place — the digest prompt — so a note was
+# readable only by whoever read that message on the night it went out; nothing
+# outside the container could see that the run had noted anything at all.
 note() { STATUS+="$1; "; echo "nightly: $1" >&2; }
 
 # Every abort reports by printing: the scheduler delivers this job's stdout, and
@@ -72,8 +74,8 @@ checked() {
   "$@"
   case $? in
     0) ;;
-    2) note "$what could not run: the owner's Mac did not answer; see the cron log" ;;
-    *) note "$what FAILED; see the cron log" ;;
+    2) note "$what could not run: the owner's Mac did not answer" ;;
+    *) note "$what FAILED" ;;
   esac
 }
 
@@ -105,7 +107,7 @@ if ! "$BIN/ingest-all" "$VAULT" "$WIKI"; then
   # re-ingest into that page, so the notice says whether it did.
   echo "nightly: FAILED at ingest" >&2
   reconcile
-  notify "Wiki nightly FAILED at ingest. No digest was generated. ${STATUS:-Every page it wrote has a manifest record.} See the cron log."
+  notify "Wiki nightly FAILED at ingest. No digest was generated. ${STATUS:-Every page it wrote has a manifest record. }See $LOG."
   exit 1
 fi
 
@@ -129,8 +131,11 @@ checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --netwo
 
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the wiki and writes a summary. The turn only has to PRINT it --
-# the scheduler delivers this script's stdout.
-if ! timeout 600 hermes chat -q "Use the wiki-digest skill on the owner's wiki at ${WIKI} for the last day. The wiki is on the owner's Mac: read its log.md and pages only with plow_read_file. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
+# the scheduler delivers this script's stdout. `-Q` keeps that stdout to the
+# reply: without it the whole CLI transcript -- the prompt echoed back, tool
+# traces, reasoning -- was the message, with the digest at the bottom.
+STATUS="${STATUS:+${STATUS}see $LOG}"
+if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill on the owner's wiki at ${WIKI} for the last day. The wiki is on the owner's Mac: read its log.md and pages only with plow_read_file. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
   echo "nightly: the digest did not send within 600s" >&2
   exit 1
 fi

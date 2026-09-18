@@ -107,6 +107,6 @@ def test_the_nightly_never_asks_a_cli_turn_to_send():
     # write hits a closed descriptor, stdout arrives empty, and an empty stdout
     # is delivered as nothing. Silent, again.
     lines = [l.strip() for l in body.splitlines() if not l.lstrip().startswith("#")]
-    opens = next(i for i, l in enumerate(lines) if l == "exec 3>&1 1>&2")
+    opens = next(i for i, l in enumerate(lines) if l.startswith("exec 3>&1 "))
     first_use = next(i for i, l in enumerate(lines) if ">&3" in l)
     assert opens < first_use, "fd 3 is written before it is opened"
