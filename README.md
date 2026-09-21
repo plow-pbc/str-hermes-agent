@@ -731,9 +731,11 @@ same as being unable to; see below.
   Disturb knows when the owners are asleep and this code does not.
 
 State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id to
-`{seen, owed}`: the newest message the poller has walked past, and whether it
-announced a wait on that conversation and still owes the owners the one
-follow-up. Deliberately separate from the nightly pipeline's watermark. Guest text is never persisted. A first run adopts what exists and
+`{seen, owed}`: the newest message the poller has walked past, and the instant
+it announced a wait on that conversation that it still owes the owners a
+follow-up on — null when it owes none. The veto window is measured from
+`owed`, so a draft announced late off a backlog still gets its full thirty
+minutes. Deliberately separate from the nightly pipeline's watermark. Guest text is never persisted. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
 history all reads as new. **Adopting is silent about anyone waiting** — a
 guest whose message is outstanding when the next tick runs is marked seen and

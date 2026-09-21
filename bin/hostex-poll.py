@@ -135,23 +135,24 @@ def overdue(conversations: list[dict], cursor: dict[str, dict],
             now: datetime.datetime) -> list[dict]:
     """Owed follow-ups whose veto window has closed, longest-waiting first.
 
-    `owed` is recorded by the tick that announced the wait, never inferred
-    from the watermark: cold start, the legacy-string upgrade and the
-    fall-through inside the pending loop all write the same watermark an
-    announcement does, so reading one as the other had the first tick after a
-    deploy reporting a closed window on every conversation in the account.
-    Measured from the watermark rather than from a separately recorded
-    announcement time: in steady state the tick that announces is the tick
-    that wrote it, and traffic that moves it afterwards — one of Hostex's
-    templates, typically — only pushes the deadline out, never in. A backlog
-    drained one conversation per tick is where the two genuinely diverge, and
-    the owners get a window short by however long the queue was.
+    `owed` is the instant the poller announced this wait, and null when it owes
+    nothing — written by the tick that made the announcement, never inferred
+    from the watermark. Both halves of that mattered: cold start, the
+    legacy-string upgrade and the fall-through inside the pending loop all
+    write the same watermark an announcement does, so reading one as the other
+    had the first tick after a deploy reporting a closed window on every
+    conversation in the account; and the watermark is the guest's clock, not
+    ours. A backlog drained one conversation per tick announces the tenth
+    guest twenty minutes after they wrote, and a Hostex template landing on an
+    announced thread moves the watermark again — measured from either, the
+    thirty minutes the owners were promised is not the thirty minutes they
+    get.
     """
     deadline = now - datetime.timedelta(minutes=FOLLOWUP_MINUTES)
     due = [conv for conv in conversations
            if (entry := cursor.get(conv["id"])) is not None
            and entry["owed"]
-           and datetime.datetime.fromisoformat(entry["seen"]) <= deadline]
+           and datetime.datetime.fromisoformat(entry["owed"]) <= deadline]
     return sorted(due, key=lambda conv: conv["last_message_at"])
 
 
@@ -293,16 +294,18 @@ def cursor_path() -> pathlib.Path:
 
 
 def load_cursor(path: pathlib.Path) -> dict[str, dict]:
-    """Entries are {"seen": <iso>, "owed": <bool>}, where `owed` means we
-    announced this wait to the owners and have not followed it up yet.
+    """Entries are {"seen": <iso>, "owed": <iso> | None} — the newest message
+    walked past, and when we announced a wait on it that we still owe the
+    owners a follow-up on.
 
     A bare string is the shape deployed before the follow-up existed: a
-    watermark, and nothing said about it. Upgraded as unowed, so the first
+    watermark, and nothing said about it. Upgraded owing nothing, so the first
     tick after the upgrade keeps what the running poller knew instead of
-    reporting a closed window on every conversation it had ever adopted.
+    reporting a closed window on every conversation it had ever adopted — the
+    live cursor holds 380 of them, adopted in one tick.
     """
     raw = json.loads(path.read_text()) if path.exists() else {}
-    return {cid: {"seen": entry, "owed": False} if isinstance(entry, str) else entry
+    return {cid: {"seen": entry, "owed": None} if isinstance(entry, str) else entry
             for cid, entry in raw.items()}
 
 
@@ -311,15 +314,17 @@ def record_seen(cursor: dict[str, dict], cid: str, seen: str) -> None:
     conversation the tick walks, including the ones it says nothing about, so
     it cannot be what marks a wait announced — only the emit in `run` can.
 
-    An obligation already recorded survives the move. What advanced this
-    watermark is as often one of Hostex's own templates as the guest, and a
-    template is not an answer: discharging here would strand the draft the
-    owners are holding with nothing left watching it. Only the follow-up
-    itself clears the debt, and by then it has read the thread and can see
-    whether an owner answered in the Hostex app."""
+    An obligation already recorded survives the move, deadline included. What
+    advanced this watermark is as often one of Hostex's own templates as the
+    guest, and a template is neither an answer nor a reason to restart the
+    clock: discharging here would strand the draft the owners are holding with
+    nothing left watching it, and re-dating it would let a stream of templates
+    hold the window open forever. Only the follow-up clears the debt, and by
+    then it has read the thread and can see whether an owner answered in the
+    Hostex app."""
     previous = cursor.get(cid, {})
     if previous.get("seen") != seen:
-        cursor[cid] = {"seen": seen, "owed": previous.get("owed", False)}
+        cursor[cid] = {"seen": seen, "owed": previous.get("owed")}
 
 
 def save_cursor(path: pathlib.Path, cursor: dict[str, dict]) -> None:
@@ -373,6 +378,7 @@ def run(token: str, cursor_file: pathlib.Path,
     # Keyed on the file, not the loaded dict: an account with no conversations
     # writes {} and would re-adopt every tick, swallowing the first real one.
     cold_start = not cursor_file.exists()
+    now = now or datetime.datetime.now(datetime.timezone.utc)
     cursor = load_cursor(cursor_file)
     conversations = list_conversations(token)
     output = SILENT
@@ -398,16 +404,17 @@ def run(token: str, cursor_file: pathlib.Path,
             if (speaker is not None and speaker["sender_role"] != "host"
                     and speaker["created_at"] > previous):
                 output = render(PROMPT, conversation, thread)
-                # The one place a wait becomes owed: we are telling the owners
-                # about it on this turn, so the window starts here.
-                cursor[cid]["owed"] = True
+                # The one place a wait becomes owed, and the only clock the
+                # promise can be measured on: the owners hear about it now, so
+                # their thirty minutes start now — not whenever the guest
+                # happened to write.
+                cursor[cid]["owed"] = now.isoformat()
                 break
 
     # Only when the tick has no new message to carry: a guest who just spoke
     # and one who has been waiting thirty minutes both want the single turn
     # cron injects, and the reminder is only two minutes behind.
     if output is SILENT:
-        now = now or datetime.datetime.now(datetime.timezone.utc)
         for conversation in overdue(conversations, cursor, now):
             cid = conversation["id"]
             thread = read_thread(cid, token)
@@ -415,7 +422,7 @@ def run(token: str, cursor_file: pathlib.Path,
             # Discharged either way: an owner who answered in the Hostex app
             # closed this wait, and a reminder about it would re-raise a
             # conversation that is already handled.
-            cursor[cid]["owed"] = False
+            cursor[cid]["owed"] = None
             if speaker is not None and speaker["sender_role"] != "host":
                 output = render(FOLLOWUP, conversation, thread)
                 break

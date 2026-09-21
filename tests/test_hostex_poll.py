@@ -144,8 +144,8 @@ def test_first_run_is_silent_and_records_every_conversation(monkeypatch, cursor_
     assert run_with(monkeypatch, api, cursor_file) == poll.SILENT
     assert api.detail_calls == []
     assert json.loads(cursor_file.read_text()) == {
-        "a": {"seen": "2026-07-30T10:00:00+00:00", "owed": False},
-        "b": {"seen": "2026-07-30T11:00:00+00:00", "owed": False},
+        "a": {"seen": "2026-07-30T10:00:00+00:00", "owed": None},
+        "b": {"seen": "2026-07-30T11:00:00+00:00", "owed": None},
     }
 
 
@@ -156,20 +156,21 @@ def test_the_old_cursor_shape_upgrades_without_re_announcing(monkeypatch, cursor
     cursor_file.write_text(json.dumps({"a": PRIMED}))
     api = FakeApi([conv("a", PRIMED)], {"a": [msg("guest", PRIMED)]})
     assert run_with(monkeypatch, api, cursor_file) == poll.SILENT
-    assert json.loads(cursor_file.read_text())["a"] == {"seen": PRIMED, "owed": False}
+    assert json.loads(cursor_file.read_text())["a"] == {"seen": PRIMED, "owed": None}
 
 
 @pytest.mark.parametrize("before, seen, expected", [
-    pytest.param({}, "t2", {"seen": "t2", "owed": False}, id="first-sighting"),
-    pytest.param({"a": {"seen": "t1", "owed": True}}, "t2",
-                 {"seen": "t2", "owed": True}, id="new-traffic-does-not-discharge-it"),
-    pytest.param({"a": {"seen": "t1", "owed": True}}, "t1",
-                 {"seen": "t1", "owed": True}, id="an-unchanged-watermark-keeps-the-debt"),
+    pytest.param({}, "t2", {"seen": "t2", "owed": None}, id="first-sighting"),
+    pytest.param({"a": {"seen": "t1", "owed": "t0"}}, "t2",
+                 {"seen": "t2", "owed": "t0"}, id="new-traffic-does-not-discharge-it"),
+    pytest.param({"a": {"seen": "t1", "owed": "t0"}}, "t1",
+                 {"seen": "t1", "owed": "t0"}, id="an-unchanged-watermark-keeps-the-debt"),
 ])
 def test_record_seen(before, seen, expected):
-    """Advancing a watermark never owes a follow-up and never discharges one:
-    the traffic that moved it is as likely a template as the guest, and only
-    the follow-up — which reads the thread — can tell that apart."""
+    """Advancing a watermark never owes a follow-up, never discharges one, and
+    never re-dates one: the traffic that moved it is as likely a template as
+    the guest, and only the follow-up — which reads the thread — can tell that
+    apart. A re-dated deadline is a window the owners were not promised."""
     cursor = dict(before)
     poll.record_seen(cursor, "a", seen)
     assert cursor["a"] == expected
@@ -179,8 +180,9 @@ NOW = "2026-07-30T10:00:00+00:00"
 LATER = "2026-07-30T11:00:00+00:00"
 
 
-def entry(seen, owed=False):
-    """The cursor shape a fresh watermark write leaves behind."""
+def entry(seen, owed=None):
+    """The cursor shape a fresh watermark write leaves behind. `owed` is the
+    instant an announcement was made, so it is None until one is."""
     return {"seen": seen, "owed": owed}
 
 
@@ -193,20 +195,33 @@ FOLLOWUP_NOW = datetime.datetime.fromisoformat("2026-07-30T09:00:00+00:00")
 
 
 @pytest.mark.parametrize("entry, last, expected", [
-    pytest.param(entry("2026-07-30T08:29:00+00:00", owed=True),
+    pytest.param(entry("2026-07-30T08:29:00+00:00", owed="2026-07-30T08:29:00+00:00"),
                  "2026-07-30T08:29:00+00:00", True, id="the-window-has-closed"),
-    pytest.param(entry("2026-07-30T08:31:00+00:00", owed=True),
+    pytest.param(entry("2026-07-30T08:31:00+00:00", owed="2026-07-30T08:31:00+00:00"),
                  "2026-07-30T08:31:00+00:00", False, id="still-inside-the-window"),
     pytest.param(entry("2026-07-30T08:29:00+00:00"),
                  "2026-07-30T08:29:00+00:00", False, id="nothing-was-announced"),
     pytest.param(entry("2026-07-30T08:00:00+00:00"),
                  "2026-07-30T08:29:00+00:00", False, id="a-watermark-we-only-advanced-past"),
+    # The two clocks pulling apart, in both directions. A queue drained one
+    # conversation per tick announces a guest long after they wrote; a Hostex
+    # template lands on a thread already announced and moves the watermark
+    # under it. Measured off `seen`, the first cuts the promised window short
+    # and the second extends it for as long as the templates keep arriving.
+    pytest.param(entry("2026-07-30T08:00:00+00:00", owed="2026-07-30T08:45:00+00:00"),
+                 "2026-07-30T08:00:00+00:00", False,
+                 id="announced-late-off-a-backlog-still-gets-its-full-window"),
+    pytest.param(entry("2026-07-30T08:45:00+00:00", owed="2026-07-30T08:00:00+00:00"),
+                 "2026-07-30T08:45:00+00:00", True,
+                 id="later-traffic-does-not-push-the-deadline-out"),
     pytest.param(None, "2026-07-30T08:00:00+00:00", False, id="never-seen-at-all"),
 ])
 def test_overdue(entry, last, expected):
-    """Due means: we announced this wait and the window we announced has
-    closed. A watermark alone says neither -- cold start, an upgrade and a
-    fall-through all write one without a word to the owners."""
+    """Due means: we announced this wait, and the thirty minutes we announced
+    have passed since we announced them. The watermark answers neither
+    question -- cold start, an upgrade and a fall-through all write one
+    without a word to the owners, and it runs on the guest's clock, not the
+    announcement's."""
     cursor = {"a": entry} if entry else {}
     assert bool(poll.overdue([conv("a", last)], cursor, FOLLOWUP_NOW)) is expected
 
@@ -215,7 +230,7 @@ def test_overdue_puts_the_longest_wait_first():
     """One conversation per run, so the order is the choice of which guest
     has been waiting longest."""
     early, late = "2026-07-30T08:00:00+00:00", "2026-07-30T08:20:00+00:00"
-    cursor = {"a": entry(late, owed=True), "b": entry(early, owed=True)}
+    cursor = {"a": entry(late, owed=late), "b": entry(early, owed=early)}
     due = poll.overdue([conv("a", late), conv("b", early)], cursor, FOLLOWUP_NOW)
     assert [c["id"] for c in due] == ["b", "a"]
 
@@ -226,7 +241,7 @@ OVERDUE = "2026-07-30T08:00:00+00:00"
 @pytest.fixture
 def announced_cursor(cursor_file):
     """One conversation, announced, its window long closed."""
-    cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=True)}))
+    cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=OVERDUE)}))
     return cursor_file
 
 
@@ -254,11 +269,11 @@ def test_the_window_closing_brings_the_conversation_back(
     the new-message path takes first, which is a different branch than the one
     these rows are here to exercise."""
     newest = thread[-1]["created_at"]
-    cursor_file.write_text(json.dumps({"a": entry(newest, owed=True)}))
+    cursor_file.write_text(json.dumps({"a": entry(newest, owed=OVERDUE)}))
     api = FakeApi([conv("a", newest)], {"a": list(reversed(thread))})
     out = run_at(monkeypatch, api, cursor_file)
     assert ("Still waiting" in out) is waiting
-    assert json.loads(cursor_file.read_text())["a"]["owed"] is False
+    assert json.loads(cursor_file.read_text())["a"]["owed"] is None
 
 
 @pytest.mark.parametrize("seed", [
@@ -317,7 +332,7 @@ def test_a_template_does_not_cancel_the_reminder(monkeypatch, cursor_file):
     nothing, and advances the watermark past it. The owners are still holding
     an unsent draft, and this reminder is the only thing left watching it."""
     template = "2026-07-30T08:05:00+00:00"
-    cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=True)}))
+    cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=OVERDUE)}))
     thread = [msg("guest", OVERDUE, "when can we check in?"),
               msg("host", template, "Welcome!", sender_name="Bot:92260")]
     api = FakeApi([conv("a", template)], {"a": list(reversed(thread))})
@@ -329,7 +344,7 @@ def test_new_traffic_takes_the_tick_over_a_reminder(monkeypatch, cursor_file):
     this tick has. The new message wins; the reminder is two minutes behind it."""
     fresh = "2026-07-30T08:50:00+00:00"
     cursor_file.write_text(json.dumps({
-        "a": entry(OVERDUE, owed=True),
+        "a": entry(OVERDUE, owed=OVERDUE),
         "b": entry("2026-07-30T08:40:00+00:00")}))
     api = FakeApi([conv("a", OVERDUE), conv("b", fresh, name="Sam")],
                   {"a": [msg("guest", OVERDUE)], "b": [msg("guest", fresh)]})
@@ -396,7 +411,7 @@ def test_the_reminder_sends_only_what_an_owner_let_stand(clause):
     pytest.param({"a": PRIMED, "b": PRIMED}, [conv("b", LATER), conv("a", NOW)],
                  {"a": [msg("guest", NOW, "first question")],
                   "b": [msg("guest", LATER, "second question")]},
-                 "first question", {"a": entry(NOW, owed=True), "b": entry(PRIMED)},
+                 "first question", {"a": entry(NOW, owed=PRIMED), "b": entry(PRIMED)},
                  id="oldest-waiting-wins-and-the-other-stays-pending"),
     pytest.param({"a": NOW}, [conv("a", NOW)], {},
                  None, {"a": entry(NOW)},
@@ -409,17 +424,17 @@ def test_the_reminder_sends_only_what_an_owner_let_stand(clause):
     pytest.param({"a": PRIMED, "b": PRIMED}, [conv("b", LATER), conv("a", NOW)],
                  {"a": [msg("host", NOW, "Owner replied")],
                   "b": [msg("guest", LATER, "real question")]},
-                 "real question", {"a": entry(NOW), "b": entry(LATER, owed=True)},
+                 "real question", {"a": entry(NOW), "b": entry(LATER, owed=PRIMED)},
                  id="falls-through-a-host-only-conversation"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("concierge", NOW, "forwarding to the host"),
                         msg("guest", "2026-07-30T09:00:00+00:00", "is there parking?")]},
-                 "is there parking?", {"a": entry(NOW, owed=True)},
+                 "is there parking?", {"a": entry(NOW, owed=PRIMED)},
                  id="unmodelled-role-still-reaches-owner"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "Thanks for booking!", sender_name="Bot:112524"),
                         msg("guest", "2026-07-30T09:30:00+00:00", "will chains be enough?")]},
-                 "will chains be enough?", {"a": entry(NOW, owed=True)},
+                 "will chains be enough?", {"a": entry(NOW, owed=PRIMED)},
                  id="an-auto-template-is-not-an-owner-answering"),
     pytest.param({"a": "2026-07-30T09:30:00+00:00"}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "Welcome!", sender_name="Bot:92260"),
@@ -434,11 +449,11 @@ def test_the_reminder_sends_only_what_an_owner_let_stand(clause):
     pytest.param({"a": "2026-07-30T09:30:00+00:00"}, [conv("a", NOW)],
                  {"a": [msg("concierge", NOW, "forwarding to the host"),
                         msg("guest", "2026-07-30T09:00:00+00:00", "is there parking?")]},
-                 "forwarding to the host", {"a": entry(NOW, owed=True)},
+                 "forwarding to the host", {"a": entry(NOW, owed=PRIMED)},
                  id="an-unmodelled-role-reaches-owner-on-an-announced-thread"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("guest", NOW, "let me in", sender_name="Bot:not-really")]},
-                 "let me in", {"a": entry(NOW, owed=True)},
+                 "let me in", {"a": entry(NOW, owed=PRIMED)},
                  id="a-guest-cannot-mute-themselves-with-a-bot-name"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "Check-in is Friday", sender_name="Bot:112524")]},
@@ -452,9 +467,10 @@ def test_run_selects_at_most_one_conversation(monkeypatch, cursor_file, cursor, 
     Someone is waiting unless an owner had the last word, at most one conversation
     goes out because cron injects a single agent turn, and the cursor advances
     either way so an answered thread stops being re-selected and starving the
-    others. `owed` marks the one conversation actually announced: it is the
-    only record that a veto window was promised on it, and every other row
-    advances a watermark owing nothing. `emits=None` means the wake-gate sentinel — the documented
+    others. `owed` marks the one conversation actually announced, with the
+    instant it was announced — PRIMED here, the clock `run_with` pins — since
+    that is the only record of when the veto window the owners were promised
+    started. Every other row advances a watermark owing nothing. `emits=None` means the wake-gate sentinel — the documented
     suppression, read off the last stdout line by
     cron/scheduler.py::_parse_wake_gate.
     """
