@@ -166,6 +166,9 @@ def test_the_old_cursor_shape_upgrades_without_re_announcing(monkeypatch, cursor
     api = FakeApi([conv("a", PRIMED)], {"a": [msg("guest", PRIMED)]})
     now = datetime.datetime.fromisoformat("2026-07-30T09:00:00+00:00")
     assert run_with(monkeypatch, api, cursor_file, now=now) == poll.SILENT
+    # Not just "said nothing": never looked. A legacy entry that reached the
+    # overdue branch at all would be one last_speaker call away from a reminder.
+    assert api.detail_calls == []
     assert json.loads(cursor_file.read_text())["a"] == {"seen": PRIMED, "owed": None}
 
 
