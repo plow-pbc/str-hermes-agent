@@ -92,14 +92,16 @@ Conversation: {conversation_id}
 
 {transcript}
 
-Find the draft you sent the owners for this conversation and act on it — do
-not compose a new one; the owners approved, or let stand, particular words.
-If you announced it under the veto window and no owner objected to, edited, or
-questioned it, send exactly those words to the conversation id above: the
-window has closed and the silence is the approval you said it would be. If an
-owner approved or edited it, send what they approved. If an owner objected, or
-you cannot find the draft or tell which of several it is, send the guest
-nothing and say so in the owners' group.
+Find the draft you sent the owners for this conversation and act on it — do not
+compose a new one; the owners approved, or let stand, particular words. Check
+the owners' thread itself for a reply naming this draft before treating silence
+as approval — if you cannot read that thread at all, send the guest nothing and
+say so. If you announced it under the veto window and no owner objected to,
+edited, or questioned it, send exactly those words to the conversation id
+above: the window has closed and the silence is the approval you said it would
+be. If an owner approved or edited it, send what they approved. If an owner
+objected, or you cannot find the draft or tell which of several it is, send the
+guest nothing and say so in the owners' group.
 Once you have sent it, say so.
 This reminder comes once. Nothing else is watching this conversation.
 """
