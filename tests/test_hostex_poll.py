@@ -162,13 +162,14 @@ def test_the_old_cursor_shape_upgrades_without_re_announcing(monkeypatch, cursor
 @pytest.mark.parametrize("before, seen, expected", [
     pytest.param({}, "t2", {"seen": "t2", "owed": False}, id="first-sighting"),
     pytest.param({"a": {"seen": "t1", "owed": True}}, "t2",
-                 {"seen": "t2", "owed": False}, id="new-traffic-ends-the-old-wait"),
+                 {"seen": "t2", "owed": True}, id="new-traffic-does-not-discharge-it"),
     pytest.param({"a": {"seen": "t1", "owed": True}}, "t1",
                  {"seen": "t1", "owed": True}, id="an-unchanged-watermark-keeps-the-debt"),
 ])
 def test_record_seen(before, seen, expected):
-    """Advancing a watermark never owes a follow-up, and a fresh one clears an
-    obligation the guest has since overtaken. A quiet tick leaves it alone."""
+    """Advancing a watermark never owes a follow-up and never discharges one:
+    the traffic that moved it is as likely a template as the guest, and only
+    the follow-up — which reads the thread — can tell that apart."""
     cursor = dict(before)
     poll.record_seen(cursor, "a", seen)
     assert cursor["a"] == expected
@@ -308,6 +309,19 @@ def test_the_reminder_fires_once(monkeypatch, announced_cursor):
     api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE)]})
     assert "Still waiting" in run_at(monkeypatch, api, announced_cursor)
     assert run_at(monkeypatch, api, announced_cursor) == poll.SILENT
+
+
+def test_a_template_does_not_cancel_the_reminder(monkeypatch, cursor_file):
+    """A Hostex template posts on the owner side and is not an answer, but it
+    does move `last_message_at` — so the tick walks the conversation, says
+    nothing, and advances the watermark past it. The owners are still holding
+    an unsent draft, and this reminder is the only thing left watching it."""
+    template = "2026-07-30T08:05:00+00:00"
+    cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=True)}))
+    thread = [msg("guest", OVERDUE, "when can we check in?"),
+              msg("host", template, "Welcome!", sender_name="Bot:92260")]
+    api = FakeApi([conv("a", template)], {"a": list(reversed(thread))})
+    assert "Still waiting" in run_at(monkeypatch, api, cursor_file)
 
 
 def test_new_traffic_takes_the_tick_over_a_reminder(monkeypatch, cursor_file):

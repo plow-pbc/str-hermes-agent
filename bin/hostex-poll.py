@@ -305,13 +305,19 @@ def load_cursor(path: pathlib.Path) -> dict[str, dict]:
 
 
 def record_seen(cursor: dict[str, dict], cid: str, seen: str) -> None:
-    """Advance the watermark, owing nothing. This runs on every conversation
-    the tick walks, including the ones it says nothing about, so it cannot be
-    what marks a wait announced — only the emit below can. A new watermark
-    also discharges an older obligation: the guest spoke again, so whatever
-    the owners are sitting on now belongs to a different wait."""
-    if cursor.get(cid, {}).get("seen") != seen:
-        cursor[cid] = {"seen": seen, "owed": False}
+    """Advance the watermark, owing nothing new. This runs on every
+    conversation the tick walks, including the ones it says nothing about, so
+    it cannot be what marks a wait announced — only the emit in `run` can.
+
+    An obligation already recorded survives the move. What advanced this
+    watermark is as often one of Hostex's own templates as the guest, and a
+    template is not an answer: discharging here would strand the draft the
+    owners are holding with nothing left watching it. Only the follow-up
+    itself clears the debt, and by then it has read the thread and can see
+    whether an owner answered in the Hostex app."""
+    previous = cursor.get(cid, {})
+    if previous.get("seen") != seen:
+        cursor[cid] = {"seen": seen, "owed": previous.get("owed", False)}
 
 
 def save_cursor(path: pathlib.Path, cursor: dict[str, dict]) -> None:
