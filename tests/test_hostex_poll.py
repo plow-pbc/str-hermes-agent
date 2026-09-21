@@ -22,6 +22,8 @@ _spec = importlib.util.spec_from_file_location(
 poll = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(poll)
 
+PERSONA = (ROOT / "runtime" / "persona.md").read_text()
+
 
 def conv(cid, last, prop="Lake House", name="Jane"):
     return {
@@ -474,6 +476,27 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     assert "two-tier guest-send rule in SOUL.md" in flowed
     assert "sending in 30 minutes unless an owner says stop" in flowed
     assert "any draft you are unsure about" in flowed
+
+
+@pytest.mark.parametrize("text, where", [
+    pytest.param(PERSONA, "persona.md", id="persona"),
+    pytest.param(poll.PROMPT, "hostex-poll.py's PROMPT", id="poll-prompt"),
+])
+def test_nothing_asks_the_model_to_schedule_the_send(text, where):
+    """The deadline has one owner. An instruction to schedule a job is the
+    failure this replaced: the announcement went out, the job never existed,
+    and the job reported ok — see docs/superpowers/plans for the run."""
+    assert "one-shot" not in text, f"{where} still asks for a one-shot job"
+    # Not a bare "schedule" search: both documents legitimately describe the
+    # scheduled templates Hostex sends on the owners' behalf.
+    assert "schedule the" not in text, f"{where} still asks the model to schedule the send"
+
+
+def test_the_persona_still_promises_the_window_it_announces():
+    """The consumer half: the reminder only makes sense if the announcement
+    still tells the owners they have thirty minutes to stop it."""
+    assert "sending in 30 minutes unless an owner says stop" in PERSONA
+    assert f"{poll.FOLLOWUP_MINUTES} minutes" in PERSONA
 
 
 def test_a_forged_line_in_the_guest_name_cannot_reach_the_prompt():

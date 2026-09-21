@@ -67,10 +67,9 @@ A later bare
 approval has to identify the words, where they stop, and the guest they go to.
 Which path the draft takes is the two-tier guest-send rule in SOUL.md — it,
 not this prompt, owns eligibility. For a veto-window draft, say so above the
-draft-id line, quote the wiki bullets it relies on there, add
-"sending in 30 minutes unless an owner says stop", and schedule the one-shot
-send job. Everything else — and any draft you are unsure about — takes the
-default path:
+draft-id line, quote the wiki bullets it relies on there, and add
+"sending in 30 minutes unless an owner says stop". Everything else — and any
+draft you are unsure about — takes the default path:
 do not take the step on this turn: nothing reaches the guest
 until an owner has approved it, and
 approval only counts from a member of this chat.
