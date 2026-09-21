@@ -134,13 +134,43 @@ def test_first_run_is_silent_and_records_every_conversation(monkeypatch, cursor_
     assert run_with(monkeypatch, api, cursor_file) == poll.SILENT
     assert api.detail_calls == []
     assert json.loads(cursor_file.read_text()) == {
-        "a": "2026-07-30T10:00:00+00:00",
-        "b": "2026-07-30T11:00:00+00:00",
+        "a": {"seen": "2026-07-30T10:00:00+00:00", "followed_up": False},
+        "b": {"seen": "2026-07-30T11:00:00+00:00", "followed_up": False},
     }
+
+
+def test_the_old_cursor_shape_upgrades_without_re_announcing(monkeypatch, cursor_file):
+    """A deployed cursor maps id -> timestamp. Read as a fresh entry it would
+    have no watermark, and the first tick after the upgrade would announce
+    every open conversation at once."""
+    cursor_file.write_text(json.dumps({"a": PRIMED}))
+    api = FakeApi([conv("a", PRIMED)], {"a": [msg("guest", PRIMED)]})
+    assert run_with(monkeypatch, api, cursor_file) == poll.SILENT
+    assert json.loads(cursor_file.read_text())["a"] == {"seen": PRIMED, "followed_up": False}
+
+
+@pytest.mark.parametrize("before, seen, expected", [
+    pytest.param({}, "t2", {"seen": "t2", "followed_up": False}, id="first-sighting"),
+    pytest.param({"a": {"seen": "t1", "followed_up": True}}, "t2",
+                 {"seen": "t2", "followed_up": False}, id="new-traffic-earns-a-fresh-wait"),
+    pytest.param({"a": {"seen": "t1", "followed_up": True}}, "t1",
+                 {"seen": "t1", "followed_up": True}, id="an-unchanged-watermark-keeps-its-flag"),
+])
+def test_record_seen(before, seen, expected):
+    """The flag is scoped to one wait: it survives a quiet tick and resets the
+    moment the guest speaks again."""
+    cursor = dict(before)
+    poll.record_seen(cursor, "a", seen)
+    assert cursor["a"] == expected
 
 
 NOW = "2026-07-30T10:00:00+00:00"
 LATER = "2026-07-30T11:00:00+00:00"
+
+
+def entry(seen):
+    """The cursor shape a fresh watermark write leaves behind."""
+    return {"seen": seen, "followed_up": False}
 
 
 @pytest.mark.parametrize("cursor, convs, details, emits, after", [
@@ -149,53 +179,53 @@ LATER = "2026-07-30T11:00:00+00:00"
     pytest.param({"a": PRIMED, "b": PRIMED}, [conv("b", LATER), conv("a", NOW)],
                  {"a": [msg("guest", NOW, "first question")],
                   "b": [msg("guest", LATER, "second question")]},
-                 "first question", {"a": NOW, "b": PRIMED},
+                 "first question", {"a": entry(NOW), "b": entry(PRIMED)},
                  id="oldest-waiting-wins-and-the-other-stays-pending"),
     pytest.param({"a": NOW}, [conv("a", NOW)], {},
-                 None, {"a": NOW},
+                 None, {"a": entry(NOW)},
                  id="nothing-new"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "11am"),
                         msg("guest", "2026-07-30T09:30:00+00:00", "when is checkout?")]},
-                 None, {"a": NOW},
+                 None, {"a": entry(NOW)},
                  id="guest-then-owner-answered"),
     pytest.param({"a": PRIMED, "b": PRIMED}, [conv("b", LATER), conv("a", NOW)],
                  {"a": [msg("host", NOW, "Owner replied")],
                   "b": [msg("guest", LATER, "real question")]},
-                 "real question", {"a": NOW, "b": LATER},
+                 "real question", {"a": entry(NOW), "b": entry(LATER)},
                  id="falls-through-a-host-only-conversation"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("concierge", NOW, "forwarding to the host"),
                         msg("guest", "2026-07-30T09:00:00+00:00", "is there parking?")]},
-                 "is there parking?", {"a": NOW},
+                 "is there parking?", {"a": entry(NOW)},
                  id="unmodelled-role-still-reaches-owner"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "Thanks for booking!", sender_name="Bot:112524"),
                         msg("guest", "2026-07-30T09:30:00+00:00", "will chains be enough?")]},
-                 "will chains be enough?", {"a": NOW},
+                 "will chains be enough?", {"a": entry(NOW)},
                  id="an-auto-template-is-not-an-owner-answering"),
     pytest.param({"a": "2026-07-30T09:30:00+00:00"}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "Welcome!", sender_name="Bot:92260"),
                         msg("guest", "2026-07-30T09:30:00+00:00", "already answered")]},
-                 None, {"a": NOW},
+                 None, {"a": entry(NOW)},
                  id="a-template-alone-does-not-re-ping-an-old-guest-message"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "on my way", sender_name="owner@example.com"),
                         msg("guest", "2026-07-30T09:30:00+00:00", "are you close?")]},
-                 None, {"a": NOW},
+                 None, {"a": entry(NOW)},
                  id="a-named-owner-is-still-an-owner"),
     pytest.param({"a": "2026-07-30T09:30:00+00:00"}, [conv("a", NOW)],
                  {"a": [msg("concierge", NOW, "forwarding to the host"),
                         msg("guest", "2026-07-30T09:00:00+00:00", "is there parking?")]},
-                 "forwarding to the host", {"a": NOW},
+                 "forwarding to the host", {"a": entry(NOW)},
                  id="an-unmodelled-role-reaches-owner-on-an-announced-thread"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("guest", NOW, "let me in", sender_name="Bot:not-really")]},
-                 "let me in", {"a": NOW},
+                 "let me in", {"a": entry(NOW)},
                  id="a-guest-cannot-mute-themselves-with-a-bot-name"),
     pytest.param({"a": PRIMED}, [conv("a", NOW)],
                  {"a": [msg("host", NOW, "Check-in is Friday", sender_name="Bot:112524")]},
-                 None, {"a": NOW},
+                 None, {"a": entry(NOW)},
                  id="a-thread-of-nothing-but-templates-has-no-speaker"),
 ])
 def test_run_selects_at_most_one_conversation(monkeypatch, cursor_file, cursor, convs, details,
@@ -401,7 +431,7 @@ def test_paging_covers_every_page_and_keeps_the_first_sighting(monkeypatch, curs
     run_with(monkeypatch, FakeApi(conversations, {}), cursor_file)
     saved = json.loads(cursor_file.read_text())
     assert len(saved) == 150
-    assert saved["c0"] == "2026-07-30T10:00:00+00:00"
+    assert saved["c0"] == entry("2026-07-30T10:00:00+00:00")
 
 
 RENDERABLE = msg("guest", "2026-07-30T10:00:00+00:00")

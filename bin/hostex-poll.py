@@ -80,11 +80,11 @@ a reply already sent is not sent again on a later approval of the same draft.
 """
 
 
-def pending_conversations(conversations: list[dict], cursor: dict[str, str]) -> list[dict]:
+def pending_conversations(conversations: list[dict], cursor: dict[str, dict]) -> list[dict]:
     """Conversations with traffic past their cursor, longest-waiting first."""
     pending = [
         conv for conv in conversations
-        if conv["last_message_at"] > cursor.get(conv["id"], "")
+        if conv["last_message_at"] > cursor.get(conv["id"], {}).get("seen", "")
     ]
     return sorted(pending, key=lambda conv: conv["last_message_at"])
 
@@ -226,11 +226,28 @@ def cursor_path() -> pathlib.Path:
     return hermes_home() / "hostex-poll-cursor.json"
 
 
-def load_cursor(path: pathlib.Path) -> dict[str, str]:
-    return json.loads(path.read_text()) if path.exists() else {}
+def load_cursor(path: pathlib.Path) -> dict[str, dict]:
+    """Entries are {"seen": <iso>, "followed_up": <bool>}.
+
+    A bare string is the shape deployed before the follow-up existed and reads
+    as a watermark never followed up — so an upgrade keeps what the running
+    poller knew instead of announcing every open conversation on its first
+    tick.
+    """
+    raw = json.loads(path.read_text()) if path.exists() else {}
+    return {cid: {"seen": entry, "followed_up": False} if isinstance(entry, str) else entry
+            for cid, entry in raw.items()}
 
 
-def save_cursor(path: pathlib.Path, cursor: dict[str, str]) -> None:
+def record_seen(cursor: dict[str, dict], cid: str, seen: str) -> None:
+    """Advance the watermark. A new one clears the follow-up flag: the guest
+    spoke again, so what the owners are sitting on is a different wait and has
+    earned its own reminder."""
+    if cursor.get(cid, {}).get("seen") != seen:
+        cursor[cid] = {"seen": seen, "followed_up": False}
+
+
+def save_cursor(path: pathlib.Path, cursor: dict[str, dict]) -> None:
     """Write atomically — a truncated cursor would raise on every later tick,
     the one failure an unattended job cannot recover from. A fixed tmp name is
     safe because the scheduler never runs two fires of a job at once."""
@@ -270,13 +287,14 @@ def run(token: str, cursor_file: pathlib.Path) -> str:
     output = SILENT
 
     if cold_start:
-        cursor = {c["id"]: c["last_message_at"] for c in conversations}
+        for conversation in conversations:
+            record_seen(cursor, conversation["id"], conversation["last_message_at"])
     else:
         # One conversation per run: cron injects a single agent turn, so a
         # second guest here would share its attention.
         for conversation in pending_conversations(conversations, cursor):
             cid = conversation["id"]
-            previous = cursor.get(cid, "")
+            previous = cursor.get(cid, {}).get("seen", "")
             messages = api_get(f"/conversations/{cid}", token)["data"]["messages"]
             thread = conversation_thread(messages)
             # The list said this conversation had traffic, so empty detail
@@ -291,7 +309,7 @@ def run(token: str, cursor_file: pathlib.Path) -> str:
             # template arriving on an already-announced thread from re-pinging
             # it, without a second rule about which role counts as waiting.
             speaker = last_speaker(thread)
-            cursor[cid] = conversation["last_message_at"]
+            record_seen(cursor, cid, conversation["last_message_at"])
             if (speaker is not None and speaker["sender_role"] != "host"
                     and speaker["created_at"] > previous):
                 output = render_prompt(conversation, thread)
