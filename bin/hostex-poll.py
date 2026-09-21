@@ -141,9 +141,11 @@ def overdue(conversations: list[dict], cursor: dict[str, dict],
     announcement does, so reading one as the other had the first tick after a
     deploy reporting a closed window on every conversation in the account.
     Measured from the watermark rather than from a separately recorded
-    announcement time — the poll runs every two minutes, so the two differ by
-    less than the rounding on "30 minutes", and the cursor already holds one
-    of them.
+    announcement time: in steady state the tick that announces is the tick
+    that wrote it, and traffic that moves it afterwards — one of Hostex's
+    templates, typically — only pushes the deadline out, never in. A backlog
+    drained one conversation per tick is where the two genuinely diverge, and
+    the owners get a window short by however long the queue was.
     """
     deadline = now - datetime.timedelta(minutes=FOLLOWUP_MINUTES)
     due = [conv for conv in conversations
