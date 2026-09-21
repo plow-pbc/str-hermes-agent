@@ -122,8 +122,15 @@ def primed_cursor(cursor_file):
 
 
 def run_with(monkeypatch, api, cursor_file):
+    """Every scenario this drives predates the follow-up feature, so `now` is
+    pinned at PRIMED, the earliest watermark any of them use: its deadline
+    lands 30 minutes earlier still, before every fixture in the file, so
+    nothing here can read as overdue. Otherwise the default wall-clock `now`
+    drifts past their fixed 2026 dates and a run made months from now finds
+    them all "overdue" on a tick that was only ever testing which
+    conversation gets selected."""
     monkeypatch.setattr(poll, "api_get", api)
-    return poll.run("tok", cursor_file)
+    return poll.run("tok", cursor_file, now=datetime.datetime.fromisoformat(PRIMED))
 
 
 def test_first_run_is_silent_and_records_every_conversation(monkeypatch, cursor_file):
@@ -208,6 +215,71 @@ def test_overdue_puts_the_longest_wait_first():
     cursor = {"a": entry(late), "b": entry(early)}
     due = poll.overdue([conv("a", late), conv("b", early)], cursor, FOLLOWUP_NOW)
     assert [c["id"] for c in due] == ["b", "a"]
+
+
+OVERDUE = "2026-07-30T08:00:00+00:00"
+
+
+@pytest.fixture
+def announced_cursor(cursor_file):
+    """One conversation, announced, its window long closed."""
+    cursor_file.write_text(json.dumps({"a": {"seen": OVERDUE, "followed_up": False}}))
+    return cursor_file
+
+
+def run_at(monkeypatch, api, cursor_file, now=FOLLOWUP_NOW):
+    monkeypatch.setattr(poll, "api_get", api)
+    return poll.run("tok", cursor_file, now=now)
+
+
+@pytest.mark.parametrize("thread, waiting", [
+    pytest.param([msg("guest", OVERDUE)], True, id="the-guest-is-still-waiting"),
+    pytest.param([msg("guest", OVERDUE), msg("host", "2026-07-30T08:05:00+00:00")], False,
+                 id="an-owner-answered-after-we-announced"),
+    pytest.param([msg("guest", OVERDUE),
+                  msg("host", "2026-07-30T08:05:00+00:00", sender_name="Bot:7")], True,
+                 id="a-template-is-not-an-answer"),
+])
+def test_the_window_closing_brings_the_conversation_back(
+        monkeypatch, announced_cursor, thread, waiting):
+    """Hostex is the authority on whether the guest was answered — an owner may
+    have replied in the Hostex app, where nothing told the poller."""
+    api = FakeApi([conv("a", OVERDUE)], {"a": list(reversed(thread))})
+    out = run_at(monkeypatch, api, announced_cursor)
+    assert ("Still waiting" in out) is waiting
+    assert json.loads(announced_cursor.read_text())["a"]["followed_up"] is True
+
+
+def test_the_reminder_fires_once(monkeypatch, announced_cursor):
+    """Otherwise an unanswered conversation re-raises every two minutes."""
+    api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE)]})
+    assert "Still waiting" in run_at(monkeypatch, api, announced_cursor)
+    assert run_at(monkeypatch, api, announced_cursor) == poll.SILENT
+
+
+def test_new_traffic_takes_the_tick_over_a_reminder(monkeypatch, cursor_file):
+    """A guest who just spoke and one still waiting both want the single turn
+    this tick has. The new message wins; the reminder is two minutes behind it."""
+    fresh = "2026-07-30T08:50:00+00:00"
+    cursor_file.write_text(json.dumps({
+        "a": {"seen": OVERDUE, "followed_up": False},
+        "b": {"seen": "2026-07-30T08:40:00+00:00", "followed_up": False}}))
+    api = FakeApi([conv("a", OVERDUE), conv("b", fresh, name="Sam")],
+                  {"a": [msg("guest", OVERDUE)], "b": [msg("guest", fresh)]})
+    out = run_at(monkeypatch, api, cursor_file)
+    assert "Still waiting" not in out and "Conversation: b" in out
+
+
+def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announced_cursor):
+    """The wording an owner let stand is the wording that goes; a reminder that
+    reads as 'write a reply' spends the veto window on words nobody saw."""
+    api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE, "when can we check in?")]})
+    out = run_at(monkeypatch, api, announced_cursor)
+    # Collapsed: the clause wraps across a physical line in FOLLOWUP, same as
+    # PROMPT's own clauses do (see test_the_prompt_withholds_the_guest...).
+    assert "do not compose a new one" in " ".join(out.split())
+    assert "Conversation: a" in out
+    assert "when can we check in?" in out
 
 
 @pytest.mark.parametrize("cursor, convs, details, emits, after", [

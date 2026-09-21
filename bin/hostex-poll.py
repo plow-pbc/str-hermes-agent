@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Detect the longest-waiting Hostex conversation with unread guest messages.
 
-Prints a prompt for a Hermes cron agent turn, or the wake-gate sentinel when
-there is nothing new. Detection only: composes no reply, calls no model,
-sends nothing. See README § Inbound guest messages.
+Prints a prompt for a Hermes cron agent turn — a new guest message, or a
+reminder that a draft the owners were shown is still unsent past its veto
+window — or the wake-gate sentinel when there is nothing to say. Detection
+only: composes no reply, calls no model, sends nothing. See README § Inbound
+guest messages.
 
 Probed against 479 live messages — and the newest-first invariant re-probed
 across all 366 conversations, 4,993 messages, once whole threads began
@@ -78,6 +80,29 @@ Send the reply once an owner approves the wording, and
 send what they approved — if they change it, that revision is what goes.
 Once you have sent it, say so:
 a reply already sent is not sent again on a later approval of the same draft.
+"""
+
+
+FOLLOWUP = """\
+Still waiting. You reported this to the owners and the guest has had no reply
+since — the veto window you announced has closed.
+
+Property: {property_title}
+Guest: {guest}
+Conversation: {conversation_id}
+
+{transcript}
+
+Find the draft you sent the owners for this conversation and act on it — do
+not compose a new one; the owners approved, or let stand, particular words.
+If you announced it under the veto window and no owner objected to, edited, or
+questioned it, send exactly those words to the conversation id above: the
+window has closed and the silence is the approval you said it would be. If an
+owner approved or edited it, send what they approved. If an owner objected, or
+you cannot find the draft or tell which of several it is, send the guest
+nothing and say so in the owners' group.
+Once you have sent it, say so.
+This reminder comes once. Nothing else is watching this conversation.
 """
 
 
@@ -302,8 +327,32 @@ def render_prompt(conversation: dict, messages: list[dict]) -> str:
     )
 
 
-def run(token: str, cursor_file: pathlib.Path) -> str:
-    """Emit a prompt for the longest-waiting guest, or the wake-gate sentinel."""
+def render_followup(conversation: dict, messages: list[dict]) -> str:
+    """The same fields `render_prompt` builds, under the reminder's framing."""
+    return FOLLOWUP.format(
+        property_title=conversation["property_title"],
+        guest=one_line(conversation["guest"]["name"]),
+        conversation_id=conversation["id"],
+        transcript="\n".join(
+            f"  [{m['created_at']}] {sender_label(m)}: {message_text(m)}" for m in messages
+        ),
+    )
+
+
+def read_thread(cid: str, token: str) -> list[dict]:
+    """The conversation, oldest first. The list said this id had traffic, so
+    empty detail means the two disagree — raising beats marking it handled and
+    never mentioning it again."""
+    thread = conversation_thread(api_get(f"/conversations/{cid}", token)["data"]["messages"])
+    if not thread:
+        raise ValueError(f"{cid}: list reported traffic, detail is empty")
+    return thread
+
+
+def run(token: str, cursor_file: pathlib.Path,
+        now: datetime.datetime | None = None) -> str:
+    """Emit a prompt for the longest-waiting guest, a reminder that a veto
+    window has closed, or the wake-gate sentinel."""
     # Keyed on the file, not the loaded dict: an account with no conversations
     # writes {} and would re-adopt every tick, swallowing the first real one.
     cold_start = not cursor_file.exists()
@@ -320,13 +369,7 @@ def run(token: str, cursor_file: pathlib.Path) -> str:
         for conversation in pending_conversations(conversations, cursor):
             cid = conversation["id"]
             previous = cursor.get(cid, {}).get("seen", "")
-            messages = api_get(f"/conversations/{cid}", token)["data"]["messages"]
-            thread = conversation_thread(messages)
-            # The list said this conversation had traffic, so empty detail
-            # means the two disagree. Raising beats marking it handled and
-            # never mentioning it again.
-            if not thread:
-                raise ValueError(f"{cid}: list reported traffic, detail is empty")
+            thread = read_thread(cid, token)
             # Someone is waiting unless a person on the owner side had the
             # last word. Phrased as "not host" rather than "is the guest" so
             # an unmodelled role errs toward telling them instead of reading
@@ -338,6 +381,23 @@ def run(token: str, cursor_file: pathlib.Path) -> str:
             if (speaker is not None and speaker["sender_role"] != "host"
                     and speaker["created_at"] > previous):
                 output = render_prompt(conversation, thread)
+                break
+
+    # Only when the tick has no new message to carry: a guest who just spoke
+    # and one who has been waiting thirty minutes both want the single turn
+    # cron injects, and the reminder is only two minutes behind.
+    if output is SILENT:
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        for conversation in overdue(conversations, cursor, now):
+            cid = conversation["id"]
+            thread = read_thread(cid, token)
+            speaker = last_speaker(thread)
+            # Marked either way: an owner who answered in the Hostex app closed
+            # this wait, and a reminder about it would re-raise a conversation
+            # that is already handled.
+            cursor[cid]["followed_up"] = True
+            if speaker is not None and speaker["sender_role"] != "host":
+                output = render_followup(conversation, thread)
                 break
 
     # Emit before committing: if the process dies between the two, the next
