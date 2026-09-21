@@ -123,25 +123,32 @@ def primed_cursor(cursor_file):
     return cursor_file
 
 
-def run_with(monkeypatch, api, cursor_file):
-    """Every scenario this drives predates the follow-up feature, so `now` is
-    pinned at PRIMED, the earliest watermark any of them use: its deadline
+def run_with(monkeypatch, api, cursor_file, now=None):
+    """Every scenario this drives predates the follow-up feature, so `now`
+    defaults to PRIMED, the earliest watermark any of them use: its deadline
     lands 30 minutes earlier still, before every fixture in the file, so
     nothing here can read as overdue. Otherwise the default wall-clock `now`
     drifts past their fixed 2026 dates and a run made months from now finds
     them all "overdue" on a tick that was only ever testing which
-    conversation gets selected."""
+    conversation gets selected.
+
+    A caller can override the default to prove the opposite: a watermark this
+    file never announced still reads as un-owed past its deadline too."""
     monkeypatch.setattr(poll, "api_get", api)
-    return poll.run("tok", cursor_file, now=datetime.datetime.fromisoformat(PRIMED))
+    return poll.run("tok", cursor_file,
+                     now=now or datetime.datetime.fromisoformat(PRIMED))
 
 
 def test_first_run_is_silent_and_records_every_conversation(monkeypatch, cursor_file):
-    """Otherwise the first tick announces every conversation that already exists."""
+    """Otherwise the first tick announces every conversation that already
+    exists. `now` sits well past every deadline here too, so a passing run
+    also proves the adopted watermark never reads as an announcement."""
     api = FakeApi(
         [conv("a", "2026-07-30T10:00:00+00:00"), conv("b", "2026-07-30T11:00:00+00:00")],
         {},
     )
-    assert run_with(monkeypatch, api, cursor_file) == poll.SILENT
+    now = datetime.datetime.fromisoformat("2026-07-30T12:00:00+00:00")
+    assert run_with(monkeypatch, api, cursor_file, now=now) == poll.SILENT
     assert api.detail_calls == []
     assert json.loads(cursor_file.read_text()) == {
         "a": {"seen": "2026-07-30T10:00:00+00:00", "owed": None},
@@ -152,10 +159,13 @@ def test_first_run_is_silent_and_records_every_conversation(monkeypatch, cursor_
 def test_the_old_cursor_shape_upgrades_without_re_announcing(monkeypatch, cursor_file):
     """A deployed cursor maps id -> timestamp. Read as a fresh entry it would
     have no watermark, and the first tick after the upgrade would announce
-    every open conversation at once."""
+    every open conversation at once. `now` sits past that watermark's own
+    deadline too, so the same run also proves a legacy cursor never reads as
+    an announcement, however overdue it looks."""
     cursor_file.write_text(json.dumps({"a": PRIMED}))
     api = FakeApi([conv("a", PRIMED)], {"a": [msg("guest", PRIMED)]})
-    assert run_with(monkeypatch, api, cursor_file) == poll.SILENT
+    now = datetime.datetime.fromisoformat("2026-07-30T09:00:00+00:00")
+    assert run_with(monkeypatch, api, cursor_file, now=now) == poll.SILENT
     assert json.loads(cursor_file.read_text())["a"] == {"seen": PRIMED, "owed": None}
 
 
@@ -274,24 +284,6 @@ def test_the_window_closing_brings_the_conversation_back(
     out = run_at(monkeypatch, api, cursor_file)
     assert ("Still waiting" in out) is waiting
     assert json.loads(cursor_file.read_text())["a"]["owed"] is None
-
-
-@pytest.mark.parametrize("seed", [
-    pytest.param(None, id="cold-start-adopted-the-backlog"),
-    pytest.param(json.dumps({"a": OVERDUE}), id="a-legacy-bare-string-cursor"),
-])
-def test_a_watermark_we_adopted_is_not_a_draft_we_announced(monkeypatch, cursor_file, seed):
-    """The live cursor adopted 366 conversations at cold start, every one of
-    them long past thirty minutes old. Read as "we announced this", the first
-    tick after a deploy tells the agent its veto window has closed on a draft
-    that was never written -- and tells it again every two minutes until the
-    backlog drains. The legacy bare-string cursor is the same watermark by
-    another route, so both shapes are pinned."""
-    if seed is not None:
-        cursor_file.write_text(seed)
-    api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE)]})
-    assert run_at(monkeypatch, api, cursor_file) == poll.SILENT
-    assert api.detail_calls == []
 
 
 # Newer than OVERDUE so the tick has traffic to advance past, old enough that
