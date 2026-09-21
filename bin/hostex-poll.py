@@ -121,22 +121,23 @@ FOLLOWUP_MINUTES = 30
 
 def overdue(conversations: list[dict], cursor: dict[str, dict],
             now: datetime.datetime) -> list[dict]:
-    """Announced waits whose veto window has closed, longest-waiting first.
+    """Owed follow-ups whose veto window has closed, longest-waiting first.
 
-    `seen == last_message_at` is what "already announced" looks like from here:
-    the tick that announced a conversation is the tick that wrote its
-    watermark forward, so an entry still behind the list belongs to the
-    new-message path instead. Measured from the guest's message rather than
-    from a separately recorded announcement time — the poll runs every two
-    minutes, so the two differ by less than the rounding on "30 minutes", and
-    the cursor already holds the one of them.
+    `owed` is recorded by the tick that announced the wait, never inferred
+    from the watermark: cold start, the legacy-string upgrade and the
+    fall-through inside the pending loop all write the same watermark an
+    announcement does, so reading one as the other had the first tick after a
+    deploy reporting a closed window on every conversation in the account.
+    Measured from the watermark rather than from a separately recorded
+    announcement time — the poll runs every two minutes, so the two differ by
+    less than the rounding on "30 minutes", and the cursor already holds one
+    of them.
     """
     deadline = now - datetime.timedelta(minutes=FOLLOWUP_MINUTES)
     due = [conv for conv in conversations
            if (entry := cursor.get(conv["id"])) is not None
-           and not entry["followed_up"]
-           and entry["seen"] == conv["last_message_at"]
-           and datetime.datetime.fromisoformat(conv["last_message_at"]) <= deadline]
+           and entry["owed"]
+           and datetime.datetime.fromisoformat(entry["seen"]) <= deadline]
     return sorted(due, key=lambda conv: conv["last_message_at"])
 
 
@@ -278,24 +279,27 @@ def cursor_path() -> pathlib.Path:
 
 
 def load_cursor(path: pathlib.Path) -> dict[str, dict]:
-    """Entries are {"seen": <iso>, "followed_up": <bool>}.
+    """Entries are {"seen": <iso>, "owed": <bool>}, where `owed` means we
+    announced this wait to the owners and have not followed it up yet.
 
-    A bare string is the shape deployed before the follow-up existed and reads
-    as a watermark never followed up — so an upgrade keeps what the running
-    poller knew instead of announcing every open conversation on its first
-    tick.
+    A bare string is the shape deployed before the follow-up existed: a
+    watermark, and nothing said about it. Upgraded as unowed, so the first
+    tick after the upgrade keeps what the running poller knew instead of
+    reporting a closed window on every conversation it had ever adopted.
     """
     raw = json.loads(path.read_text()) if path.exists() else {}
-    return {cid: {"seen": entry, "followed_up": False} if isinstance(entry, str) else entry
+    return {cid: {"seen": entry, "owed": False} if isinstance(entry, str) else entry
             for cid, entry in raw.items()}
 
 
 def record_seen(cursor: dict[str, dict], cid: str, seen: str) -> None:
-    """Advance the watermark. A new one clears the follow-up flag: the guest
-    spoke again, so what the owners are sitting on is a different wait and has
-    earned its own reminder."""
+    """Advance the watermark, owing nothing. This runs on every conversation
+    the tick walks, including the ones it says nothing about, so it cannot be
+    what marks a wait announced — only the emit below can. A new watermark
+    also discharges an older obligation: the guest spoke again, so whatever
+    the owners are sitting on now belongs to a different wait."""
     if cursor.get(cid, {}).get("seen") != seen:
-        cursor[cid] = {"seen": seen, "followed_up": False}
+        cursor[cid] = {"seen": seen, "owed": False}
 
 
 def save_cursor(path: pathlib.Path, cursor: dict[str, dict]) -> None:
@@ -382,6 +386,9 @@ def run(token: str, cursor_file: pathlib.Path,
             if (speaker is not None and speaker["sender_role"] != "host"
                     and speaker["created_at"] > previous):
                 output = render_prompt(conversation, thread)
+                # The one place a wait becomes owed: we are telling the owners
+                # about it on this turn, so the window starts here.
+                cursor[cid]["owed"] = True
                 break
 
     # Only when the tick has no new message to carry: a guest who just spoke
@@ -393,10 +400,10 @@ def run(token: str, cursor_file: pathlib.Path,
             cid = conversation["id"]
             thread = read_thread(cid, token)
             speaker = last_speaker(thread)
-            # Marked either way: an owner who answered in the Hostex app closed
-            # this wait, and a reminder about it would re-raise a conversation
-            # that is already handled.
-            cursor[cid]["followed_up"] = True
+            # Discharged either way: an owner who answered in the Hostex app
+            # closed this wait, and a reminder about it would re-raise a
+            # conversation that is already handled.
+            cursor[cid]["owed"] = False
             if speaker is not None and speaker["sender_role"] != "host":
                 output = render_followup(conversation, thread)
                 break
