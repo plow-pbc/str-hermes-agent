@@ -334,10 +334,46 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     assert "do not compose a new one" in flowed
     assert "Conversation: a" in out
     assert "when can we check in?" in out
-    # Silence only counts as approval where an objection would have been visible.
-    assert ("Check the owners' thread itself for a reply naming this draft "
-            "before treating silence as approval") in flowed
-    assert "if you cannot read that thread at all, send the guest nothing and say so." in flowed
+
+
+@pytest.mark.parametrize("clause", [
+    # The mechanism, and the reason this is not left to the model: the cron
+    # turn runs in its own session and nothing in it says the owners' thread
+    # is reachable at all, so an instruction that only demands the check gets
+    # the fail-closed branch every time and the feature never sends. Verified
+    # on the live host — session_search is in the cron toolset, and a search
+    # from an unrelated session id returns the owners' group with the
+    # announcement in it.
+    pytest.param("recall past conversations with `session_search`",
+                 id="how-to-read-the-owners-thread"),
+    pytest.param("if that search returns nothing you can read, send the guest "
+                 "nothing and say so", id="and-fail-closed-when-it-cannot"),
+    # The announcing tick is the same tick for both tiers and the poller
+    # cannot tell them apart, so the reminder has to: without this clause an
+    # approval-path draft — the majority — falls through every branch below
+    # and reaches the guest in wording no owner ever answered.
+    pytest.param("If you did not announce this draft under the veto window",
+                 id="an-approval-path-draft-is-not-sent"),
+    pytest.param("say in the owners' group that it is still waiting on them",
+                 id="it-is-raised-with-the-owners-instead"),
+    # Two drafts can be open for different guests, which is why they carry
+    # ids at all. Naming one back is a voluntary model action in the group
+    # turn, so the thread may hold nothing but "stop" — read as the other
+    # draft's, it sends this one.
+    pytest.param('a bare "stop" in that thread stops this send',
+                 id="an-unaddressed-stop-stops-every-draft"),
+    # PROMPT's clause, carried across. The poller prints before it commits the
+    # cursor, so a crash between the two re-emits — into a session with no
+    # memory of the send, and behind Hostex's own read lag.
+    pytest.param("a reply already sent is not sent again", id="sent-once"),
+])
+def test_the_reminder_sends_only_what_an_owner_let_stand(clause):
+    """FOLLOWUP is the whole instruction the turn that actually sends gets.
+
+    Collapsed, like PROMPT's clauses above: each of these sits on one physical
+    line only by accident of the current wrap.
+    """
+    assert clause in " ".join(poll.FOLLOWUP.split())
 
 
 @pytest.mark.parametrize("cursor, convs, details, emits, after", [

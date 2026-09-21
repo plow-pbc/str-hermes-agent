@@ -83,8 +83,9 @@ a reply already sent is not sent again on a later approval of the same draft.
 
 
 FOLLOWUP = """\
-Still waiting. You reported this to the owners and the guest has had no reply
-since — the veto window you announced has closed.
+Still waiting. You reported this to the owners thirty minutes ago and the guest
+has had no reply since. Which of the two paths that draft took decides what
+happens now, and this reminder cannot tell them apart — you can.
 
 Property: {property_title}
 Guest: {guest}
@@ -93,16 +94,27 @@ Conversation: {conversation_id}
 {transcript}
 
 Find the draft you sent the owners for this conversation and act on it — do not
-compose a new one; the owners approved, or let stand, particular words. Check
-the owners' thread itself for a reply naming this draft before treating silence
-as approval — if you cannot read that thread at all, send the guest nothing and
-say so. If you announced it under the veto window and no owner objected to,
-edited, or questioned it, send exactly those words to the conversation id
-above: the window has closed and the silence is the approval you said it would
-be. If an owner approved or edited it, send what they approved. If an owner
-objected, or you cannot find the draft or tell which of several it is, send the
-guest nothing and say so in the owners' group.
-Once you have sent it, say so.
+compose a new one; the owners approved, or let stand, particular words. This
+turn is a new session and does not carry the owners' thread with it: recall
+past conversations with `session_search` to find that thread, the delivery that
+carried this draft, and whatever the owners said after it. Read it before
+treating silence as approval — if that search returns nothing you can read,
+send the guest nothing and say so.
+An owner objection that names no draft objects to every draft in flight, this
+one included: a bare "stop" in that thread stops this send, and counts as an
+owner having objected in everything below. The owners are asked to name the id
+and need not have.
+If you did not announce this draft under the veto window — if it went to the
+owners for approval and none of them has answered — send the guest nothing:
+say in the owners' group that it is still waiting on them. Silence is only
+approval where you told the owners it would be.
+If you announced it under the veto window and no owner objected to, edited, or
+questioned it, send exactly those words to the conversation id above: the
+window has closed and the silence is the approval you said it would be. If an
+owner approved or edited it, send what they approved. If an owner objected, or
+you cannot find the draft or tell which of several it is, send the guest
+nothing and say so in the owners' group.
+Once you have sent it, say so: a reply already sent is not sent again.
 This reminder comes once. Nothing else is watching this conversation.
 """
 
