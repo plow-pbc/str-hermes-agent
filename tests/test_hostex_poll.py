@@ -279,9 +279,14 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     out = run_at(monkeypatch, api, announced_cursor)
     # Collapsed: the clause wraps across a physical line in FOLLOWUP, same as
     # PROMPT's own clauses do (see test_the_prompt_withholds_the_guest...).
-    assert "do not compose a new one" in " ".join(out.split())
+    flowed = " ".join(out.split())
+    assert "do not compose a new one" in flowed
     assert "Conversation: a" in out
     assert "when can we check in?" in out
+    # Silence only counts as approval where an objection would have been visible.
+    assert ("Check the owners' thread itself for a reply naming this draft "
+            "before treating silence as approval") in flowed
+    assert "if you cannot read that thread at all, send the guest nothing and say so." in flowed
 
 
 @pytest.mark.parametrize("cursor, convs, details, emits, after", [
