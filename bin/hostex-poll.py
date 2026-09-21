@@ -111,9 +111,9 @@ approval where you told the owners it would be.
 If you announced it under the veto window and no owner objected to, edited, or
 questioned it, send exactly those words to the conversation id above: the
 window has closed and the silence is the approval you said it would be. If an
-owner approved or edited it, send what they approved. If an owner objected, or
-you cannot find the draft or tell which of several it is, send the guest
-nothing and say so in the owners' group.
+owner approved it, send what they approved. If an owner edited or objected to
+it, or you cannot find the draft or tell which of several it is, send the
+guest nothing and say so in the owners' group.
 Once you have sent it, say so: a reply already sent is not sent again.
 This reminder comes once. Nothing else is watching this conversation.
 """

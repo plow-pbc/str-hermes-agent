@@ -391,6 +391,11 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     # draft's, it sends this one.
     pytest.param('a bare "stop" in that thread stops this send',
                  id="an-unaddressed-stop-stops-every-draft"),
+    # config.yaml's group prompt treats an edit as a fresh draft on the
+    # approval path, not a variant of approval — so the words an owner typed
+    # to change a draft must never be the words that reach the guest.
+    pytest.param("If an owner edited or objected to it",
+                 id="an-edit-does-not-authorise-the-send"),
     # PROMPT's clause, carried across. The poller prints before it commits the
     # cursor, so a crash between the two re-emits — into a session with no
     # memory of the send, and behind Hostex's own read lag.
