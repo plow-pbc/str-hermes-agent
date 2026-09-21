@@ -278,6 +278,16 @@ Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`
 under `wiki-nightly`, and after its next run confirm the scheduler line
 `Job 'wiki-nightly': delivered to plow_chat:…` names the home chat.
 
+## 4.66 Update the hostex-inbound wrapper instruction, once
+
+Same drift as 4.6's `origin` and the `--failure-deliver` edit just above:
+`enable-hostex-inbound.sh`'s wrapper text is a positional argument baked into
+the job at creation, not read live, so a commit that changes it — like this
+one — does not reach a job that already exists. README § [Inbound guest
+messages](../../../README.md#inbound-guest-messages) has the verified
+`cron edit … --prompt` command and why `edit`, not recreate, is the right one
+here too.
+
 ## 4.7 Register the host-side promote, once
 
 Ingest staging — the raw conversations and the manifest — never crosses the

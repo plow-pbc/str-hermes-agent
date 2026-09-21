@@ -713,6 +713,24 @@ The script itself sends nothing — it composes no reply and has no messaging
 tool. The agent turn it feeds is *instructed* not to act, which is not the
 same as being unable to; see below.
 
+That instruction is a positional argument to `hermes cron create`
+(`scripts/enable-hostex-inbound.sh`), baked into the job at creation — not
+read from this file live. Editing it here changes nothing for a job that
+already exists, and the enable script refuses to run while one does, so a
+redeploy cannot pick the edit up either. Updating the deployed job in place:
+
+```sh
+docker compose exec -T hermes hermes cron edit hostex-inbound --prompt "<new text>"
+```
+
+Verified against the live image: `hermes cron` has no `update` subcommand —
+`edit` is the one that carries `--prompt`, and it replaces the job's stored
+instruction without touching its cursor or origin. Until that runs, the
+deployed job is still executing whatever text it was created with, and if
+that text forbids messaging the guest unconditionally, the follow-up in
+`bin/hostex-poll.py`'s reminder prompt cannot send regardless of what ships
+here.
+
 - One conversation per tick, since cron injects a single agent turn. The rest
   wait for later ticks, oldest first.
 - It surfaces unless a person on the owner side had the last word. If an owner
