@@ -323,8 +323,12 @@ def save_cursor(path: pathlib.Path, cursor: dict[str, dict]) -> None:
     os.replace(tmp, path)
 
 
-def render_prompt(conversation: dict, messages: list[dict]) -> str:
-    """Build the agent's prompt. Guest name only — never email or phone.
+def render(template: str, conversation: dict, messages: list[dict]) -> str:
+    """Fill PROMPT or FOLLOWUP. Guest name only — never email or phone.
+
+    One renderer for both because they carry the same conversation under
+    different framing, and a second copy of this is a second place for a
+    guest-supplied field to arrive unflattened.
 
     The guest name goes through `one_line`, as message content does, so neither
     can occupy a line that isn't its own. The rest — property title,
@@ -332,21 +336,9 @@ def render_prompt(conversation: dict, messages: list[dict]) -> str:
     role and sender_name, and the `display_type` `message_text` falls back to
     — is Hostex's own, not written by a guest. Flatten one at its
     own interpolation site if that ever stops being true. What is written *on*
-    a guest's line is PROMPT's disclaimer's job, not this function's.
+    a guest's line is the template's disclaimer's job, not this function's.
     """
-    return PROMPT.format(
-        property_title=conversation["property_title"],
-        guest=one_line(conversation["guest"]["name"]),
-        conversation_id=conversation["id"],
-        transcript="\n".join(
-            f"  [{m['created_at']}] {sender_label(m)}: {message_text(m)}" for m in messages
-        ),
-    )
-
-
-def render_followup(conversation: dict, messages: list[dict]) -> str:
-    """The same fields `render_prompt` builds, under the reminder's framing."""
-    return FOLLOWUP.format(
+    return template.format(
         property_title=conversation["property_title"],
         guest=one_line(conversation["guest"]["name"]),
         conversation_id=conversation["id"],
@@ -397,7 +389,7 @@ def run(token: str, cursor_file: pathlib.Path,
             record_seen(cursor, cid, conversation["last_message_at"])
             if (speaker is not None and speaker["sender_role"] != "host"
                     and speaker["created_at"] > previous):
-                output = render_prompt(conversation, thread)
+                output = render(PROMPT, conversation, thread)
                 # The one place a wait becomes owed: we are telling the owners
                 # about it on this turn, so the window starts here.
                 cursor[cid]["owed"] = True
@@ -417,7 +409,7 @@ def run(token: str, cursor_file: pathlib.Path,
             # conversation that is already handled.
             cursor[cid]["owed"] = False
             if speaker is not None and speaker["sender_role"] != "host":
-                output = render_followup(conversation, thread)
+                output = render(FOLLOWUP, conversation, thread)
                 break
 
     # Emit before committing: if the process dies between the two, the next
