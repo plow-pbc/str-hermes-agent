@@ -19,6 +19,7 @@ back to their last human speaker, where a deeper drop still passes silently.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -87,6 +88,30 @@ def pending_conversations(conversations: list[dict], cursor: dict[str, dict]) ->
         if conv["last_message_at"] > cursor.get(conv["id"], {}).get("seen", "")
     ]
     return sorted(pending, key=lambda conv: conv["last_message_at"])
+
+
+FOLLOWUP_MINUTES = 30
+
+
+def overdue(conversations: list[dict], cursor: dict[str, dict],
+            now: datetime.datetime) -> list[dict]:
+    """Announced waits whose veto window has closed, longest-waiting first.
+
+    `seen == last_message_at` is what "already announced" looks like from here:
+    the tick that announced a conversation is the tick that wrote its
+    watermark forward, so an entry still behind the list belongs to the
+    new-message path instead. Measured from the guest's message rather than
+    from a separately recorded announcement time — the poll runs every two
+    minutes, so the two differ by less than the rounding on "30 minutes", and
+    the cursor already holds the one of them.
+    """
+    deadline = now - datetime.timedelta(minutes=FOLLOWUP_MINUTES)
+    due = [conv for conv in conversations
+           if (entry := cursor.get(conv["id"])) is not None
+           and not entry["followed_up"]
+           and entry["seen"] == conv["last_message_at"]
+           and datetime.datetime.fromisoformat(conv["last_message_at"]) <= deadline]
+    return sorted(due, key=lambda conv: conv["last_message_at"])
 
 
 def conversation_thread(messages: list[dict]) -> list[dict]:

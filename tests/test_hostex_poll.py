@@ -4,6 +4,7 @@ Loaded by path because bin/ is not an importable package and the script's name
 is not a valid module identifier — the same approach tests/test_seam_server.py
 uses for mcp-seam.
 """
+import datetime
 import importlib.util
 import json
 import os
@@ -168,9 +169,45 @@ NOW = "2026-07-30T10:00:00+00:00"
 LATER = "2026-07-30T11:00:00+00:00"
 
 
-def entry(seen):
+def entry(seen, followed_up=False):
     """The cursor shape a fresh watermark write leaves behind."""
-    return {"seen": seen, "followed_up": False}
+    return {"seen": seen, "followed_up": followed_up}
+
+
+# Named apart from NOW above: that constant is baked into decorator-time
+# parametrize lists everywhere else in this file, but
+# test_a_forged_line_in_the_guest_name_cannot_reach_the_prompt reads NOW
+# from a function body, which resolves the module global at call time — a
+# second top-level assignment to NOW would silently retarget that lookup.
+FOLLOWUP_NOW = datetime.datetime.fromisoformat("2026-07-30T09:00:00+00:00")
+
+
+@pytest.mark.parametrize("entry, last, expected", [
+    pytest.param(entry("2026-07-30T08:29:00+00:00"),
+                 "2026-07-30T08:29:00+00:00", True, id="the-window-has-closed"),
+    pytest.param(entry("2026-07-30T08:31:00+00:00"),
+                 "2026-07-30T08:31:00+00:00", False, id="still-inside-the-window"),
+    pytest.param(entry("2026-07-30T08:29:00+00:00", followed_up=True),
+                 "2026-07-30T08:29:00+00:00", False, id="already-followed-up"),
+    pytest.param(entry("2026-07-30T08:00:00+00:00"),
+                 "2026-07-30T08:29:00+00:00", False, id="traffic-we-have-not-announced-yet"),
+    pytest.param(None, "2026-07-30T08:00:00+00:00", False, id="never-seen-at-all"),
+])
+def test_overdue(entry, last, expected):
+    """Due means: we announced this wait, the window has closed, and we have
+    not reminded anyone about it yet. Unannounced traffic belongs to the
+    new-message path, which has not run for it yet."""
+    cursor = {"a": entry} if entry else {}
+    assert bool(poll.overdue([conv("a", last)], cursor, FOLLOWUP_NOW)) is expected
+
+
+def test_overdue_puts_the_longest_wait_first():
+    """One conversation per run, so the order is the choice of which guest
+    has been waiting longest."""
+    early, late = "2026-07-30T08:00:00+00:00", "2026-07-30T08:20:00+00:00"
+    cursor = {"a": entry(late), "b": entry(early)}
+    due = poll.overdue([conv("a", late), conv("b", early)], cursor, FOLLOWUP_NOW)
+    assert [c["id"] for c in due] == ["b", "a"]
 
 
 @pytest.mark.parametrize("cursor, convs, details, emits, after", [
