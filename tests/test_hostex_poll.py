@@ -223,7 +223,7 @@ OVERDUE = "2026-07-30T08:00:00+00:00"
 @pytest.fixture
 def announced_cursor(cursor_file):
     """One conversation, announced, its window long closed."""
-    cursor_file.write_text(json.dumps({"a": {"seen": OVERDUE, "followed_up": False}}))
+    cursor_file.write_text(json.dumps({"a": entry(OVERDUE)}))
     return cursor_file
 
 
@@ -262,8 +262,8 @@ def test_new_traffic_takes_the_tick_over_a_reminder(monkeypatch, cursor_file):
     this tick has. The new message wins; the reminder is two minutes behind it."""
     fresh = "2026-07-30T08:50:00+00:00"
     cursor_file.write_text(json.dumps({
-        "a": {"seen": OVERDUE, "followed_up": False},
-        "b": {"seen": "2026-07-30T08:40:00+00:00", "followed_up": False}}))
+        "a": entry(OVERDUE),
+        "b": entry("2026-07-30T08:40:00+00:00")}))
     api = FakeApi([conv("a", OVERDUE), conv("b", fresh, name="Sam")],
                   {"a": [msg("guest", OVERDUE)], "b": [msg("guest", fresh)]})
     out = run_at(monkeypatch, api, cursor_file)
@@ -496,12 +496,16 @@ def test_the_prompt_is_emitted_before_the_cursor_is_committed(monkeypatch, prime
         [conv("a", "2026-07-30T10:00:00+00:00")],
         {"a": [msg("guest", "2026-07-30T10:00:00+00:00", "where do I park?")]},
     )
-    monkeypatch.setattr(poll, "api_get", api)
     def boom(path, cursor):
         raise RuntimeError("disk full")
     monkeypatch.setattr(poll, "save_cursor", boom)
     with pytest.raises(RuntimeError):
-        poll.run("tok", primed_cursor)
+        # Through run_with, not a bare poll.run(...): this call reaches
+        # output-is-SILENT scenarios by coincidence of what's in the fixture
+        # today (a pending message wins the tick), and an unpinned `now`
+        # would default to real wall-clock the moment a future edit steers it
+        # toward a SILENT one.
+        run_with(monkeypatch, api, primed_cursor)
     assert "where do I park?" in capsys.readouterr().out
     assert json.loads(primed_cursor.read_text())["a"] == PRIMED
 
