@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Detect the longest-waiting Hostex conversation with unread guest messages.
 
-Prints a prompt for a Hermes cron agent turn, or the wake-gate sentinel when
-there is nothing new. Detection only: composes no reply, calls no model,
-sends nothing. See README § Inbound guest messages.
+Prints a prompt for a Hermes cron agent turn — a new guest message, or a
+reminder that a draft the owners were shown is still unsent past its veto
+window — or the wake-gate sentinel when there is nothing to say. Detection
+only: composes no reply, calls no model, sends nothing. See README § Inbound
+guest messages.
 
 Probed against 479 live messages — and the newest-first invariant re-probed
 across all 366 conversations, 4,993 messages, once whole threads began
@@ -19,6 +21,7 @@ back to their last human speaker, where a deeper drop still passes silently.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -64,10 +67,9 @@ A later bare
 approval has to identify the words, where they stop, and the guest they go to.
 Which path the draft takes is the two-tier guest-send rule in SOUL.md — it,
 not this prompt, owns eligibility. For a veto-window draft, say so above the
-draft-id line, quote the wiki bullets it relies on there, add
-"sending in 30 minutes unless an owner says stop", and schedule the one-shot
-send job. Everything else — and any draft you are unsure about — takes the
-default path:
+draft-id line, quote the wiki bullets it relies on there, and add
+"sending in 30 minutes unless an owner says stop". Everything else — and any
+draft you are unsure about — takes the default path:
 do not take the step on this turn: nothing reaches the guest
 until an owner has approved it, and
 approval only counts from a member of this chat.
@@ -80,13 +82,78 @@ a reply already sent is not sent again on a later approval of the same draft.
 """
 
 
-def pending_conversations(conversations: list[dict], cursor: dict[str, str]) -> list[dict]:
+FOLLOWUP = """\
+Still waiting. You reported this to the owners thirty minutes ago and the guest
+has had no reply since. Which of the two paths that draft took decides what
+happens now, and this reminder cannot tell them apart — you can.
+
+Property: {property_title}
+Guest: {guest}
+Conversation: {conversation_id}
+
+{transcript}
+
+Find the draft you sent the owners for this conversation and act on it — do not
+compose a new one; the owners approved, or let stand, particular words. This
+turn is a new session and does not carry the owners' thread with it: recall
+past conversations with `session_search` to find that thread, the delivery that
+carried this draft, and whatever the owners said after it. Read it before
+treating silence as approval — if that search returns nothing you can read,
+send the guest nothing and say so.
+An owner objection that names no draft objects to every draft in flight, this
+one included: a bare "stop" in that thread stops this send, and counts as an
+owner having objected in everything below. The owners are asked to name the id
+and need not have.
+If you did not announce this draft under the veto window — if it went to the
+owners for approval and none of them has answered — send the guest nothing:
+say in the owners' group that it is still waiting on them. Silence is only
+approval where you told the owners it would be.
+If you announced it under the veto window and no owner objected to, edited, or
+questioned it, send exactly those words to the conversation id above: the
+window has closed and the silence is the approval you said it would be. If an
+owner approved it, send what they approved. If an owner edited or objected to
+it, or you cannot find the draft or tell which of several it is, send the
+guest nothing and say so in the owners' group.
+Once you have sent it, say so: a reply already sent is not sent again.
+This reminder comes once. Nothing else is watching this conversation.
+"""
+
+
+def pending_conversations(conversations: list[dict], cursor: dict[str, dict]) -> list[dict]:
     """Conversations with traffic past their cursor, longest-waiting first."""
     pending = [
         conv for conv in conversations
-        if conv["last_message_at"] > cursor.get(conv["id"], "")
+        if conv["last_message_at"] > cursor.get(conv["id"], {}).get("seen", "")
     ]
     return sorted(pending, key=lambda conv: conv["last_message_at"])
+
+
+FOLLOWUP_MINUTES = 30
+
+
+def overdue(conversations: list[dict], cursor: dict[str, dict],
+            now: datetime.datetime) -> list[dict]:
+    """Owed follow-ups whose veto window has closed, longest-waiting first.
+
+    `owed` is the instant the poller announced this wait, and null when it owes
+    nothing — written by the tick that made the announcement, never inferred
+    from the watermark. Both halves of that mattered: cold start, the
+    legacy-string upgrade and the fall-through inside the pending loop all
+    write the same watermark an announcement does, so reading one as the other
+    had the first tick after a deploy reporting a closed window on every
+    conversation in the account; and the watermark is the guest's clock, not
+    ours. A backlog drained one conversation per tick announces the tenth
+    guest twenty minutes after they wrote, and a Hostex template landing on an
+    announced thread moves the watermark again — measured from either, the
+    thirty minutes the owners were promised is not the thirty minutes they
+    get.
+    """
+    deadline = now - datetime.timedelta(minutes=FOLLOWUP_MINUTES)
+    due = [conv for conv in conversations
+           if (entry := cursor.get(conv["id"])) is not None
+           and entry["owed"]
+           and datetime.datetime.fromisoformat(entry["owed"]) <= deadline]
+    return sorted(due, key=lambda conv: conv["last_message_at"])
 
 
 def conversation_thread(messages: list[dict]) -> list[dict]:
@@ -226,11 +293,41 @@ def cursor_path() -> pathlib.Path:
     return hermes_home() / "hostex-poll-cursor.json"
 
 
-def load_cursor(path: pathlib.Path) -> dict[str, str]:
-    return json.loads(path.read_text()) if path.exists() else {}
+def load_cursor(path: pathlib.Path) -> dict[str, dict]:
+    """Entries are {"seen": <iso>, "owed": <iso> | None} — the newest message
+    walked past, and when we announced a wait on it that we still owe the
+    owners a follow-up on.
+
+    A bare string is the shape deployed before the follow-up existed: a
+    watermark, and nothing said about it. Upgraded owing nothing, so the first
+    tick after the upgrade keeps what the running poller knew instead of
+    reporting a closed window on every conversation it had ever adopted — the
+    live cursor holds 380 of them, adopted in one tick.
+    """
+    raw = json.loads(path.read_text()) if path.exists() else {}
+    return {cid: {"seen": entry, "owed": None} if isinstance(entry, str) else entry
+            for cid, entry in raw.items()}
 
 
-def save_cursor(path: pathlib.Path, cursor: dict[str, str]) -> None:
+def record_seen(cursor: dict[str, dict], cid: str, seen: str) -> None:
+    """Advance the watermark, owing nothing new. This runs on every
+    conversation the tick walks, including the ones it says nothing about, so
+    it cannot be what marks a wait announced — only the emit in `run` can.
+
+    An obligation already recorded survives the move, deadline included. What
+    advanced this watermark is as often one of Hostex's own templates as the
+    guest, and a template is neither an answer nor a reason to restart the
+    clock: discharging here would strand the draft the owners are holding with
+    nothing left watching it, and re-dating it would let a stream of templates
+    hold the window open forever. Only the follow-up clears the debt, and by
+    then it has read the thread and can see whether an owner answered in the
+    Hostex app."""
+    previous = cursor.get(cid, {})
+    if previous.get("seen") != seen:
+        cursor[cid] = {"seen": seen, "owed": previous.get("owed")}
+
+
+def save_cursor(path: pathlib.Path, cursor: dict[str, dict]) -> None:
     """Write atomically — a truncated cursor would raise on every later tick,
     the one failure an unattended job cannot recover from. A fixed tmp name is
     safe because the scheduler never runs two fires of a job at once."""
@@ -239,8 +336,12 @@ def save_cursor(path: pathlib.Path, cursor: dict[str, str]) -> None:
     os.replace(tmp, path)
 
 
-def render_prompt(conversation: dict, messages: list[dict]) -> str:
-    """Build the agent's prompt. Guest name only — never email or phone.
+def render(template: str, conversation: dict, messages: list[dict]) -> str:
+    """Fill PROMPT or FOLLOWUP. Guest name only — never email or phone.
+
+    One renderer for both because they carry the same conversation under
+    different framing, and a second copy of this is a second place for a
+    guest-supplied field to arrive unflattened.
 
     The guest name goes through `one_line`, as message content does, so neither
     can occupy a line that isn't its own. The rest — property title,
@@ -248,9 +349,9 @@ def render_prompt(conversation: dict, messages: list[dict]) -> str:
     role and sender_name, and the `display_type` `message_text` falls back to
     — is Hostex's own, not written by a guest. Flatten one at its
     own interpolation site if that ever stops being true. What is written *on*
-    a guest's line is PROMPT's disclaimer's job, not this function's.
+    a guest's line is the template's disclaimer's job, not this function's.
     """
-    return PROMPT.format(
+    return template.format(
         property_title=conversation["property_title"],
         guest=one_line(conversation["guest"]["name"]),
         conversation_id=conversation["id"],
@@ -260,30 +361,38 @@ def render_prompt(conversation: dict, messages: list[dict]) -> str:
     )
 
 
-def run(token: str, cursor_file: pathlib.Path) -> str:
-    """Emit a prompt for the longest-waiting guest, or the wake-gate sentinel."""
+def read_thread(cid: str, token: str) -> list[dict]:
+    """The conversation, oldest first. The list said this id had traffic, so
+    empty detail means the two disagree — raising beats marking it handled and
+    never mentioning it again."""
+    thread = conversation_thread(api_get(f"/conversations/{cid}", token)["data"]["messages"])
+    if not thread:
+        raise ValueError(f"{cid}: list reported traffic, detail is empty")
+    return thread
+
+
+def run(token: str, cursor_file: pathlib.Path,
+        now: datetime.datetime | None = None) -> str:
+    """Emit a prompt for the longest-waiting guest, a reminder that a veto
+    window has closed, or the wake-gate sentinel."""
     # Keyed on the file, not the loaded dict: an account with no conversations
     # writes {} and would re-adopt every tick, swallowing the first real one.
     cold_start = not cursor_file.exists()
+    now = now or datetime.datetime.now(datetime.timezone.utc)
     cursor = load_cursor(cursor_file)
     conversations = list_conversations(token)
     output = SILENT
 
     if cold_start:
-        cursor = {c["id"]: c["last_message_at"] for c in conversations}
+        for conversation in conversations:
+            record_seen(cursor, conversation["id"], conversation["last_message_at"])
     else:
         # One conversation per run: cron injects a single agent turn, so a
         # second guest here would share its attention.
         for conversation in pending_conversations(conversations, cursor):
             cid = conversation["id"]
-            previous = cursor.get(cid, "")
-            messages = api_get(f"/conversations/{cid}", token)["data"]["messages"]
-            thread = conversation_thread(messages)
-            # The list said this conversation had traffic, so empty detail
-            # means the two disagree. Raising beats marking it handled and
-            # never mentioning it again.
-            if not thread:
-                raise ValueError(f"{cid}: list reported traffic, detail is empty")
+            previous = cursor.get(cid, {}).get("seen", "")
+            thread = read_thread(cid, token)
             # Someone is waiting unless a person on the owner side had the
             # last word. Phrased as "not host" rather than "is the guest" so
             # an unmodelled role errs toward telling them instead of reading
@@ -291,10 +400,31 @@ def run(token: str, cursor_file: pathlib.Path) -> str:
             # template arriving on an already-announced thread from re-pinging
             # it, without a second rule about which role counts as waiting.
             speaker = last_speaker(thread)
-            cursor[cid] = conversation["last_message_at"]
+            record_seen(cursor, cid, conversation["last_message_at"])
             if (speaker is not None and speaker["sender_role"] != "host"
                     and speaker["created_at"] > previous):
-                output = render_prompt(conversation, thread)
+                output = render(PROMPT, conversation, thread)
+                # The one place a wait becomes owed, and the only clock the
+                # promise can be measured on: the owners hear about it now, so
+                # their thirty minutes start now — not whenever the guest
+                # happened to write.
+                cursor[cid]["owed"] = now.isoformat()
+                break
+
+    # Only when the tick has no new message to carry: a guest who just spoke
+    # and one who has been waiting thirty minutes both want the single turn
+    # cron injects, and the reminder is only two minutes behind.
+    if output is SILENT:
+        for conversation in overdue(conversations, cursor, now):
+            cid = conversation["id"]
+            thread = read_thread(cid, token)
+            speaker = last_speaker(thread)
+            # Discharged either way: an owner who answered in the Hostex app
+            # closed this wait, and a reminder about it would re-raise a
+            # conversation that is already handled.
+            cursor[cid]["owed"] = None
+            if speaker is not None and speaker["sender_role"] != "host":
+                output = render(FOLLOWUP, conversation, thread)
                 break
 
     # Emit before committing: if the process dies between the two, the next

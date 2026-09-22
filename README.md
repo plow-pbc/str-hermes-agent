@@ -90,7 +90,7 @@ not what the agent reads, and a check pointed at it reports on a dead home.
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `~/Plow/wiki/index.md`, and a turn reads that over the relay to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); no expiry yet. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline and re-raises an unanswered draft once when the window closes. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Provisioned by the base image** — `plow-init` writes the `plow` MCP server from the agent's own Plow identity at every boot (§ Plow Latch) |
@@ -713,6 +713,24 @@ The script itself sends nothing — it composes no reply and has no messaging
 tool. The agent turn it feeds is *instructed* not to act, which is not the
 same as being unable to; see below.
 
+That instruction is a positional argument to `hermes cron create`
+(`scripts/enable-hostex-inbound.sh`), baked into the job at creation — not
+read from this file live. Editing it here changes nothing for a job that
+already exists, and the enable script refuses to run while one does, so a
+redeploy cannot pick the edit up either. Updating the deployed job in place:
+
+```sh
+docker compose exec -T hermes hermes cron edit hostex-inbound --prompt "<new text>"
+```
+
+Verified against the live image: `hermes cron` has no `update` subcommand —
+`edit` is the one that carries `--prompt`, and it replaces the job's stored
+instruction without touching its cursor or origin. Until that runs, the
+deployed job is still executing whatever text it was created with, and if
+that text forbids messaging the guest unconditionally, the follow-up in
+`bin/hostex-poll.py`'s reminder prompt cannot send regardless of what ships
+here.
+
 - One conversation per tick, since cron injects a single agent turn. The rest
   wait for later ticks, oldest first.
 - It surfaces unless a person on the owner side had the last word. If an owner
@@ -731,8 +749,11 @@ same as being unable to; see below.
   Disturb knows when the owners are asleep and this code does not.
 
 State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id to
-last announced timestamp, deliberately separate from the nightly pipeline's
-watermark. Guest text is never persisted. A first run adopts what exists and
+`{seen, owed}`: the newest message the poller has walked past, and the instant
+it announced a wait on that conversation that it still owes the owners a
+follow-up on — null when it owes none. The veto window is measured from
+`owed`, so a draft announced late off a backlog still gets its full thirty
+minutes. Deliberately separate from the nightly pipeline's watermark. Guest text is never persisted. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
 history all reads as new. **Adopting is silent about anyone waiting** — a
 guest whose message is outstanding when the next tick runs is marked seen and

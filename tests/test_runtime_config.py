@@ -237,10 +237,11 @@ def test_the_draft_reaches_the_session_that_approves_it():
     # Consumer half of the veto-tier contract (producer half pinned in
     # test_hostex_poll.py): the group prompt has to recognize a veto
     # announcement by the same wording the poller's prompt emits, and any
-    # owner reply naming the draft id has to cancel the scheduled send —
-    # otherwise "stop" is chatter and the one-shot job fires anyway.
+    # owner reply naming the draft id has to stop the send — nothing is
+    # scheduled to cancel, so the objection has to reach the later turn the
+    # only way it can: answered in this thread, for that turn to find.
     assert "sending in 30 minutes unless an owner says stop" in flowed
-    assert "cancels the pending job" in flowed
+    assert "stops the send" in flowed
     assert "an edit as a fresh draft on the approval path" in flowed
     # Single policy owner: eligibility for the veto tier is stated once, in
     # SOUL.md; the poller and group prompts reference it rather than restate
