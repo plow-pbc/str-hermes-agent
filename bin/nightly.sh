@@ -120,7 +120,8 @@ if find "$VAULT" -mindepth 2 -name '*.md' -not -path "$VAULT/_raw/*" | grep -q .
 fi
 
 reconcile
-checked "wiki validation" "$RELAY" run -- wiki validate
+# Only str's roots: a page another writer owns is that writer's to fix (wiki.toml).
+checked "wiki validation" "$RELAY" run -- wiki validate --writer str
 # History lives beside the wiki on the Mac and is pushed off it: a compiled corpus
 # on one disk with no other copy is the exposure promote-vault was written to
 # close. `--push` scans what leaves for credentials, and refuses loudly when the

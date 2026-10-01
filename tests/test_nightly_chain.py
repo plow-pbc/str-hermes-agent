@@ -31,7 +31,7 @@ def night(tmp_path):
     _stub(bin_dir / "ingest-all", 'exit "${INGEST_RC:-0}"')
     _stub(bin_dir / "wiki-provenance", 'echo "${PROVENANCE_SAYS:-}"; exit "${PROVENANCE_RC:-0}"')
     _stub(bin_dir / "plow_relay.py",
-          'case "$*" in *" index") exit "${INDEX_RC:-0}";; *" validate") exit "${VALIDATE_RC:-0}";;'
+          'case "$*" in *" index") exit "${INDEX_RC:-0}";; *" validate --writer str") exit "${VALIDATE_RC:-0}";;'
           ' *snapshot*) exit "${SNAPSHOT_RC:-0}";; esac')
     path_dir = tmp_path / "path"
     path_dir.mkdir()
@@ -74,7 +74,7 @@ def test_the_digest_carries_what_every_post_ingest_step_found(night, case, rcs, 
         f"ingest-all {vault} ~/Plow/wiki",
         "plow_relay.py run --write ~/Plow/wiki -- wiki index",
         f"wiki-provenance {vault} ~/Plow/wiki",
-        "plow_relay.py run -- wiki validate",
+        "plow_relay.py run -- wiki validate --writer str",
         "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
         " wiki snapshot --push --author str",
     ]

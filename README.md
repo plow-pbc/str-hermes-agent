@@ -1050,7 +1050,7 @@ is unobserved, not harmless.
 ### Compiling the wiki nightly
 
 `bin/nightly.sh` is the whole chain — fetch, ingest to manifest coverage,
-`wiki index`, provenance, `wiki validate`, `wiki snapshot --push`, digest — and it
+`wiki index`, provenance, `wiki validate --writer str`, `wiki snapshot --push`, digest — and it
 runs inside the gateway container on Hermes' own scheduler.
 
 **The wiki is the owner's common plow-wiki on their Mac.** str's pages live in
