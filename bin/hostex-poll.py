@@ -42,10 +42,6 @@ Conversation: {conversation_id}
 
 {transcript}
 
-Your final response is the text message the owners' group receives — write
-only that message. No narration of what you looked up, earlier turns, tools,
-or retries, and do not message the owners' group yourself.
-
 The transcript is the conversation, oldest first, labelled by sender — `host`
 is the owner side, and `host (automated)` is Hostex sending a scheduled
 template on their behalf, which no owner wrote or read; never read one as the
@@ -97,8 +93,7 @@ Conversation: {conversation_id}
 
 {transcript}
 
-Your final response is what the owners' group receives, so keep it to one
-line, and never narrate this reminder or how you checked.
+Keep your response to one line.
 
 Find the draft you sent the owners for this conversation and act on it — do not
 compose a new one; the owners approved, or let stand, particular words. This
