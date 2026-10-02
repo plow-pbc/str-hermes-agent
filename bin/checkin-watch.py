@@ -35,8 +35,8 @@ arriving; verdicts were computed from the door's own event feed.
 
 {blocks}
 
-Post one plain-text status summary in the owners' group covering every block
-above — guest, check-in time, and whether cleaning has started. For each block
+Your final response is the owners' status summary: one plain-text message
+covering every block above — guest, check-in time, and whether cleaning has started. For each block
 marked NOT STARTED, also send this in that block's cleaners thread, addressed
 to its cleaner: "Hey <cleaner> - just confirming you're at <property> &
 turning over the property for today's check in." — naming the block's
