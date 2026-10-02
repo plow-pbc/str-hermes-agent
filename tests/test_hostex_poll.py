@@ -378,8 +378,8 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     # and reaches the guest in wording no owner ever answered.
     pytest.param("If you did not announce this draft under the veto window",
                  id="an-approval-path-draft-is-not-sent"),
-    pytest.param("say in the owners' group that it is still waiting on them",
-                 id="it-is-raised-with-the-owners-instead"),
+    pytest.param("send the guest nothing and respond with exactly [SILENT]",
+                 id="and-the-owners-are-not-nagged"),
     # Two drafts can be open for different guests, which is why they carry
     # ids at all. Naming one back is a voluntary model action in the group
     # turn, so the thread may hold nothing but "stop" — read as the other
