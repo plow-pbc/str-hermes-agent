@@ -30,6 +30,9 @@ cron:
   # for a job without one — every other job here is CLI-created with origin
   # null. enable-hostex-inbound.sh stamps the origin that opts this one in.
   mirror_delivery: true
+  # The agent's final response is the whole message; the default header and
+  # "stop reminder" footer doubled every guest alert's length.
+  wrap_response: false
 # The other half of that mirror: one session per group chat, not one per member.
 # The image resolves a delivery's session by chat id, and refuses to pick when
 # the chat has several open sessions belonging to different people rather than
