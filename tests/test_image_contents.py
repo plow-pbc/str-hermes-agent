@@ -42,6 +42,10 @@ IMAGE_CLAIMS = [
      *_present("/opt/hermes/skills/productivity/property-guest-messaging/SKILL.md")),
     ("the scheduler's scripts", *_present("/opt/plow/str/bin/nightly.sh")),
     ("the seam mcp server", *_present("/opt/plow/str/mcp-seam/server.py")),
+    ("the boot hook that registers the cron jobs",
+     "test -x /etc/cont-init.d/06-register-jobs && echo present || echo missing", "present"),
+    ("register-jobs runs on the image's interpreter and waits for setup",
+     "/opt/plow/str/bin/register-jobs --boot", "str: not set up yet -- jobs wait for str-setup"),
     ("the relay client the nightly's wiki steps run through",
      "test -x /opt/plow/str/bin/plow_relay.py && echo present || echo missing", "present"),
     *((f"wiki skill {name}", *_present(f"/opt/hermes/skills/{name}/SKILL.md"))
