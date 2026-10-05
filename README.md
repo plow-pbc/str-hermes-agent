@@ -753,7 +753,7 @@ State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id
 it announced a wait on that conversation that it still owes the owners a
 follow-up on — null when it owes none. The veto window is measured from
 `owed`, so a draft announced late off a backlog still gets its full thirty
-minutes. Deliberately separate from the nightly pipeline's watermark. Guest text is never persisted. A first run adopts what exists and
+minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text; Hermes' own run records (`cron/output/<job>/`, last 50 kept) do, prompt transcript and response both, and the follow-up check reads them. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
 history all reads as new. **Adopting is silent about anyone waiting** — a
 guest whose message is outstanding when the next tick runs is marked seen and

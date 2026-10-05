@@ -258,8 +258,7 @@ def announce(cursor_file, cid, response=VETO_DRAFT, at="2026-07-30_08-00-00"):
     received under `## Response`."""
     run = cursor_file.parent / "cron/output/job1" / f"{at}.md"
     run.parent.mkdir(parents=True, exist_ok=True)
-    report = poll.PROMPT.format(property_title="Lake House", guest="Jane",
-                                conversation_id=cid, transcript="")
+    report = poll.render(poll.PROMPT, conv(cid, OVERDUE), [])
     run.write_text(f"# Cron Job: hostex-inbound\n\n## Prompt\n\n{report}\n\n"
                    f"## Response\n\n{response}\n")
 
@@ -636,7 +635,6 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     # PR #3). The eligibility clauses themselves are pinned on SOUL.md in
     # test_runtime_config.py.
     assert "two-tier guest-send rule in SOUL.md" in flowed
-    assert poll.VETO in flowed  # the poller's follow-up filter reads this exact line
     assert "any draft you are unsure about" in flowed
 
 

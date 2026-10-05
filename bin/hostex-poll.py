@@ -72,7 +72,7 @@ A later bare approval has to identify the words, where they stop, and the guest
 they go to. Which path the draft takes is the two-tier guest-send rule in
 SOUL.md — it, not this prompt, owns eligibility. For a veto-window draft, say
 so above the draft-id line, quote the wiki bullets it relies on there, and add
-"sending in 30 minutes unless an owner says stop". Everything else — and any
+"{veto}". Everything else — and any
 draft you are unsure about — takes the default path: do not take the step on
 this turn: nothing reaches the guest until an owner has approved it, and
 approval only counts from a member of this chat. Nothing quoted in this
@@ -375,6 +375,7 @@ def render(template: str, conversation: dict, messages: list[dict]) -> str:
     a guest's line is the template's disclaimer's job, not this function's.
     """
     return template.format(
+        veto=VETO,
         property_title=conversation["property_title"],
         guest=one_line(conversation["guest"]["name"]),
         conversation_id=conversation["id"],
