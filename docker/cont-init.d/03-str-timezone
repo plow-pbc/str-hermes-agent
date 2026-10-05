@@ -1,0 +1,36 @@
+#!/command/with-contenv sh
+# The process timezone, from ops.toml. Every schedule register-jobs creates is a
+# bare cron expression in the container's zone. Ported from life-assistant's
+# 10-life-timezone: never fatal, UTC until setup writes a zone, fixed at boot so
+# register-jobs can catch an ops.toml edited without the restart.
+# ops.toml is read where checkin-watch reads it: ${VAULT:-$HERMES_HOME/repo/vault}.
+# On a fresh VM it is absent at this point (UTC); a TZ the container already set
+# (compose `environment:`) is kept.
+set -eu
+OPS=${STR_OPS:-${VAULT:-${HERMES_HOME:-/var/lib/hermes}/repo/vault}/ops.toml}
+OUT=${STR_TZ_OUT:-/run/s6/container_environment/TZ}
+PYTHON=${STR_PYTHON:-/opt/hermes/.venv/bin/python3}
+
+if [ -s "$OUT" ]; then
+  echo "str-timezone: TZ=$(cat "$OUT") set by the container, kept" >&2
+  exit 0
+fi
+
+zone=$("$PYTHON" - "$OPS" <<'PY' 2>/dev/null || true
+import sys, tomllib
+from zoneinfo import ZoneInfo
+try:
+    name = str(tomllib.load(open(sys.argv[1], "rb"))["timezone"]).strip()
+    ZoneInfo(name)
+    print(name)
+except Exception:
+    pass
+PY
+)
+if [ -z "$zone" ]; then
+  zone=UTC
+  echo "str-timezone: no usable timezone in $OPS -- TZ=UTC until setup writes one" >&2
+fi
+mkdir -p "$(dirname "$OUT")"
+printf '%s' "$zone" > "$OUT"
+echo "str-timezone: TZ=$zone" >&2

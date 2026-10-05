@@ -143,6 +143,7 @@ RUN chown -R root:root /opt/plow \
 # builder the build dies here, before pytest collects. Both scripts are tracked
 # 100755 so the executable bit travels; the chmod below normalises the rest,
 # which a plain COPY would otherwise take from the builder's umask.
+COPY docker/cont-init.d/03-str-timezone /etc/cont-init.d/03-str-timezone
 COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-require-ingest-manifest.sh
 
 # The one image-to-home seam. Everything above is authoritative under /opt/plow
@@ -152,7 +153,8 @@ COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-requir
 # receives the image's SOUL or config at all. One script closes all three rather
 # than three copies of the payload closing one each.
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
-RUN chmod 0755 /etc/cont-init.d/04-require-ingest-manifest.sh \
+RUN chmod 0755 /etc/cont-init.d/03-str-timezone \
+               /etc/cont-init.d/04-require-ingest-manifest.sh \
                /etc/cont-init.d/05-install-agent-payload.sh
 
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
