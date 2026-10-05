@@ -1,0 +1,153 @@
+#!/opt/hermes/.venv/bin/python3
+"""setup-discover <command> -- read-only lookups that print JSON, so setup can
+offer choices instead of asking for IDs. Exit 2 and one sentence on stderr on failure.
+
+  latch | hostex-properties | seam-devices | seam-codes <seam_device_id> | groups
+
+Secrets come from the process environment over $HERMES_HOME/.env (container env
+wins), never argv. Hostex reuses hostex_api's base URL and no-redirect opener.
+Seam is called over REST, not the SDK: `seam` lives only in the mcp-seam uv
+environment, not in this interpreter. One HTTP seam, fetch(url, headers) -> dict.
+"""
+from __future__ import annotations
+
+import importlib.machinery, importlib.util, json, os, pathlib, sys
+import urllib.error, urllib.parse, urllib.request
+
+BIN = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN))
+import hostex_api  # noqa: E402
+
+SEAM = "https://connect.getseam.com"
+PLOW_PROVIDER = "imessage"  # the phone line, as plugins/plow_chat PROVIDER
+PAGE = 100
+
+
+def _read_setup_env(home):
+    loader = importlib.machinery.SourceFileLoader("str_config", str(BIN / "str-config"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("str_config", loader))
+    loader.exec_module(module)
+    return module.read_setup_env(home)
+
+
+def fetch(url: str, headers: dict) -> dict:
+    request = urllib.request.Request(url, headers={"Accept": "application/json", **headers})
+    with hostex_api.OPENER.open(request, timeout=hostex_api.TIMEOUT_S) as response:
+        return json.loads(response.read().decode())
+
+
+class Owner(Exception):
+    """A failure with a sentence the owner can act on."""
+
+
+def _secret(env, key):
+    if not env.get(key, "").strip():
+        raise Owner(f"{key} is not set; run setup to store it first.")
+    return env[key].strip()
+
+
+def cmd_latch(env, fetch):
+    return {"configured": bool(env.get("PLOW_MCP_URL", "").strip())}
+
+
+def cmd_hostex_properties(env, fetch):
+    headers = {"Hostex-Access-Token": _secret(env, "HOSTEX_TOKEN"), "User-Agent": "setup-discover/1.0"}
+    found, offset = [], 0
+    while True:
+        query = urllib.parse.urlencode({"offset": offset, "limit": PAGE})
+        batch = fetch(f"{hostex_api.BASE}/properties?{query}", headers)["data"]["properties"]
+        found += batch
+        if len(batch) < PAGE:
+            break
+        offset += PAGE
+    return [{"hostex_property_id": p["id"], "title": p.get("title") or "",
+             "timezone": p.get("timezone"), "default_checkin_time": p.get("default_checkin_time")}
+            for p in found]
+
+
+def _seam_get(env, fetch, path, **params):
+    headers = {"Authorization": "Bearer " + _secret(env, "SEAM_API_KEY")}
+    return fetch(f"{SEAM}{path}?{urllib.parse.urlencode(params)}", headers)
+
+
+def cmd_seam_devices(env, fetch):
+    # mcp-seam's list_locks is client.locks.list() -> /locks/list
+    return [{"seam_device_id": d["device_id"], "name": (d.get("properties") or {}).get("name") or ""}
+            for d in _seam_get(env, fetch, "/locks/list")["devices"]]
+
+
+def cmd_seam_codes(env, fetch, device_id):
+    # Both of Seam's disjoint collections, as mcp-seam's _all_codes reads them.
+    codes = [c for path in ("/access_codes/list", "/access_codes/unmanaged/list")
+             for c in _seam_get(env, fetch, path, device_id=device_id)["access_codes"]]
+    codes.sort(key=lambda c: (c.get("name") or "").casefold())
+    return [{"access_code_id": c["access_code_id"], "name": c.get("name") or ""} for c in codes]
+
+
+def _self_line(chat):
+    # plugins/plow_chat/_transport.py _self_agent_line
+    agent = next((p for p in chat.get("participants") or [] if p.get("type") == "agent"
+                  and p.get("relationship") in (None, "self")), {})
+    return agent.get("line") or {}
+
+
+def _group_chat(chat):
+    # plugins/plow_chat/_transport.py _provider + _is_solo_dm: this line's chats,
+    # and "group" is anyone else in the room, a peer agent included.
+    people = chat.get("participants") or []
+    peer = any(p.get("type") == "agent" and p.get("relationship") == "peer" for p in people)
+    humans = sum(1 for p in people if p.get("type") == "member")
+    return (chat.get("status") == "active" and _self_line(chat).get("provider_type") == PLOW_PROVIDER
+            and (peer or humans > 1))
+
+
+def cmd_groups(env, fetch):
+    headers = {"Authorization": "Bearer " + _secret(env, "PLOW_AGENT_TOKEN")}
+    base = env.get("PLOW_API_BASE", "https://api.plow.co").rstrip("/")
+    body = fetch(f"{base}/v1/chats", headers)
+    if body["has_more"]:
+        raise Owner("Plow lists more chats than one page; setup cannot show them all.")
+    out = []
+    for chat in filter(_group_chat, body["data"]):
+        members = [p for p in chat["participants"] if p.get("type") == "member"]
+        names = [(p.get("display_name") or "").strip() or p["provider_key"] for p in members]
+        roster = ", ".join(p["provider_key"] for p in members)
+        title = (chat.get("display_name") or "").strip()
+        out.append({"chat_uid": chat["uid"], "title": title if title and title != roster else ", ".join(names),
+                    "members": names})
+    return out
+
+
+COMMANDS = {"latch": cmd_latch, "hostex-properties": cmd_hostex_properties,
+            "seam-devices": cmd_seam_devices, "seam-codes": cmd_seam_codes, "groups": cmd_groups}
+SERVICE = {"hostex-properties": "Hostex", "seam-devices": "Seam", "seam-codes": "Seam", "groups": "Plow"}
+
+
+def main(argv, environ=None, fetch=fetch):
+    environ = os.environ if environ is None else environ
+    name, args = (argv[0] if argv else ""), argv[1:]
+    if name not in COMMANDS or len(args) != (name == "seam-codes"):
+        print("setup-discover: usage: setup-discover latch | hostex-properties | seam-devices "
+              "| seam-codes <seam_device_id> | groups", file=sys.stderr)
+        return 2
+    service = SERVICE.get(name, "setup")
+    try:
+        home = pathlib.Path(environ.get("HERMES_HOME", "/var/lib/hermes"))
+        env = {**_read_setup_env(home), **environ}
+        result = COMMANDS[name](env, fetch, *args)
+    except Owner as e:
+        print(f"setup-discover: {e}", file=sys.stderr)
+        return 2
+    except urllib.error.HTTPError as e:
+        why = "rejected the token" if e.code in (401, 403) else f"answered HTTP {e.code}"
+        print(f"setup-discover: {service} {why}; check the key you gave setup.", file=sys.stderr)
+        return 2
+    except OSError:
+        print(f"setup-discover: could not reach {service}; check the network and try again.", file=sys.stderr)
+        return 2
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
