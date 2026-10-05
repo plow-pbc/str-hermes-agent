@@ -278,8 +278,10 @@ def announced_cursor(cursor_file):
                  id="an-approval-path-draft-waits-on-an-owner-not-a-reminder"),
     pytest.param([("a", "Jane · Lake House\n\"thanks!\"\nThanks.\n\nNo reply needed.")],
                  False, id="no-reply-needed-has-nothing-to-follow-up"),
-    pytest.param([], False, id="no-record-of-the-announcement-fails-closed"),
-    pytest.param([("b", VETO_DRAFT)], False, id="another-guests-veto-draft-does-not-count"),
+    # No record means the layout moved, not that nothing was promised: wake,
+    # and let FOLLOWUP's own path check decide, rather than drop a send.
+    pytest.param([], True, id="no-record-falls-back-to-the-agent"),
+    pytest.param([("b", "No reply needed.")], True, id="another-guests-record-does-not-count"),
     pytest.param([("a", VETO_DRAFT), ("a", "No reply needed.")], False,
                  id="the-newest-announcement-decides"),
 ])
@@ -415,6 +417,11 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     # ids at all. Naming one back is a voluntary model action in the group
     # turn, so the thread may hold nothing but "stop" — read as the other
     # draft's, it sends this one.
+    # The poller's record check is a filter: a guest quoting the veto line
+    # gets past it, so the agent still refuses an approval-path draft.
+    pytest.param("If you did not announce this draft under the veto window, send "
+                 "the guest nothing and respond with exactly [SILENT]",
+                 id="the-agent-still-checks-the-path"),
     pytest.param('a bare "stop" in that thread stops this send',
                  id="an-unaddressed-stop-stops-every-draft"),
     # config.yaml's group prompt treats an edit as a fresh draft on the

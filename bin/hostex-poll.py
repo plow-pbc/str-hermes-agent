@@ -105,6 +105,8 @@ An owner objection that names no draft objects to every draft in flight, this
 one included: a bare "stop" in that thread stops this send, and counts as an
 owner having objected in everything below. The owners are asked to name the id
 and need not have.
+If you did not announce this draft under the veto window, send the guest
+nothing and respond with exactly [SILENT].
 If no owner objected to, edited, or questioned it, send exactly those words to
 the conversation id above: the window has closed and the silence is the
 approval you said it would be. If an owner approved it, send what they
@@ -156,21 +158,24 @@ def overdue(conversations: list[dict], cursor: dict[str, dict],
 VETO = "sending in 30 minutes unless an owner says stop"
 
 
-def announced_a_veto_draft(home: pathlib.Path, cid: str) -> bool:
-    """Whether the newest announcement of `cid` ended in a veto-window draft.
+def announced_without_veto(home: pathlib.Path, cid: str) -> bool:
+    """True when the newest announcement of `cid` is on record and was not a
+    veto-window draft — the one kind with anything left to do when its window
+    closes. An approval-path draft waits on an owner and "No reply needed"
+    waits on nothing; waking the agent for either spent a turn searching for a
+    draft that does not exist.
 
-    Only that draft has anything left to do when its window closes: an
-    approval-path draft waits on an owner, and "No reply needed" waits on
-    nothing — waking the agent for either spent a turn searching for a draft
-    that does not exist. Read from Hermes' own run record,
-    `cron/output/<job>/<time>.md`: a `## Prompt` carrying this script's report
-    and a `## Response` carrying what the owners received. Hermes keeps 50 per
-    job, hours at a two-minute tick against a thirty-minute window.
+    Read from Hermes' own run record, `cron/output/<job>/<time>.md`: a
+    `## Prompt` carrying this script's report and a `## Response` carrying what
+    the owners received; Hermes keeps 50 per job, hours at a two-minute tick.
+    A filter, not the gate: no record (a changed layout) still wakes the
+    agent, and a guest quoting the veto line only buys a wake in which
+    FOLLOWUP has the agent check the path itself.
     """
     for run in sorted(home.glob("cron/output/*/*.md"), key=lambda f: f.name, reverse=True):
         prompt, _, response = run.read_text().rpartition("## Response")
         if PROMPT.splitlines()[0] in prompt and f"Conversation: {cid}\n" in prompt:
-            return VETO in " ".join(response.split())
+            return VETO not in " ".join(response.split())
     return False
 
 
@@ -442,7 +447,7 @@ def run(token: str, cursor_file: pathlib.Path,
             # conversation that is already handled.
             cursor[cid]["owed"] = None
             if (speaker is not None and speaker["sender_role"] != "host"
-                    and announced_a_veto_draft(cursor_file.parent, cid)):
+                    and not announced_without_veto(cursor_file.parent, cid)):
                 output = render(FOLLOWUP, conversation, thread)
                 break
 
