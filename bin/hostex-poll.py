@@ -49,7 +49,8 @@ owner having answered. Read all of it before drafting: a standing arrangement
 or a promise already made to this guest sits in the older messages, and
 wording already sent is not repeated.
 
-Plain text, no markdown, in this shape:
+Plain text, no markdown, in this shape — the first three lines always, even
+when no reply is needed:
 - Guest name · property · stay dates.
 - Their newest message, quoted verbatim and marked as their words — not your
   summary of it. Trim a long one to the part carrying the request and say you
@@ -59,7 +60,8 @@ Plain text, no markdown, in this shape:
   X, thanks, alteration request...).
 - Only when the reply turns on facts you verified (availability, the prior
   night, cleaning or turnover, the door code, automated messages queued), one
-  `Checked:` line listing them tersely.
+  `Checked:` line of conclusions, not data — "Sep 29 vacant · code active",
+  never a price list. About 25 words at most.
 - If a reply is warranted, the draft, in this exact line order — (1) a short
   draft id on its own line, (2) the conversation id, (3) a `DRAFT:` line, (4)
   the wording — and end the message there, with nothing after the wording. If
@@ -83,9 +85,8 @@ approval of the same draft.
 
 
 FOLLOWUP = """\
-Still waiting. You reported this to the owners thirty minutes ago and the guest
-has had no reply since. Which of the two paths that draft took decides what
-happens now, and this reminder cannot tell them apart — you can.
+Still waiting. You announced a veto-window draft for this conversation thirty
+minutes ago and the guest has had no reply since.
 
 Property: {property_title}
 Guest: {guest}
@@ -95,28 +96,21 @@ Conversation: {conversation_id}
 
 Keep your response to one line.
 
-Find the draft you sent the owners for this conversation and act on it — do not
-compose a new one; the owners approved, or let stand, particular words. This
-turn is a new session and does not carry the owners' thread with it: recall
-past conversations with `session_search` to find that thread, the delivery that
-carried this draft, and whatever the owners said after it. Read it before
-treating silence as approval — if that search returns nothing you can read,
-send the guest nothing and say so.
+Find that draft and act on it — do not compose a new one; the owners let
+particular words stand. This turn is a new session and does not carry the
+owners' thread with it: recall past conversations with `session_search` to find
+the delivery that carried this draft and whatever the owners said after it. If
+that search returns nothing you can read, send the guest nothing and say so.
 An owner objection that names no draft objects to every draft in flight, this
 one included: a bare "stop" in that thread stops this send, and counts as an
 owner having objected in everything below. The owners are asked to name the id
 and need not have.
-If you did not announce this draft under the veto window — if it went to the
-owners for approval and none of them has answered — send the guest nothing and
-respond with exactly [SILENT]: the owners already have the draft, and a
-reminder is noise. Silence is only approval where you told the owners it would
-be.
-If you announced it under the veto window and no owner objected to, edited, or
-questioned it, send exactly those words to the conversation id above: the
-window has closed and the silence is the approval you said it would be. If an
-owner approved it, send what they approved. Then respond "Sent to <guest>." If
-an owner edited or objected to it, or you cannot find the draft or tell which
-of several it is, send the guest nothing and say so.
+If no owner objected to, edited, or questioned it, send exactly those words to
+the conversation id above: the window has closed and the silence is the
+approval you said it would be. If an owner approved it, send what they
+approved. Then respond "Sent to <guest>." If an owner edited or objected to it,
+or you cannot find the draft or tell which of several it is, send the guest
+nothing and say so.
 Once you have sent it, say so: a reply already sent is not sent again.
 This reminder comes once. Nothing else is watching this conversation.
 """
@@ -157,6 +151,27 @@ def overdue(conversations: list[dict], cursor: dict[str, dict],
            and entry["owed"]
            and datetime.datetime.fromisoformat(entry["owed"]) <= deadline]
     return sorted(due, key=lambda conv: conv["last_message_at"])
+
+
+VETO = "sending in 30 minutes unless an owner says stop"
+
+
+def announced_a_veto_draft(home: pathlib.Path, cid: str) -> bool:
+    """Whether the newest announcement of `cid` ended in a veto-window draft.
+
+    Only that draft has anything left to do when its window closes: an
+    approval-path draft waits on an owner, and "No reply needed" waits on
+    nothing — waking the agent for either spent a turn searching for a draft
+    that does not exist. Read from Hermes' own run record,
+    `cron/output/<job>/<time>.md`: a `## Prompt` carrying this script's report
+    and a `## Response` carrying what the owners received. Hermes keeps 50 per
+    job, hours at a two-minute tick against a thirty-minute window.
+    """
+    for run in sorted(home.glob("cron/output/*/*.md"), key=lambda f: f.name, reverse=True):
+        prompt, _, response = run.read_text().rpartition("## Response")
+        if PROMPT.splitlines()[0] in prompt and f"Conversation: {cid}\n" in prompt:
+            return VETO in " ".join(response.split())
+    return False
 
 
 def conversation_thread(messages: list[dict]) -> list[dict]:
@@ -426,7 +441,8 @@ def run(token: str, cursor_file: pathlib.Path,
             # closed this wait, and a reminder about it would re-raise a
             # conversation that is already handled.
             cursor[cid]["owed"] = None
-            if speaker is not None and speaker["sender_role"] != "host":
+            if (speaker is not None and speaker["sender_role"] != "host"
+                    and announced_a_veto_draft(cursor_file.parent, cid)):
                 output = render(FOLLOWUP, conversation, thread)
                 break
 

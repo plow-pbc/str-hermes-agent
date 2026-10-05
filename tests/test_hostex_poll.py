@@ -249,13 +249,50 @@ def test_overdue_puts_the_longest_wait_first():
 
 
 OVERDUE = "2026-07-30T08:00:00+00:00"
+VETO_DRAFT = f"d1\na\nDRAFT: Enjoy your stay!\n\n{poll.VETO}"
+
+
+def announce(cursor_file, cid, response=VETO_DRAFT, at="2026-07-30_08-00-00"):
+    """Hermes' run record for the tick that announced `cid`, in the shape the
+    scheduler writes it: the script's report under `## Prompt`, what the owners
+    received under `## Response`."""
+    run = cursor_file.parent / "cron/output/job1" / f"{at}.md"
+    run.parent.mkdir(parents=True, exist_ok=True)
+    report = poll.PROMPT.format(property_title="Lake House", guest="Jane",
+                                conversation_id=cid, transcript="")
+    run.write_text(f"# Cron Job: hostex-inbound\n\n## Prompt\n\n{report}\n\n"
+                   f"## Response\n\n{response}\n")
 
 
 @pytest.fixture
 def announced_cursor(cursor_file):
-    """One conversation, announced, its window long closed."""
+    """One conversation, announced as a veto-window draft, its window long closed."""
     cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=OVERDUE)}))
+    announce(cursor_file, "a")
     return cursor_file
+
+
+@pytest.mark.parametrize("runs, wakes", [
+    pytest.param([("a", VETO_DRAFT)], True, id="a-veto-window-draft-is-followed-up"),
+    pytest.param([("a", "d1\na\nDRAFT: We can do 2pm.")], False,
+                 id="an-approval-path-draft-waits-on-an-owner-not-a-reminder"),
+    pytest.param([("a", "Jane · Lake House\n\"thanks!\"\nThanks.\n\nNo reply needed.")],
+                 False, id="no-reply-needed-has-nothing-to-follow-up"),
+    pytest.param([], False, id="no-record-of-the-announcement-fails-closed"),
+    pytest.param([("b", VETO_DRAFT)], False, id="another-guests-veto-draft-does-not-count"),
+    pytest.param([("a", VETO_DRAFT), ("a", "No reply needed.")], False,
+                 id="the-newest-announcement-decides"),
+])
+def test_only_a_veto_window_draft_wakes_the_agent_when_its_window_closes(
+        monkeypatch, cursor_file, runs, wakes):
+    """The follow-up's one job is the send a veto window promised. Every other
+    wake spent a turn searching for a draft that was never written."""
+    cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=OVERDUE)}))
+    for i, (cid, response) in enumerate(runs):
+        announce(cursor_file, cid, response, at=f"2026-07-30_08-0{i}-00")
+    api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE)]})
+    assert ("Still waiting" in run_at(monkeypatch, api, cursor_file)) is wakes
+    assert json.loads(cursor_file.read_text())["a"]["owed"] is None
 
 
 def run_at(monkeypatch, api, cursor_file, now=FOLLOWUP_NOW):
@@ -283,6 +320,7 @@ def test_the_window_closing_brings_the_conversation_back(
     these rows are here to exercise."""
     newest = thread[-1]["created_at"]
     cursor_file.write_text(json.dumps({"a": entry(newest, owed=OVERDUE)}))
+    announce(cursor_file, "a")
     api = FakeApi([conv("a", newest)], {"a": list(reversed(thread))})
     out = run_at(monkeypatch, api, cursor_file)
     assert ("Still waiting" in out) is waiting
@@ -328,6 +366,7 @@ def test_a_template_does_not_cancel_the_reminder(monkeypatch, cursor_file):
     an unsent draft, and this reminder is the only thing left watching it."""
     template = "2026-07-30T08:05:00+00:00"
     cursor_file.write_text(json.dumps({"a": entry(OVERDUE, owed=OVERDUE)}))
+    announce(cursor_file, "a")
     thread = [msg("guest", OVERDUE, "when can we check in?"),
               msg("host", template, "Welcome!", sender_name="Bot:92260")]
     api = FakeApi([conv("a", template)], {"a": list(reversed(thread))})
@@ -370,16 +409,8 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     # announcement in it.
     pytest.param("recall past conversations with `session_search`",
                  id="how-to-read-the-owners-thread"),
-    pytest.param("if that search returns nothing you can read, send the guest "
+    pytest.param("that search returns nothing you can read, send the guest "
                  "nothing and say so", id="and-fail-closed-when-it-cannot"),
-    # The announcing tick is the same tick for both tiers and the poller
-    # cannot tell them apart, so the reminder has to: without this clause an
-    # approval-path draft — the majority — falls through every branch below
-    # and reaches the guest in wording no owner ever answered.
-    pytest.param("If you did not announce this draft under the veto window",
-                 id="an-approval-path-draft-is-not-sent"),
-    pytest.param("send the guest nothing and respond with exactly [SILENT]",
-                 id="and-the-owners-are-not-nagged"),
     # Two drafts can be open for different guests, which is why they carry
     # ids at all. Naming one back is a voluntary model action in the group
     # turn, so the thread may hold nothing but "stop" — read as the other
