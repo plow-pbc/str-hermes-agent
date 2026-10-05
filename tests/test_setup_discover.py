@@ -71,6 +71,47 @@ def test_rejected_token_is_one_sentence(tmp_path, capsys, name, service):
     assert "abcdefgh" not in err and "Traceback" not in err
 
 
+@pytest.mark.parametrize("code,expected", [(401, "Seam rejected the token"), (403, "Seam refused the request (HTTP 403)"),
+                                           (500, "Seam refused the request (HTTP 500)")])
+def test_status_wording(tmp_path, capsys, code, expected):
+    def fail(url, headers):
+        raise urllib.error.HTTPError(url, code, "no", {}, io.BytesIO())
+    assert run(tmp_path, ["seam-devices"], {}, fail) == 2
+    err = capsys.readouterr().err
+    assert expected in err and (code == 401) == ("check the key" in err)
+
+
+@pytest.mark.parametrize("name,payload", [("hostex-properties", {}), ("seam-devices", {"nope": 1}),
+                                          ("seam-codes", {}), ("groups", {"data": []})])
+def test_malformed_payload_is_one_sentence(tmp_path, capsys, name, payload):
+    args = ["dev-1"] if name == "seam-codes" else []
+    assert run(tmp_path, [name, *args], {}, lambda url, headers: payload) == 2
+    err = capsys.readouterr().err
+    assert "answered something unexpected" in err and "Traceback" not in err
+
+
+def test_non_json_body_is_one_sentence(tmp_path, capsys, monkeypatch):
+    class Body:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"error code: 1010"
+    monkeypatch.setattr(discover.hostex_api.OPENER, "open", lambda req, timeout: Body())
+    assert discover.main(["seam-devices"], {**ENV, "HERMES_HOME": str(tmp_path)}) == 2
+    assert "Seam answered something unexpected" in capsys.readouterr().err
+
+
+def test_fetch_names_itself_to_the_api(monkeypatch):
+    sent = []
+    class Body:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"{}"
+    monkeypatch.setattr(discover.hostex_api.OPENER, "open", lambda req, timeout: sent.append(req) or Body())
+    discover.fetch("https://api.example/x", {"Authorization": "Bearer t"})
+    assert sent[0].get_header("User-agent") == "str-setup-discover/1"
+    assert sent[0].get_header("Authorization") == "Bearer t"
+
+
 def test_setup_env_fills_in_and_process_env_wins(tmp_path):
     (tmp_path / ".env").write_text("HOSTEX_TOKEN=from-file\nSEAM_API_KEY=seam-file\n")
     seen = []
