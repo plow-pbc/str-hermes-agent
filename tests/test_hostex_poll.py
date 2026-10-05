@@ -635,6 +635,7 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     # PR #3). The eligibility clauses themselves are pinned on SOUL.md in
     # test_runtime_config.py.
     assert "two-tier guest-send rule in SOUL.md" in flowed
+    assert "{veto}" in flowed  # the follow-up filter reads the rendered VETO line
     assert "any draft you are unsure about" in flowed
 
 
