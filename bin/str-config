@@ -1,0 +1,117 @@
+#!/opt/hermes/.venv/bin/python3
+"""str-config -- write setup's answers. JSON patch on stdin; never argv.
+
+The one writer for $HERMES_HOME/.env (the four keys setup owns) and
+${VAULT:-$HERMES_HOME/repo/vault}/ops.toml (where checkin-watch reads it).
+Container env wins: a key already in the process environment is not written.
+Secrets are double-quoted with escapes so any character round-trips through
+python-dotenv, which the gateway uses. read_setup_env is the one reader.
+"""
+import json, os, pathlib, sys, tempfile, tomllib
+
+ENV_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY", "PLOW_CHAT_GROUP_UIDS", "PLOW_CHAT_APPROVAL_GROUP")
+SECRET_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY")
+OPS_KEYS = ("timezone", "properties")
+PROPERTY_KEYS = ("hostex_property_id", "title", "timezone", "default_checkin_time",
+                 "seam_device_id", "cleaner_name", "cleaner_access_code_ids", "cleaners_thread")
+
+
+def mask(value):
+    return "…***" if len(value) < 8 else "…" + value[-3:]
+
+
+def _quote(value):
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def read_env(path):
+    from dotenv import dotenv_values  # in the image; tests use the same parser
+    return dict(dotenv_values(path)) if path.exists() else {}
+
+
+def read_setup_env(home):
+    """What setup wrote: the parsed $HERMES_HOME/.env, {} if absent."""
+    return read_env(pathlib.Path(home) / ".env")
+
+
+def _refuse_unknown(given, allowed, where):
+    extra = sorted(set(given) - set(allowed))
+    if extra:
+        raise SystemExit(f"str-config: unknown {where} key(s): {', '.join(extra)}")
+
+
+def _atomic_write(path, text, mode):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    if path.exists():
+        st = path.stat()
+        if os.geteuid() == 0:
+            os.chown(tmp, st.st_uid, st.st_gid)
+        mode = st.st_mode & 0o777
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def _write_env(path, updates):
+    lines = path.read_text().splitlines() if path.exists() else []
+    kept = [l for l in lines if l.split("=", 1)[0].strip() not in updates]
+    kept += [f"{k}={_quote(v)}" for k, v in updates.items()]
+    _atomic_write(path, "\n".join(kept) + "\n", 0o600)
+
+
+def _toml_value(v):
+    if isinstance(v, bool) or not isinstance(v, (int, str, list)):
+        raise SystemExit(f"str-config: unsupported ops value {v!r}")
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    return json.dumps(v)  # a JSON string is a valid TOML basic string
+
+
+def _write_ops(path, ops):
+    out = [f"timezone = {_toml_value(ops['timezone'])}"] if "timezone" in ops else []
+    for prop in ops.get("properties", []):
+        out += ["", "[[properties]]"] + [f"{k} = {_toml_value(prop[k])}" for k in PROPERTY_KEYS if k in prop]
+    _atomic_write(path, "\n".join(out) + "\n", 0o644)
+
+
+def apply(patch, home, environ):
+    home = pathlib.Path(home)
+    summary = []
+    env = patch.get("env", {})
+    _refuse_unknown(env, ENV_KEYS, "env")
+    updates = {}
+    for key, value in env.items():
+        if environ.get(key):
+            summary.append(f"{key}: set by the container, not written")
+            continue
+        updates[key] = value
+        summary.append(f"{key}: {mask(value) if key in SECRET_KEYS else value}")
+    if updates:
+        _write_env(home / ".env", updates)
+    if "ops" in patch:
+        ops = patch["ops"]
+        _refuse_unknown(ops, OPS_KEYS, "ops")
+        for prop in ops.get("properties", []):
+            _refuse_unknown(prop, PROPERTY_KEYS, "property")
+        vault = pathlib.Path(environ["VAULT"]) if "VAULT" in environ else home / "repo/vault"
+        path = vault / "ops.toml"
+        merged = {**(tomllib.loads(path.read_text()) if path.exists() else {}), **ops}
+        _write_ops(path, merged)
+        summary.append(f"ops.toml: timezone={merged.get('timezone')}, "
+                       f"{len(merged.get('properties', []))} propert(ies)")
+    return summary
+
+
+def main():
+    home = pathlib.Path(os.environ.get("HERMES_HOME", "/var/lib/hermes"))
+    for line in apply(json.load(sys.stdin), home, os.environ):
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
