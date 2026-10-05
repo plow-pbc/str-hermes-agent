@@ -65,7 +65,8 @@ def test_allowed_values_roundtrip(tmp_path, key, value):
 def test_export_line_is_replaced(tmp_path):
     (tmp_path / ".env").write_text("export SEAM_API_KEY=old\n")
     str_config.apply({"env": {"SEAM_API_KEY": "new-12345678"}}, tmp_path, environ={})
-    assert "old" not in (tmp_path / ".env").read_text()
+    lines = (tmp_path / ".env").read_text().splitlines()
+    assert lines == ["SEAM_API_KEY=new-12345678"]
 
 
 def test_read_setup_env_absent(tmp_path):

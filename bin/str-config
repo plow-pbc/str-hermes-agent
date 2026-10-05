@@ -1,11 +1,14 @@
 #!/opt/hermes/.venv/bin/python3
-"""str-config -- write setup's answers. JSON patch on stdin; never argv.
+r"""str-config -- write setup's answers. JSON patch on stdin; never argv.
 
 The one writer for $HERMES_HOME/.env (the four keys setup owns) and
 ${VAULT:-$HERMES_HOME/repo/vault}/ops.toml (where checkin-watch reads it).
 Container env wins: a key already in the process environment is not written.
-Secrets are double-quoted with escapes so any character round-trips through
-python-dotenv, which the gateway uses. read_setup_env is the one reader.
+Values are written unquoted as KEY=value, because bin/hostex-poll.py and
+bin/hostex-raw split on the first `=` and do not strip quotes. A value with
+`"` `'` `\` `$` `#` CR/LF or leading/trailing whitespace is refused by key,
+never echoing the value; inner spaces are fine. read_setup_env is the one
+reader.
 """
 import json, os, pathlib, sys, tempfile, tomllib
 
