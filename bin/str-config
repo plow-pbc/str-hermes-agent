@@ -20,8 +20,10 @@ def mask(value):
     return "…***" if len(value) < 8 else "…" + value[-3:]
 
 
-def _quote(value):
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+def _refuse_unwritable(key, value):
+    if any(c in value for c in "\"'\\$#\r\n") or value != value.strip():
+        raise SystemExit(f"str-config: {key} value has a character that cannot be written "
+                         "unquoted (quote, backslash, $, #, newline, edge whitespace)")
 
 
 def read_env(path):
@@ -56,8 +58,9 @@ def _atomic_write(path, text, mode):
 
 def _write_env(path, updates):
     lines = path.read_text().splitlines() if path.exists() else []
-    kept = [l for l in lines if l.split("=", 1)[0].strip() not in updates]
-    kept += [f"{k}={_quote(v)}" for k, v in updates.items()]
+    kept = [l for l in lines
+            if l.split("=", 1)[0].strip().removeprefix("export ").strip() not in updates]
+    kept += [f"{k}={v}" for k, v in updates.items()]
     _atomic_write(path, "\n".join(kept) + "\n", 0o600)
 
 
@@ -83,6 +86,8 @@ def apply(patch, home, environ):
     summary = []
     env = patch.get("env", {})
     _refuse_unknown(env, ENV_KEYS, "env")
+    for key, value in env.items():
+        _refuse_unwritable(key, value)
     updates = {}
     for key, value in env.items():
         if environ.get(key):

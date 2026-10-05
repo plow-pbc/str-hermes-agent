@@ -15,6 +15,7 @@ def _load(name, path):
 
 str_config = _load("str_config", ROOT / "bin" / "str-config")
 watch = _load("checkin_watch", ROOT / "bin" / "checkin-watch.py")
+poll = _load("hostex_poll", ROOT / "bin" / "hostex-poll.py")
 
 PROP = {"hostex_property_id": 12345, "title": "Example Property",
         "timezone": "America/Los_Angeles", "default_checkin_time": "16:00",
@@ -30,17 +31,41 @@ def test_preserves_unrelated_lines_and_env_wins(tmp_path):
         tmp_path, environ={"HOSTEX_TOKEN": "from-compose"})
     text = env.read_text()
     assert text.startswith("# keep me\nOTHER=1\n")
-    assert "SEAM_API_KEY=\"new-12345678\"" in text and "SEAM_API_KEY=old" not in text
+    assert "SEAM_API_KEY=new-12345678" in text and "SEAM_API_KEY=old" not in text
     assert "HOSTEX_TOKEN" not in text                      # container value wins
     assert any("HOSTEX_TOKEN: set by the container" in l for l in lines)
     assert not any("new-12345678" in l for l in lines)     # summary is masked
     assert any("…678" in l for l in lines)
 
 
-@pytest.mark.parametrize("secret", ["a=b#c", "has space", "q'uo\"te", "x" * 64])
-def test_secret_roundtrip(tmp_path, secret):
-    str_config.apply({"env": {"HOSTEX_TOKEN": secret}}, tmp_path, environ={})
-    assert str_config.read_setup_env(tmp_path)["HOSTEX_TOKEN"] == secret
+def test_token_read_by_the_real_poll_reader(tmp_path, monkeypatch):
+    str_config.apply({"env": {"HOSTEX_TOKEN": "tok-abc.123_x"}}, tmp_path, environ={})
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert poll.read_token() == "tok-abc.123_x"
+    assert str_config.read_setup_env(tmp_path)["HOSTEX_TOKEN"] == "tok-abc.123_x"
+
+
+@pytest.mark.parametrize("value", ['a"b', "a'b", "a\\b", "a$b", "a#b", "a\nb", "a\rb", " zq9", "zq9 "])
+def test_unwritable_values_refused_without_echo(tmp_path, value):
+    with pytest.raises(SystemExit) as e:
+        str_config.apply({"env": {"SEAM_API_KEY": value}}, tmp_path, environ={})
+    assert "SEAM_API_KEY" in str(e.value) and "zq9" not in str(e.value) and value not in str(e.value)
+    assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.parametrize("key,value", [
+    ("HOSTEX_TOKEN", "aB3-_.=+/:zZ9"),
+    ("PLOW_CHAT_GROUP_UIDS", "cht_a=STR Owners,cht_b=Cleaners"),
+])
+def test_allowed_values_roundtrip(tmp_path, key, value):
+    str_config.apply({"env": {key: value}}, tmp_path, environ={})
+    assert str_config.read_setup_env(tmp_path)[key] == value
+
+
+def test_export_line_is_replaced(tmp_path):
+    (tmp_path / ".env").write_text("export SEAM_API_KEY=old\n")
+    str_config.apply({"env": {"SEAM_API_KEY": "new-12345678"}}, tmp_path, environ={})
+    assert "old" not in (tmp_path / ".env").read_text()
 
 
 def test_read_setup_env_absent(tmp_path):
