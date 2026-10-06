@@ -23,7 +23,8 @@ import pytest
 IMAGE = "sams-str-hermes-agent:local"
 GUARD = "/etc/cont-init.d/04-require-ingest-manifest.sh"
 VAULT = "/tmp/scratch-home/repo/vault"
-MANIFEST = f"""echo '{{"sources": {{}}}}' > {VAULT}/.manifest.json"""
+KEPT = '{"sources": {"kept": {}}}'  # not the first-boot default, so an overwrite shows
+MANIFEST = f"echo '{KEPT}' > {VAULT}/.manifest.json"
 
 VAULT_SHAPES = [
     # A cloud VM has no bind: nothing exists yet, and a first ingest is the
@@ -55,7 +56,7 @@ def test_the_guard_admits_only_staging_with_a_manifest(case, shape, refusal):
     if refusal:
         assert refusal in run.stderr + run.stdout, case
     else:
-        assert run.stdout.strip() == '{"sources": {}}', case
+        assert run.stdout.strip() == (KEPT if shape else '{"sources": {}}'), case
 
 
 def test_a_failing_cont_init_stops_the_container_rather_than_warning():
