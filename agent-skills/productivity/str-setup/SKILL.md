@@ -1,6 +1,6 @@
 ---
 name: str-setup
-description: Use when str is not set up yet (setup-discover hostex-properties does not succeed), and when the owner asks to add a property, change the cleaner, or switch where drafts go. Onboarding over chat, from Plow Latch to the first scheduled job.
+description: Use in the owner's one-to-one chat when str is not set up yet (no HOSTEX_TOKEN in $HERMES_HOME/.env), and when the owner asks to add a property, change the cleaner, or switch where drafts go. Onboarding over chat, from Plow Latch to the first scheduled job.
 platforms: [linux]
 ---
 
@@ -58,7 +58,8 @@ and the owner has confirmed the trust in item 4. Nothing readable records that
 trust, so if you don't know, ask them; never assume it.
 
 Ask: "Should guest-reply drafts come to you here, or to an owners group?"
-"Here" needs nothing written: skip to step 4.
+"Here": write `{"env": {"PLOW_CHAT_APPROVAL_GROUP": ""}}` (clears a group
+chosen before), then go to step 4.
 
 For a group:
 
@@ -114,16 +115,17 @@ cleaners use the owner's accounts. You may send one short intro there with
 `send_message`, target `plow_chat:<chat_uid>` (the chat tool, not Hostex's
 guest `send_message`), so the cleaners know who you are.
 
-Write everything in one patch. `ops.timezone` is the first property's zone
-unless the owner names another. On a re-run, leave `timezone` out (moving it
-forces a restart), and since `properties` replaces the whole list, read
+Write everything in one patch. On a first run add `"timezone": "<IANA zone>"`
+to `ops`: the first property's zone unless the owner names another. On a
+re-run leave it out (moving it forces a restart), and since `properties`
+replaces the whole list, read
 `${VAULT:-${HERMES_HOME:-/var/lib/hermes}/repo/vault}/ops.toml` first and
 send every property, old and new.
 
 ```sh
 "$S/str-config" <<'JSON'
 {"env": {"PLOW_CHAT_GROUP_UIDS": "<merged list>"},
- "ops": {"timezone": "<IANA zone>", "properties": [
+ "ops": {"properties": [
    {"hostex_property_id": 123, "title": "<title>", "timezone": "<IANA zone>",
     "default_checkin_time": "16:00", "seam_device_id": "<id>",
     "cleaner_name": "<name>", "cleaner_access_code_ids": ["<id>"],
@@ -138,13 +140,15 @@ zone, let the owner confirm it, and write `{"ops": {"timezone": "<IANA zone>"}}`
 
 ## 6. Finish
 
-Run `"$S/register-jobs"`.
+The Hostex and Seam tools, the chat plugin and the timezone read config only
+when the agent starts. So if this run wrote a key (`HOSTEX_TOKEN`,
+`SEAM_API_KEY`, `PLOW_CHAT_*`), say: "Last step: restart me once from the Plow
+app, then text me 'done'.", and run `"$S/register-jobs"` when they do.
+Otherwise run it now, and if it refuses with a sentence containing "restart",
+ask for that same restart and run it again after.
 
-- It refuses with a sentence containing "restart": the agent has to restart
-  once to run in the new timezone. Say: "Last step: restart me once from the
-  Plow app, then text me 'done'." When they do, run `register-jobs` again. If
-  it still says "restart", relay its line and say setup isn't finished; never
-  ask for a second restart.
+- Ask for one restart per run, never two: if it still says "restart"
+  afterwards, relay its line and say setup isn't finished.
 - Each `register-jobs: create <name>` (or `replace`) line is a job now
   running. Tell the owner in plain words: `hostex-inbound` watches guest
   messages every two minutes, `wiki-nightly` updates the property notes at 3am,

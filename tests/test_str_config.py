@@ -55,6 +55,7 @@ def test_unwritable_values_refused_without_echo(tmp_path, value):
 @pytest.mark.parametrize("key,value", [
     ("HOSTEX_TOKEN", "aB3-_.=+/:zZ9"),
     ("PLOW_CHAT_GROUP_UIDS", "cht_a=STR Owners,cht_b=Cleaners"),
+    ("PLOW_CHAT_APPROVAL_GROUP", ""),                      # "here" clears the group
 ])
 def test_allowed_values_roundtrip(tmp_path, key, value):
     str_config.apply({"env": {key: value}}, tmp_path, environ={})
