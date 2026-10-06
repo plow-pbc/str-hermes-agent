@@ -87,7 +87,7 @@ def test_tracked_config_excludes_host_specific_runtime_identity_and_state():
     assert "home_channel:" not in config
     assert not re.search(r"(?<![A-Za-z0-9_])(?:cht|cp)_[A-Za-z0-9_-]+", config)
     assert "user_id:" not in config
-    assert "\nonboarding:\n" not in f"\n{config}"
+    assert "seen:" not in config
 
 
 def test_compose_never_mounts_the_checkout_around_the_vault():

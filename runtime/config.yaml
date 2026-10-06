@@ -80,6 +80,13 @@ auxiliary:
       timeout: 300
 
 group_sessions_per_user: false
+# The base seed sets this, but this file replaces the seed's config.yaml on
+# every boot, so without it Hermes' default "ask" appends a build-a-profile
+# directive to the owner's first message and it wins over str-setup's opener
+# (seen live on a fresh install). The runtime's `seen` flags under this key are
+# state and stay out of this file.
+onboarding:
+  profile_build: "off"
 plugins:
   enabled:
   - plow-chat-platform
