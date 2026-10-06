@@ -222,11 +222,12 @@ def is_automated(message: dict) -> bool:
 
     The side test keeps the marker out of guest hands: without it a guest
     calling themselves `Bot:…` mutes their own thread for good, which is the
-    failure this predicate exists to prevent.
+    failure this predicate exists to prevent. A `Box` is Hostex's own system
+    notice ("Pre-approval expired"), posted host-side with no sender_name.
     """
     name = message["sender_name"]
-    return (message["sender_role"] == "host"
-            and name is not None and name.startswith("Bot:"))
+    return message["sender_role"] == "host" and (
+        message["display_type"] == "Box" or (name is not None and name.startswith("Bot:")))
 
 
 def last_speaker(thread: list[dict]) -> dict | None:
@@ -364,7 +365,7 @@ def render(template: str, conversation: dict, messages: list[dict]) -> str:
     The guest name goes through `one_line`, as message content does, so neither
     can occupy a line that isn't its own. The rest — property title,
     conversation id, timestamps, the sender label `sender_label` builds from
-    role and sender_name, and the `display_type` `message_text` falls back to
+    role, sender_name and display_type, and the `display_type` `message_text` falls back to
     — is Hostex's own, not written by a guest. Flatten one at its
     own interpolation site if that ever stops being true. What is written *on*
     a guest's line is the template's disclaimer's job, not this function's.

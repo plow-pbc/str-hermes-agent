@@ -1,6 +1,6 @@
 ---
 name: str-setup
-description: Use in the owner's one-to-one chat when str is not set up yet (no HOSTEX_TOKEN in $HERMES_HOME/.env or $HERMES_HOME/str/setup.env), and when the owner asks to add a property, change the cleaner, or switch where drafts go. Onboarding over chat, from Plow Latch to the first scheduled job.
+description: Use in the owner's one-to-one chat when str is not set up yet (no HOSTEX_TOKEN in /var/lib/hermes/.env or /var/lib/hermes/str/setup.env), and when the owner asks to add a property, change the cleaner, or switch where drafts go. Onboarding over chat, from Plow Latch to the first scheduled job.
 platforms: [linux]
 ---
 
@@ -18,8 +18,8 @@ Answer what the owner said first, then carry on. Never narrate the mechanics.
 how to tell it is already done; skip those and resume at the first one that is
 not. Setup is finished when step 6 has run `register-jobs` cleanly.
 
-Start every terminal command with `S=${HERMES_HOME:-/var/lib/hermes}/scripts;`
-so `$S/` below resolves. `setup-discover <cmd>` prints JSON, and `str-config`
+Run the scripts by their full path, exactly as written here, with no
+variables. `setup-discover <cmd>` prints JSON, and `str-config`
 prints one line per thing it saved; on failure either exits non-zero with one
 sentence on stderr written for the owner: relay it as it is.
 
@@ -31,33 +31,33 @@ relay only the masked line `str-config` printed. If the owner pastes a key into
 chat anyway, don't repeat it: tell them to rotate it in Hostex (or Seam),
 because it has left their Mac, and carry on with the file.
 
-**Getting a key** (steps 2 and 4): run `"$S/str-config" --latch-template`, then
+**Getting a key** (steps 2 and 4): run `/opt/plow/str/bin/str-config --latch-template`, then
 say: "Open ~/Plow/str-keys.env on your Mac, paste your <Hostex|Seam> key after
 the = sign, save, then tell me done." When they do, run
-`"$S/str-config" --from-latch`. If it refuses a value's characters, ask them to
+`/opt/plow/str/bin/str-config --from-latch`. If it refuses a value's characters, ask them to
 paste it into the file again without spaces or quotes around it, then run it again.
 
 Everything else goes to `str-config` as JSON on stdin, through a quoted heredoc:
 
 ```sh
-S=${HERMES_HOME:-/var/lib/hermes}/scripts; "$S/str-config" <<'JSON'
+/opt/plow/str/bin/str-config <<'JSON'
 {"env": {"PLOW_CHAT_APPROVAL_GROUP": ""}}
 JSON
 ```
 
 ## 1. Plow Latch
 
-Run `"$S/setup-discover" latch`. `{"configured": true}` means continue. If it
+Run `/opt/plow/str/bin/setup-discover latch`. `{"configured": true}` means continue. If it
 is `false`, say: "str keeps its notes in your Mac's Plow wiki and reads your
 keys from it, so it needs Plow Latch running on your Mac. Install it from
 https://plow.co/latch, then message me again." Stop there.
 
 ## 2. Hostex key
 
-Done if `"$S/setup-discover" hostex-properties` already succeeds.
+Done if `/opt/plow/str/bin/setup-discover hostex-properties` already succeeds.
 
 Otherwise get the Hostex key as above, then run
-`"$S/setup-discover" hostex-properties`. Success is a JSON list of their
+`/opt/plow/str/bin/setup-discover hostex-properties`. Success is a JSON list of their
 properties: name them back in one line. On exit 2, relay the sentence and get
 the key again.
 
@@ -80,12 +80,12 @@ For a group:
    none). None there means nobody has written in it yet: ask someone to send a
    message there, then list again.
 3. Read the current list with
-   `grep -h '^PLOW_CHAT_GROUP_UIDS=' "${HERMES_HOME:-/var/lib/hermes}/str/setup.env"`.
+   `grep -h '^PLOW_CHAT_GROUP_UIDS=' /var/lib/hermes/str/setup.env`.
    Entries are comma-separated `<chat_id>=<label>`. Keep every other entry,
    replace any entry already carrying this label, add `<chat_id>=STR Owners`
    (always exactly that label), and write:
    ```sh
-   "$S/str-config" <<'JSON'
+   /opt/plow/str/bin/str-config <<'JSON'
    {"env": {"PLOW_CHAT_GROUP_UIDS": "<merged list>", "PLOW_CHAT_APPROVAL_GROUP": "STR Owners"}}
    JSON
    ```
@@ -107,7 +107,7 @@ On a first run, done if `ops.toml` (path below) already lists properties.
 Ask: "Do you use smart locks through Seam? Then I can open doors on request
 and check each morning that the cleaner has been in." If no, go to step 5.
 
-If yes, and `"$S/setup-discover" seam-devices` does not already succeed, get
+If yes, and `/opt/plow/str/bin/setup-discover seam-devices` does not already succeed, get
 the Seam key as above and verify with `seam-devices`. On exit 2, relay the
 sentence and get it again.
 
@@ -115,7 +115,7 @@ Then, from the `hostex-properties` list, ask which properties to watch. For
 each one:
 
 - the front door: offer `seam-devices` by `name`, keep its `seam_device_id`;
-- the cleaner's codes: run `"$S/setup-discover" seam-codes <seam_device_id>`,
+- the cleaner's codes: run `/opt/plow/str/bin/setup-discover seam-codes <seam_device_id>`,
   offer them by `name`, keep each chosen `access_code_id`;
 - the cleaner's first name;
 - confirm the property's `timezone` and `default_checkin_time` from Hostex
@@ -130,11 +130,11 @@ Write everything in one patch. On a first run add `"timezone": "<IANA zone>"`
 to `ops`: the first property's zone unless the owner names another. On a
 re-run leave it out (moving it forces a restart), and since `properties`
 replaces the whole list, read
-`${VAULT:-${HERMES_HOME:-/var/lib/hermes}/repo/vault}/ops.toml` first and
+`/var/lib/hermes/repo/vault/ops.toml` first and
 send every property, old and new.
 
 ```sh
-"$S/str-config" <<'JSON'
+/opt/plow/str/bin/str-config <<'JSON'
 {"env": {"PLOW_CHAT_GROUP_UIDS": "<merged list>"},
  "ops": {"properties": [
    {"hostex_property_id": 123, "title": "<title>", "timezone": "<IANA zone>",
@@ -154,8 +154,8 @@ zone, let the owner confirm it, and write `{"ops": {"timezone": "<IANA zone>"}}`
 The Hostex and Seam tools, the chat plugin and the timezone read config only
 when the agent starts. So if this run wrote a key (`HOSTEX_TOKEN`,
 `SEAM_API_KEY`, `PLOW_CHAT_*`) or the timezone, say: "Last step: restart me
-once from the Plow app, then text me 'done'.", and run `"$S/register-jobs"`
-when they do. Otherwise run it now.
+once from the Plow app, then text me 'done'." When they say done, the restart
+happened: run `/opt/plow/str/bin/register-jobs` without asking again. Otherwise run it now.
 
 - Ask for one restart per run, never two.
 - Each `register-jobs: create <name>` (or `replace`) line is a job now
