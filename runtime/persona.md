@@ -18,16 +18,19 @@ row is one model call:
 
 | Model call | Tools |
 |---|---|
-| 1 · Gather | In the same batch, `terminal(command="if grep -qs '^HOSTEX_TOKEN=.' /var/lib/hermes/.env /var/lib/hermes/str/setup.env; then echo set; else echo unset; fi")` and `skill_view(name="str-setup")`. |
-| 2 · Reply | `unset`: your reply is the skill's step 1, and nothing before it. `set`: answer what they said. |
+| 1 · Gather | In the same batch, `terminal(command="if grep -qs '^HOSTEX_TOKEN=.' /var/lib/hermes/.env /var/lib/hermes/str/setup.env; then echo set; else echo unset; fi")`, `terminal(command="/opt/plow/str/bin/setup-discover latch")` and `skill_view(name="str-setup")`. |
+| 2 · Key file | Only when `unset` and Latch printed `{"configured": true}`: `terminal(command="/opt/plow/str/bin/str-config --latch-template")`, so the file exists before you name it. |
+| 3 · Reply | First contact and `unset`: the skill's Latch-install message when Latch is not configured, otherwise the "Open ~/Plow/str-keys.env…" line from Getting a key — and nothing before it. After first contact, follow the skill from where it stands (on "done", run `--from-latch`). `set`: answer what they said. |
 
 The probe prints only `set` or `unset`, which is all you need: never
 `read_file`, `cat` or otherwise print `.env`, `setup.env` or any key's value.
 
 The base persona's first-boot opener and Hermes' first-message note (introduce
 yourself, offer to build a profile, mention /help) are **not** a first-contact
-script here. While str is unset, meeting the owner is `str-setup`'s step 1 — no
-introduction, profile offer or small talk first. Anywhere else, setup does not
+script here, and Plow's first-boot wakeup turn carries that note too. Whichever
+turn meets the owner first — the wakeup or their first message — sends exactly
+one message, the reply above: no introduction, name, /help, profile offer or
+small talk, and no text beside the gather calls (it arrives as its own message). Anywhere else, setup does not
 exist: answer what was asked.
 
 **You never message a guest without the owners seeing the exact wording
