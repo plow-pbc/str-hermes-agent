@@ -8,7 +8,8 @@ platforms: [linux]
 
 Run this only in the owner's own one-to-one thread: it collects keys and
 writes config. Asked anywhere else, say the owner can start it privately with
-you, and stop.
+you, and stop. The one exception is step 3's "trust this group", which the
+owner says in the owners group itself.
 
 This lands on a phone. One or two short lines per message, no bullet lists.
 Answer what the owner actually said first, then carry on. Never narrate the
@@ -18,14 +19,9 @@ mechanics ("running setup-discover now"): send the question the step needs.
 how to tell it is already done; skip those and resume at the first one that is
 not. Setup is finished when step 6 has run `register-jobs` cleanly.
 
-The three scripts live in `${HERMES_HOME:-/var/lib/hermes}/scripts/`. Start
-every terminal command with `S=${HERMES_HOME:-/var/lib/hermes}/scripts;` so the
-`$S/` below resolves:
-
-- `setup-discover <cmd>` prints JSON. On failure it exits 2 with one sentence
-  on stderr written for the owner: relay that sentence as it is.
-- `str-config` takes a JSON patch on stdin and prints a masked summary.
-- `register-jobs` installs the scheduled jobs.
+Start every terminal command with `S=${HERMES_HOME:-/var/lib/hermes}/scripts;`
+so `$S/` below resolves. `setup-discover <cmd>` prints JSON; on failure it exits
+2 with one sentence on stderr written for the owner: relay it as it is.
 
 **Secrets.** Pass a key to `str-config` only through a quoted heredoc, never as
 an argument and never with `echo`:
@@ -53,8 +49,7 @@ me again." Stop there.
 
 Done if `"$S/setup-discover" hostex-properties` already succeeds.
 
-Otherwise ask for their Hostex API token. Write it as
-shown above, then run `"$S/setup-discover" hostex-properties`. Success is a
+Otherwise ask for their Hostex API token, write it as shown above, then run `"$S/setup-discover" hostex-properties`. Success is a
 JSON list of their properties: name them back in one line. On exit 2, relay the
 sentence and ask for the token again.
 
@@ -67,29 +62,25 @@ Ask: "Should guest-reply drafts come to you here, or to an owners group?"
 
 For a group:
 
-1. The owner adds this line to the group in Messages, and someone says hello
-   there.
+1. The owner adds this line to the group in Messages.
 2. Run `"$S/setup-discover" groups` and offer each group by its `title` and
    `members`. If the list is empty, the line is not in a group yet: ask them to
    add it and try again.
 3. Read the current list with `grep '^PLOW_CHAT_GROUP_UIDS=' "${HERMES_HOME:-/var/lib/hermes}/.env"`.
    Keep every other entry, replace any entry already carrying this label, and
-   add `<chat_uid>=STR Owners`. Entries are comma-separated `<chat_uid>=<label>`.
-4. Write it:
-
+   add `<chat_uid>=STR Owners` (always exactly that label). Entries are
+   comma-separated `<chat_uid>=<label>`. Write it:
    ```sh
    "$S/str-config" <<'JSON'
    {"env": {"PLOW_CHAT_GROUP_UIDS": "<merged list>", "PLOW_CHAT_APPROVAL_GROUP": "STR Owners"}}
    JSON
    ```
-
-5. Send one short hello into the group with `send_message`, target
-   `plow_chat:<chat_uid>` (the chat tool, not Hostex's guest `send_message`):
-   who you are and that drafts will arrive there for approval. Speaking in a
-   thread is how it becomes one you vouch for.
-
-The label is always exactly `STR Owners`: the group's instructions are keyed
-by it.
+4. Say: "In that group, say 'trust this group' to me — that lets your
+   co-owners approve drafts there." When the owner says it in the group, call
+   `plow_set_conversation_trusted` with `trusted=true, confirm=true` (it works
+   only on the owner's own turn in that group). Confirm from the tool result;
+   if it fails, relay its error and mention the Plow dashboard's group-trust
+   setting as the alternative.
 
 ## 4. Smart locks (optional)
 
@@ -113,7 +104,10 @@ each one:
   (ask for them if Hostex has none).
 
 The cleaners group: pick it as in step 3, labelled exactly `Cleaners`, merged
-into the same `PLOW_CHAT_GROUP_UIDS` list, with its own hello.
+into the same `PLOW_CHAT_GROUP_UIDS` list. Never trust it: full trust would let
+cleaners use the owner's accounts. You may send one short intro there with
+`send_message`, target `plow_chat:<chat_uid>` (the chat tool, not Hostex's
+guest `send_message`), so the cleaners know who you are.
 
 Write everything in one patch. `ops.timezone` is the first property's zone
 unless the owner names another. `properties` replaces the whole list, so on a
@@ -122,7 +116,7 @@ first and send every property, old and new.
 
 ```sh
 "$S/str-config" <<'JSON'
-{"env": {"SEAM_API_KEY": "<key>", "PLOW_CHAT_GROUP_UIDS": "<merged list>"},
+{"env": {"PLOW_CHAT_GROUP_UIDS": "<merged list>"},
  "ops": {"timezone": "<IANA zone>", "properties": [
    {"hostex_property_id": 123, "title": "<title>", "timezone": "<IANA zone>",
     "default_checkin_time": "16:00", "seam_device_id": "<id>",
@@ -130,8 +124,6 @@ first and send every property, old and new.
     "cleaners_thread": "Cleaners"}]}}
 JSON
 ```
-
-Leave `SEAM_API_KEY` out of this patch if you already wrote it.
 
 ## 5. Timezone (no Seam)
 
@@ -146,8 +138,8 @@ Run `"$S/register-jobs"`.
 - It refuses with a sentence containing "restart": the agent has to restart
   once to run in the new timezone. Say: "Last step: restart me once from the
   Plow app, then text me 'done'." When they do, run `register-jobs` again.
-- Each `register-jobs: create <name>` (or `replace`) line is a job now running. Tell the owner
-  in plain words: `hostex-inbound` watches guest messages every two minutes,
+- Each `register-jobs: create <name>` (or `replace`) line is a job now
+  running. Tell the owner in plain words: `hostex-inbound` watches guest messages every two minutes,
   `wiki-nightly` updates the property notes at 3am, `checkin-watch` checks the
   cleaners at noon. No output means they were already installed: confirm with
   `hermes cron list`.
@@ -155,7 +147,5 @@ Run `"$S/register-jobs"`.
 
 Never say jobs are running until `register-jobs` reported them.
 
-## Changing things later
-
-"Add a property" or "change the cleaner" re-runs step 4 for that property;
-"switch drafts to the group" re-runs step 3. Each ends with step 6.
+**Later:** "add a property" or "change the cleaner" re-runs step 4; "switch
+drafts to the group" re-runs step 3. Each ends with step 6.
