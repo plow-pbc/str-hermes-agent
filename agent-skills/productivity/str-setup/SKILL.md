@@ -153,13 +153,11 @@ zone, let the owner confirm it, and write `{"ops": {"timezone": "<IANA zone>"}}`
 
 The Hostex and Seam tools, the chat plugin and the timezone read config only
 when the agent starts. So if this run wrote a key (`HOSTEX_TOKEN`,
-`SEAM_API_KEY`, `PLOW_CHAT_*`), say: "Last step: restart me once from the Plow
-app, then text me 'done'.", and run `"$S/register-jobs"` when they do.
-Otherwise run it now, and if it refuses with a sentence containing "restart",
-ask for that same restart and run it again after.
+`SEAM_API_KEY`, `PLOW_CHAT_*`) or the timezone, say: "Last step: restart me
+once from the Plow app, then text me 'done'.", and run `"$S/register-jobs"`
+when they do. Otherwise run it now.
 
-- Ask for one restart per run, never two: if it still says "restart"
-  afterwards, relay its line and say setup isn't finished.
+- Ask for one restart per run, never two.
 - Each `register-jobs: create <name>` (or `replace`) line is a job now
   running. Tell the owner in plain words: `hostex-inbound` watches guest
   messages every two minutes, `wiki-nightly` updates the property notes at 3am,

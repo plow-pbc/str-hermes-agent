@@ -119,9 +119,10 @@ def hermes_home() -> pathlib.Path:
 
 
 def read_env_key(name: str) -> str:
-    value = {**os.environ, **str_env.read_setup_env(hermes_home())}.get(name, "").strip()
+    """One key as the gateway sees it: $HERMES_HOME/.env over the environment."""
+    value = {**os.environ, **str_env.read_setup_env(hermes_home())}.get(name)
     if not value:
-        sys.exit(f"checkin-watch: {name} not found in {hermes_home()}/.env or str/setup.env")
+        sys.exit(f"checkin-watch: {name} not found in {hermes_home() / '.env'}")
     return value
 
 

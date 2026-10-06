@@ -1,5 +1,6 @@
-"""Every script that reads a Hostex token parses $HERMES_HOME/.env as the gateway
-does -- through bin/str_env.py's dotenv -- so a hand-written quoted value works."""
+"""Every script that reads a Hostex token sees what the gateway sees -- through
+bin/str_env.py's dotenv -- so a hand-written quoted value works, and so does a
+token that setup wrote only to str/setup.env."""
 import importlib.machinery
 import importlib.util
 import pathlib
@@ -20,9 +21,11 @@ def _load(script):
     return mod
 
 
+@pytest.mark.parametrize("where", [".env", "str/setup.env"])
 @pytest.mark.parametrize("script,reader,args", READERS, ids=[r[0] for r in READERS])
-def test_a_quoted_token_is_read_unquoted(script, reader, args, tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text('HOSTEX_TOKEN="tok-x"\n')
+def test_a_quoted_token_is_read_unquoted(script, reader, args, where, tmp_path, monkeypatch):
+    (tmp_path / "str").mkdir()
+    (tmp_path / where).write_text('HOSTEX_TOKEN="tok-x"\n')
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv("HOSTEX_TOKEN", raising=False)
     assert getattr(_load(script), reader)(*args) == "tok-x"

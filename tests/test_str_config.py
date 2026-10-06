@@ -18,8 +18,6 @@ def _load(name, path):
 
 str_config = _load("str_config", ROOT / "bin" / "str-config")
 watch = _load("checkin_watch", ROOT / "bin" / "checkin-watch.py")
-poll = _load("hostex_poll", ROOT / "bin" / "hostex-poll.py")
-raw = _load("hostex_raw", ROOT / "bin" / "hostex-raw")
 
 PROP = {"hostex_property_id": 12345, "title": "Example Property",
         "timezone": "America/Los_Angeles", "default_checkin_time": "16:00",
@@ -58,18 +56,6 @@ def test_dotenv_wins_over_setup_env_as_in_the_gateway(tmp_path):
     setup_env(tmp_path).write_text("HOSTEX_TOKEN=setup\nSEAM_API_KEY=seam\n")
     (tmp_path / ".env").write_text("HOSTEX_TOKEN=dotenv\n")
     assert str_env.read_setup_env(tmp_path) == {"HOSTEX_TOKEN": "dotenv", "SEAM_API_KEY": "seam"}
-
-
-@pytest.mark.parametrize("reader", [
-    poll.read_token, raw.read_token, lambda: watch.read_env_key("HOSTEX_TOKEN"),
-], ids=["hostex-poll", "hostex-raw", "checkin-watch"])
-def test_a_token_only_setup_wrote_is_found_before_any_restart(tmp_path, monkeypatch, reader):
-    setup_env(tmp_path).parent.mkdir()
-    setup_env(tmp_path).write_text("HOSTEX_TOKEN=tok-abc.123_x\n")
-    (tmp_path / ".env").write_text("PLOW_AGENT_TOKEN=x\n")  # what plow-init writes
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.delenv("HOSTEX_TOKEN", raising=False)
-    assert reader() == "tok-abc.123_x"
 
 
 @pytest.mark.parametrize("value", ['a"b', "a'b", "a\\b", "a$b", "a#b", "a\nb", "a\rb", " zq9", "zq9 "])
