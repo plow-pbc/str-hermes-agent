@@ -12,6 +12,10 @@
 # path passes on staging with nothing in it. `-s`, not `-f`: a zero-byte manifest
 # fails the same way none at all does.
 #
+# The one exception is no directory at all. That only happens on a VM with no
+# bind (a cloud install), where an empty manifest is the correct start, so it is
+# created. An EMPTY directory still refuses: that is the typo'd bind source.
+#
 # HERMES_HOME is defaulted rather than required, and that is load-bearing: a
 # `#!/usr/bin/env bash` cont-init script gets s6's own environment, not the
 # container's, so the image's HERMES_HOME is not set here. Demanding it is the
@@ -20,6 +24,13 @@
 set -euo pipefail
 
 vault="${HERMES_HOME:-/var/lib/hermes}/repo/vault"
+
+if [ ! -e "$vault" ]; then
+  install -d -o hermes -g hermes -m 0775 "$vault"
+  printf '{"sources": {}}\n' > "$vault/.manifest.json"
+  chown hermes:hermes "$vault/.manifest.json"
+  echo "str: created empty ingest staging at $vault (first boot)" >&2
+fi
 
 if [ ! -s "$vault/.manifest.json" ]; then
   echo "str: $vault has no ingest manifest (.manifest.json missing or empty) -- refusing to start." >&2
