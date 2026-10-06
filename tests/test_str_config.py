@@ -113,3 +113,13 @@ def test_a_property_checkin_watch_would_refuse_is_never_written(tmp_path, prop):
     with pytest.raises(SystemExit, match="ops.toml not written"):
         str_config.apply({"ops": {"properties": [prop]}}, tmp_path, environ={})
     assert (tmp_path / "repo/vault/ops.toml").read_text() == 'timezone = "America/Chicago"\n'
+
+
+def test_a_refused_property_in_an_env_and_ops_patch_writes_neither_file(tmp_path):
+    """Step 4 sends env and ops together; a refusal must not leave .env half-applied."""
+    prop = {k: v for k, v in PROP.items() if k != "cleaners_thread"}
+    with pytest.raises(SystemExit, match="ops.toml not written"):
+        str_config.apply({"env": {"PLOW_CHAT_GROUP_UIDS": "cht_c=Cleaners"},
+                          "ops": {"timezone": "America/Chicago", "properties": [prop]}},
+                         tmp_path, environ={})
+    assert not (tmp_path / ".env").exists() and not (tmp_path / "repo/vault/ops.toml").exists()

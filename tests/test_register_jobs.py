@@ -230,7 +230,7 @@ def test_a_timezone_edited_without_a_restart_refuses(tmp_path):
 
 def test_a_hung_hermes_call_is_a_failure_not_a_hang(monkeypatch):
     def hang(argv, **kw):
-        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+        raise subprocess.TimeoutExpired(argv, kw["timeout"], output=b"partial \xff")
     monkeypatch.setattr(register_jobs.subprocess, "run", hang)
-    with pytest.raises(SystemExit, match="timed out"):
+    with pytest.raises(SystemExit, match="partial \ufffdtimed out"):
         register_jobs._check(register_jobs._run, [register_jobs.HERMES, "cron", "list"])

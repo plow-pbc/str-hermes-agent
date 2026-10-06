@@ -117,7 +117,8 @@ def _run(argv, extra_env):
     try:
         return subprocess.run(argv, capture_output=True, text=True, env={**inherited, **extra_env}, timeout=120)
     except subprocess.TimeoutExpired as exc:
-        return subprocess.CompletedProcess(argv, 124, exc.stdout or "", f"timed out after {exc.timeout:g}s")
+        out = (exc.stdout or b"").decode(errors="replace")  # bytes even with text=True
+        return subprocess.CompletedProcess(argv, 124, out, f"timed out after {exc.timeout:g}s")
 
 
 def _check(runner, argv, extra_env=None):
