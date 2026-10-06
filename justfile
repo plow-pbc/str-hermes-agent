@@ -41,7 +41,7 @@ restart:
 # image, which passes while inspecting nothing.
 test:
     docker build -q -t sams-str-hermes-agent:local .
-    uv run --no-project --python 3.13 --with aiohttp==3.14.1 --with pytest==8.4.2 --with fastmcp==3.4.5 --with seam==1.209.0 pytest -q
+    uv run --no-project --python 3.13 --with aiohttp==3.14.1 --with pytest==8.4.2 --with fastmcp==3.4.5 --with seam==1.209.0 --with python-dotenv==1.2.2 pytest -q
 
 # Airbnb operations wiki — task runner.
 #

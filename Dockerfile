@@ -153,8 +153,11 @@ COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-requir
 # receives the image's SOUL or config at all. One script closes all three rather
 # than three copies of the payload closing one each.
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
+# str's cron jobs, reconciled from config at every boot (bin/register-jobs).
+COPY docker/cont-init.d/06-register-jobs /etc/cont-init.d/06-register-jobs
 RUN chmod 0755 /etc/cont-init.d/03-str-timezone \
                /etc/cont-init.d/04-require-ingest-manifest.sh \
-               /etc/cont-init.d/05-install-agent-payload.sh
+               /etc/cont-init.d/05-install-agent-payload.sh \
+               /etc/cont-init.d/06-register-jobs
 
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2

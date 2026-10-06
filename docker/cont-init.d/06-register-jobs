@@ -1,0 +1,5 @@
+#!/command/with-contenv sh
+# Reconcile str's cron jobs with its config on every boot, as the gateway's user
+# so jobs.json stays the gateway's. After 03 (TZ) and 05 (scripts/ link, which
+# `hermes cron` resolves --script against). --boot exits 0 whatever happens.
+exec /command/s6-setuidgid hermes env HOME="$HERMES_HOME" /opt/plow/str/bin/register-jobs --boot
