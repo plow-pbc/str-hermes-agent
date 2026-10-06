@@ -63,9 +63,11 @@ chosen before), then go to step 4.
 
 For a group:
 
-1. The owner adds this line to the group in Messages.
+1. The owner adds this line to the group in Messages, and someone sends a
+   message there: Plow only sees a group once a message arrives from it.
 2. Run `"$S/setup-discover" groups` and offer each group by its `title` and
-   `members`. Empty means the line is in no group yet: ask them, then retry.
+   `members`. Empty means nobody has written in the group yet: ask someone to
+   send a message there, then retry.
 3. Read the current list with `grep '^PLOW_CHAT_GROUP_UIDS=' "${HERMES_HOME:-/var/lib/hermes}/.env"`.
    Keep every other entry, replace any entry already carrying this label, and
    add `<chat_uid>=STR Owners` (always exactly that label). Entries are

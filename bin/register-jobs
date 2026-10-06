@@ -49,8 +49,6 @@ def _job(name, schedule, script, deliver, prompt=None, no_agent=False):
 
 
 def desired_jobs(env, ops):
-    if not env.get("HOSTEX_TOKEN"):
-        return []
     groups = _groups(env)
     # Named rather than pinned by id, so re-creating the group means relabelling
     # PLOW_CHAT_GROUP_UIDS and nothing else.

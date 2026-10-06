@@ -28,7 +28,6 @@ OPS_STRAY = {"properties": [{"cleaners_thread": "Nobody"}]}
 
 DESIRED = [
     # (id, env, ops, expected {name: deliver})
-    ("not set up", {}, {}, {}),
     ("home only", ENV_HOME, {}, {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat"}),
     ("owners group", ENV_GROUP, {}, {"hostex-inbound": "plow_chat:cht_o", "wiki-nightly": "plow_chat"}),
     ("checkin needs seam", ENV_GROUP, OPS_PROP,
@@ -100,8 +99,8 @@ RECONCILE = [
      [("remove", "checkin-watch")]),
     ("paused is left alone", ENV_FIXTURE,
      _registered(hostex_inbound={"deliver": "plow_chat", "paused_at": "2026-10-01T00:00:00Z"}), []),
-    ("disabled is left alone", {}, _registered(wiki_nightly={"enabled": False}),
-     [("remove", "hostex-inbound")]),
+    ("disabled is left alone", ENV_FIXTURE,  # a drifted schedule would otherwise be replaced
+     _registered(wiki_nightly={"enabled": False, "schedule": {"kind": "cron", "display": "0 4 * * *"}}), []),
 ]
 
 
