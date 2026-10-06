@@ -35,11 +35,11 @@ def _groups(env):
     return {label.strip(): uid.strip() for uid, label in pairs}
 
 
-def _job(name, schedule, script, deliver, prompt=None, no_agent=False):
+def _job(name, schedule, script, deliver, prompt=None, no_agent=False, origin=None):
     # HERMES_SESSION_* stamps the job's origin: the image mirrors a delivery into
-    # the target's session only when it IS the origin, so a group draft without
-    # it never reaches the session that approves it.
-    chat = deliver.partition(":")[2] or None
+    # the target's session only when it IS the origin, so a draft without it
+    # never reaches the session that approves it.
+    chat = deliver.partition(":")[2] or origin
     return {"name": name, "schedule": schedule, "script": script, "deliver": deliver,
             "session_chat_id": chat, "prompt": prompt, "no_agent": no_agent}
 
@@ -52,13 +52,17 @@ def desired_jobs(env, ops):
     if label and label not in groups:
         raise SystemExit(f"register-jobs: PLOW_CHAT_APPROVAL_GROUP {label!r} names no group in PLOW_CHAT_GROUP_UIDS")
     drafts = f"{HOME}:{groups[label]}" if label else HOME
-    jobs = [_job("hostex-inbound", "every 2m", "hostex-poll.py", drafts, HOSTEX_PROMPT),
+    # No group: drafts and approvals share the owner's own chat, so it is the
+    # origin. plow-init publishes its uid after cont-init, so a boot run has
+    # none and leaves the stamp to the setup run, which reconcile then lets win.
+    origin = None if label else env.get("PLOW_HOME_CHANNEL")
+    jobs = [_job("hostex-inbound", "every 2m", "hostex-poll.py", drafts, HOSTEX_PROMPT, origin=origin),
             # The digest is the operator's; nightly.sh's stdout is vault text
             # distilled from guest mail, so it never enters a prompt.
             _job("wiki-nightly", "0 3 * * *", "nightly.sh", HOME, no_agent=True)]
     properties = ops.get("properties", [])
     if env.get("SEAM_API_KEY") and properties and all(p["cleaners_thread"] in groups for p in properties):
-        jobs.append(_job("checkin-watch", "0 12 * * *", "checkin-watch.py", drafts, CHECKIN_PROMPT))
+        jobs.append(_job("checkin-watch", "0 12 * * *", "checkin-watch.py", drafts, CHECKIN_PROMPT, origin=origin))
     return jobs
 
 
@@ -83,7 +87,8 @@ def reconcile(desired, registered):
                 actions.append(("create", job))
         elif job is None:
             actions.append(("remove", name))
-        elif (have["schedule"]["display"], have["deliver"], have["script"]) != (job["schedule"], job["deliver"], job["script"]):
+        elif ((have["schedule"]["display"], have["deliver"], have["script"]) != (job["schedule"], job["deliver"], job["script"])
+              or job["session_chat_id"] not in (None, (have["origin"] or {}).get("chat_id"))):
             actions.append(("replace", job))
     return actions
 

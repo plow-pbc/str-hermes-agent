@@ -21,6 +21,7 @@ def _load(name, path):
 register_jobs = _load("register_jobs", ROOT / "bin/register-jobs")
 
 ENV_HOME = {"HOSTEX_TOKEN": "t"}
+ENV_HOME_UID = {**ENV_HOME, "PLOW_HOME_CHANNEL": "cht_home"}
 ENV_GROUP = {"HOSTEX_TOKEN": "t", "PLOW_CHAT_GROUP_UIDS": "cht_o=STR Owners,cht_c=Cleaners",
              "PLOW_CHAT_APPROVAL_GROUP": "STR Owners"}
 OPS_PROP = {"timezone": "America/Los_Angeles", "properties": [{"cleaners_thread": "Cleaners"}]}
@@ -58,22 +59,28 @@ HOSTEX_PROMPT = "Your final response is delivered to the owners' group as-is: ma
 # Golden: hostex-inbound is the argv and env the retired host-side enable script
 # issued (no USER_ID: every member of the owners' group can approve);
 # wiki-nightly's --no-agent keeps guest-derived stdout out of a prompt (#44), and
-# a bare plow_chat is the operator's home chat (#49).
+# a bare plow_chat is the operator's home chat (#49). Without a group, drafts
+# go home stamped with the home chat as origin, so approvals there see them.
 CRON_ARGV = [
-    ("hostex-inbound",
+    ("hostex-inbound", ENV_GROUP,
      [register_jobs.HERMES, "cron", "create", "every 2m", "--name", "hostex-inbound",
       "--script", "hostex-poll.py", "--deliver", "plow_chat:cht_o",
       "--failure-deliver", "plow_chat", HOSTEX_PROMPT],
      {"HERMES_SESSION_PLATFORM": "plow_chat", "HERMES_SESSION_CHAT_ID": "cht_o"}),
-    ("wiki-nightly",
+    ("hostex-inbound", ENV_HOME_UID,
+     [register_jobs.HERMES, "cron", "create", "every 2m", "--name", "hostex-inbound",
+      "--script", "hostex-poll.py", "--deliver", "plow_chat", HOSTEX_PROMPT],
+     {"HERMES_SESSION_PLATFORM": "plow_chat", "HERMES_SESSION_CHAT_ID": "cht_home"}),
+    ("wiki-nightly", ENV_HOME_UID,
      [register_jobs.HERMES, "cron", "create", "0 3 * * *", "--name", "wiki-nightly",
       "--script", "nightly.sh", "--no-agent", "--deliver", "plow_chat"], {}),
 ]
 
 
-@pytest.mark.parametrize("name,argv,extra_env", CRON_ARGV, ids=[r[0] for r in CRON_ARGV])
-def test_create_argv(name, argv, extra_env):
-    job = next(j for j in register_jobs.desired_jobs(ENV_GROUP, {}) if j["name"] == name)
+@pytest.mark.parametrize("name,env,argv,extra_env", CRON_ARGV,
+                         ids=[f"{r[0]}-{'group' if r[1] is ENV_GROUP else 'home'}" for r in CRON_ARGV])
+def test_create_argv(name, env, argv, extra_env):
+    job = next(j for j in register_jobs.desired_jobs(env, {}) if j["name"] == name)
     assert register_jobs.create_argv(job) == (argv, extra_env)
 
 
@@ -94,6 +101,11 @@ RECONCILE = [
     ("identical", ENV_FIXTURE, _registered(), []),
     ("deliver moved home to group", ENV_FIXTURE, _registered(hostex_inbound={"deliver": "plow_chat"}),
      [("replace", "hostex-inbound")]),
+    # A boot run predates plow-init's home uid; the setup run that has it stamps.
+    ("home origin stamped once known", ENV_HOME_UID, _registered(hostex_inbound={"deliver": "plow_chat", "origin": None}),
+     [("replace", "hostex-inbound")]),
+    ("a boot run without the uid keeps the stamp", ENV_HOME,
+     _registered(hostex_inbound={"deliver": "plow_chat", "origin": {"chat_id": "cht_home"}}), []),
     ("schedule changed", ENV_FIXTURE,
      _registered(wiki_nightly={"schedule": {"kind": "cron", "display": "0 4 * * *"}}),
      [("replace", "wiki-nightly")]),
