@@ -82,6 +82,25 @@ a volume, so there is no host path to it: read and edit through
 directory left over from before the cutover may still exist on the host — it is
 not what the agent reads, and a check pointed at it reports on a dead home.
 
+## Deploy your own
+
+str runs as a Plow agent, and it needs Plow Latch running on the owner's Mac:
+its wiki lives at `~/Plow/wiki` there, and so does the file setup reads keys
+from. Deploy the image, then text the agent. In the owner's one-to-one chat it
+starts the `str-setup` skill (`agent-skills/productivity/str-setup/`) and asks
+for, in order: the Hostex key; where guest-reply drafts go (here, or an owners
+group it then asks to be trusted in); optionally Seam smart locks, which
+properties to watch and the cleaner and cleaners group for each; and the
+timezone. Then one restart from the Plow app, and it registers its jobs.
+
+**Keys never go through chat.** Setup writes `~/Plow/str-keys.env` on the Mac
+with empty `HOSTEX_TOKEN=` / `SEAM_API_KEY=` lines; the owner pastes the keys
+there and says done, and `bin/str-config --from-latch` reads them over the
+relay, saves them to `$HERMES_HOME/str/setup.env` and empties the file. The
+model only ever sees the masked last three characters. At boot,
+`02-str-setup-env` publishes that file's four keys (and no others) into the
+container environment. The wiki's recall is optional: setup works without it.
+
 ## Status
 
 | Capability | State |
@@ -202,6 +221,7 @@ between the two; #46 records why the allowlist never was.
 |---|---|---|
 | repository `runtime/` | declarative config | yes |
 | `/var/lib/hermes/.env` | Hostex and Seam secrets plus Plow chat IDs — no Plow credential | no |
+| `/var/lib/hermes/str/setup.env` | what chat setup saved (the same four keys; `.env` wins) — agent-owned, 0600 | no |
 | `/var/lib/hermes/auth.json` | OpenAI/Codex OAuth | no |
 | `/var/lib/hermes/channel_directory.json` | gateway-derived channel directory, refreshed by Hermes | no |
 | `/var/lib/hermes/SOUL.md` | system prompt; **composed by `plow-init` at every boot** as the base image's persona followed by `runtime/persona.md`, so edits here are lost | no — edit `runtime/persona.md` |
@@ -804,7 +824,7 @@ it serving — hence the wait.
 
 **3** creates the job if it is missing, replaces it (remove, then create) when
 its delivery target moved, and primes the cursor only if there isn't one. It
-also runs at every boot. It never creates a second
+also runs at every boot and at the end of str-setup. It never creates a second
 job, and that matters: the one path that could produce one is the one where the
 first is *already broken*, pointing at a retired chat UID. Both
 jobs share the cursor, and the poller advances it for whatever it walked
