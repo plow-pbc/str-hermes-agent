@@ -176,7 +176,7 @@ def _home(tmp_path, ops="", jobs=None, cursor=False):
         (tmp_path / "cron/jobs.json").write_text(json.dumps({"jobs": list(jobs.values())}))
     if cursor:
         (tmp_path / "hostex-poll-cursor.json").write_text("{}")
-    return {**ENV_FIXTURE, "HERMES_HOME": str(tmp_path), "TZ": "America/Los_Angeles"}
+    return {**ENV_FIXTURE, "HERMES_HOME": str(tmp_path)}
 
 
 def test_a_cold_cursor_is_primed_before_the_poller_is_created(tmp_path, monkeypatch):
@@ -218,13 +218,6 @@ def test_a_refused_create_fails_setup_but_never_the_boot(tmp_path, argv, code):
             register_jobs.main(argv, env=env, runner=run)
     else:
         assert register_jobs.main(argv, env=env, runner=run) == code
-
-
-def test_a_timezone_edited_without_a_restart_refuses(tmp_path):
-    """Schedules are bare expressions in the container's TZ, fixed at boot."""
-    env = {**_home(tmp_path, ops='timezone = "America/Chicago"\n'), "TZ": "America/Los_Angeles"}
-    with pytest.raises(SystemExit, match="restart"):
-        register_jobs.main([], env=env, runner=fail_if_called)
 
 
 def test_a_hung_hermes_call_is_a_failure_not_a_hang(monkeypatch):

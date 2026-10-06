@@ -131,10 +131,6 @@ def _load_ops(path):
 def apply(env, runner):
     home = pathlib.Path(env.get("HERMES_HOME", "/var/lib/hermes"))
     ops = _load_ops(pathlib.Path(env.get("VAULT") or home / "repo/vault") / "ops.toml")
-    if "timezone" in ops and env.get("TZ") != ops["timezone"]:
-        raise SystemExit(f"register-jobs: ops.toml says timezone {ops['timezone']!r} but the container runs in "
-                         f"{env.get('TZ')!r}; schedules are bare expressions in the container's zone -- "
-                         "restart to apply the new timezone")
     registered = registered_jobs(home / "cron/jobs.json")
     for kind, x in reconcile(desired_jobs(env, ops), registered):
         name = x if kind == "remove" else x["name"]
