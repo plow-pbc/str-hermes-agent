@@ -29,6 +29,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api
+import str_env
 
 PAGE = 100
 SILENT = '{"wakeAgent": false}'
@@ -276,17 +277,11 @@ def hermes_home() -> pathlib.Path:
 
 
 def read_token() -> str:
-    """Resolve HOSTEX_TOKEN from $HERMES_HOME/.env.
-
-    In-container that is /var/lib/hermes/.env, on the home volume — the only
-    path cron runs by, and the only one that exists: the home has no host side.
-    """
-    env = hermes_home() / ".env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("HOSTEX_TOKEN="):
-                return line.split("=", 1)[1].strip()
-    sys.exit(f"hostex-poll: HOSTEX_TOKEN not found in {env}")
+    """HOSTEX_TOKEN as the gateway sees it: $HERMES_HOME/.env over the environment."""
+    token = {**os.environ, **str_env.read_setup_env(hermes_home())}.get("HOSTEX_TOKEN")
+    if not token:
+        sys.exit(f"hostex-poll: HOSTEX_TOKEN not found in {hermes_home() / '.env'}")
+    return token
 
 
 def api_get(path: str, token: str, **params: object) -> dict:

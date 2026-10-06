@@ -24,12 +24,16 @@ FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-aeae7c96989b292563b98e91ccf8
 # 2026.9.1 is the version plow-wiki requires and is younger than that, so the
 # exception is scoped to this one package and dated to its release, the way
 # upstream scopes its own. Every dependency stays quarantined.
+#
+# python-dotenv too: being first on PATH, this venv's python is the one bin/'s
+# `#!/usr/bin/env python3` scripts run on when the nightly calls them by path,
+# and bin/str_env.py reads setup's answers with it (the Hermes venv has it).
 ARG OBSIDIAN_WIKI_VERSION=2026.9.1
 ENV WIKI_VENV=/opt/wiki-venv
 RUN uv venv "$WIKI_VENV" \
     && uv pip install --python "$WIKI_VENV/bin/python" \
          --exclude-newer-package "obsidian-wiki=2026-09-13T00:00:00Z" \
-         "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
+         "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" "python-dotenv==1.2.2" \
     && "$WIKI_VENV/bin/obsidian-wiki" --help > /dev/null
 ENV PATH="/opt/wiki-venv/bin:${PATH}"
 

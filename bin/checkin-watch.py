@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api
+import str_env
 
 SEAM = "https://connect.getseam.com"
 SILENT = '{"wakeAgent": false}'
@@ -118,12 +119,11 @@ def hermes_home() -> pathlib.Path:
 
 
 def read_env_key(name: str) -> str:
-    env = hermes_home() / ".env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith(f"{name}="):
-                return line.split("=", 1)[1].strip()
-    sys.exit(f"checkin-watch: {name} not found in {env}")
+    """One key as the gateway sees it: $HERMES_HOME/.env over the environment."""
+    value = {**os.environ, **str_env.read_setup_env(hermes_home())}.get(name)
+    if not value:
+        sys.exit(f"checkin-watch: {name} not found in {hermes_home() / '.env'}")
+    return value
 
 
 def hostex_get(path: str, token: str, **params: object) -> dict:
