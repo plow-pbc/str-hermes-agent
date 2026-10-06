@@ -5,9 +5,10 @@ offer choices instead of asking for IDs. Exit 2 and one sentence on stderr on fa
   latch | hostex-properties | seam-devices | seam-codes <seam_device_id>
 
 Secrets come from bin/str_env.py over the process environment, never argv.
-Hostex reuses hostex_api's base URL and no-redirect opener.
+Hostex goes through hostex_api.get, with its retries for the daily stalls.
 Seam is called over REST, not the SDK: `seam` lives only in the mcp-seam uv
-environment, not in this interpreter. One HTTP seam, fetch(url, headers) -> dict.
+environment, not in this interpreter: fetch(url, headers) -> dict, over
+hostex_api's no-redirect opener.
 """
 from __future__ import annotations
 
@@ -44,11 +45,11 @@ def cmd_latch(env, fetch):
 
 
 def cmd_hostex_properties(env, fetch):
-    headers = {"Hostex-Access-Token": _secret(env, "HOSTEX_TOKEN")}
+    token = _secret(env, "HOSTEX_TOKEN")
     found, offset = [], 0
     while True:
-        query = urllib.parse.urlencode({"offset": offset, "limit": PAGE})
-        batch = fetch(f"{hostex_api.BASE}/properties?{query}", headers)["data"]["properties"]
+        batch = hostex_api.get("/properties", token, "str-setup-discover/1",
+                               offset=offset, limit=PAGE)["data"]["properties"]
         found += batch
         if len(batch) < PAGE:
             break

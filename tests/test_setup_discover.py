@@ -29,41 +29,47 @@ CASES = [
 ]
 
 
+@pytest.fixture
+def fake_http(monkeypatch):
+    """Route Hostex's hostex_api.get and Seam's fetch to one fake(url, headers)."""
+    def install(fake):
+        monkeypatch.setattr(discover.hostex_api, "get", lambda path, token, user_agent, **params:
+                            fake(f"{discover.hostex_api.BASE}{path}", {"Hostex-Access-Token": token}))
+        return fake
+    return install
+
+
 def run(tmp_path, argv, env, fake):
     return discover.main(argv, {**ENV, "HERMES_HOME": str(tmp_path), **env}, fetch=fake)
 
 
 @pytest.mark.parametrize("name,args,env,payload,expected", CASES)
-def test_command_prints_choices(tmp_path, capsys, name, args, env, payload, expected):
-    assert run(tmp_path, [name, *args], env, lambda url, headers: payload) == 0
+def test_command_prints_choices(tmp_path, capsys, fake_http, name, args, env, payload, expected):
+    assert run(tmp_path, [name, *args], env, fake_http(lambda url, headers: payload)) == 0
     assert json.loads(capsys.readouterr().out) == expected
 
 
-@pytest.mark.parametrize("name,service", [("hostex-properties", "Hostex"), ("seam-devices", "Seam")])
-def test_rejected_token_is_one_sentence(tmp_path, capsys, name, service):
-    def reject(url, headers):
-        raise urllib.error.HTTPError(url, 401, "no", {}, io.BytesIO())
-    assert run(tmp_path, [name], {}, reject) == 2
-    err = capsys.readouterr().err
-    assert f"{service} rejected the token" in err and err.count("\n") == 1
-    assert "abcdefgh" not in err and "Traceback" not in err
-
-
-@pytest.mark.parametrize("code,expected", [(401, "Seam rejected the token"), (403, "Seam refused the request (HTTP 403)"),
-                                           (500, "Seam refused the request (HTTP 500)")])
-def test_status_wording(tmp_path, capsys, code, expected):
+@pytest.mark.parametrize("name,code,expected", [
+    ("hostex-properties", 401, "Hostex rejected the token"),
+    ("seam-devices", 401, "Seam rejected the token"),
+    ("seam-devices", 403, "Seam refused the request (HTTP 403)"),
+    ("seam-devices", 500, "Seam refused the request (HTTP 500)"),
+])
+def test_http_failure(tmp_path, capsys, fake_http, name, code, expected):
     def fail(url, headers):
         raise urllib.error.HTTPError(url, code, "no", {}, io.BytesIO())
-    assert run(tmp_path, ["seam-devices"], {}, fail) == 2
+    assert run(tmp_path, [name], {}, fake_http(fail)) == 2
     err = capsys.readouterr().err
-    assert expected in err and (code == 401) == ("check the key" in err)
+    assert expected in err and err.count("\n") == 1
+    assert (code == 401) == ("check the key" in err)
+    assert "abcdefgh" not in err and "Traceback" not in err
 
 
 @pytest.mark.parametrize("name,payload", [("hostex-properties", {}), ("seam-devices", {"nope": 1}),
                                           ("seam-codes", {})])
-def test_malformed_payload_is_one_sentence(tmp_path, capsys, name, payload):
+def test_malformed_payload_is_one_sentence(tmp_path, capsys, fake_http, name, payload):
     args = ["dev-1"] if name == "seam-codes" else []
-    assert run(tmp_path, [name, *args], {}, lambda url, headers: payload) == 2
+    assert run(tmp_path, [name, *args], {}, fake_http(lambda url, headers: payload)) == 2
     err = capsys.readouterr().err
     assert "answered something unexpected" in err and "Traceback" not in err
 
@@ -90,7 +96,7 @@ def test_fetch_names_itself_to_the_api(monkeypatch):
     assert sent[0].get_header("Authorization") == "Bearer t"
 
 
-def test_the_file_beats_a_stale_process_env_and_the_env_fills_gaps(tmp_path):
+def test_the_file_beats_a_stale_process_env_and_the_env_fills_gaps(tmp_path, fake_http):
     """A turn's processes inherit the gateway's start-time values; setup's
     newer write to setup.env is the truth, read before any restart."""
     (tmp_path / "str").mkdir()
@@ -98,18 +104,18 @@ def test_the_file_beats_a_stale_process_env_and_the_env_fills_gaps(tmp_path):
     seen = []
     environ = {"HERMES_HOME": str(tmp_path), "HOSTEX_TOKEN": "stale", "SEAM_API_KEY": "seam-env"}
     discover.main(["hostex-properties"], environ,
-                  fetch=lambda url, headers: seen.append(headers) or {"data": {"properties": []}})
+                  fetch=fake_http(lambda url, headers: seen.append(headers) or {"data": {"properties": []}}))
     discover.main(["seam-devices"], environ,
                   fetch=lambda url, headers: seen.append(headers) or {"devices": []})
     assert seen[0]["Hostex-Access-Token"] == "from-file"
     assert seen[1]["Authorization"] == "Bearer seam-env"
 
 
-def test_missing_secret_and_unreachable_exit_2(tmp_path, capsys):
+def test_missing_secret_and_unreachable_exit_2(tmp_path, capsys, fake_http):
     assert discover.main(["seam-devices"], {"HERMES_HOME": str(tmp_path)}, fetch=None) == 2
     assert "SEAM_API_KEY is not set" in capsys.readouterr().err
 
     def down(url, headers):
         raise urllib.error.URLError("dns")
-    assert run(tmp_path, ["hostex-properties"], {}, down) == 2
+    assert run(tmp_path, ["hostex-properties"], {}, fake_http(down)) == 2
     assert "could not reach Hostex" in capsys.readouterr().err
