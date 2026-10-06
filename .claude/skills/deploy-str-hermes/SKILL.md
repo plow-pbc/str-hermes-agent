@@ -258,16 +258,17 @@ docker compose exec -T hermes hermes cron list
 
 Any `Deliver:` under `wiki-nightly` other than a bare `plow_chat` means it
 predates the change: `local` (before #52, the digest goes nowhere) or
-`plow_chat:cht_…` (the owners' group). Recreate it, but not while the 03:00 run
-is in flight, since the chain ingests into the wiki:
+`plow_chat:cht_…` (the owners' group). register-jobs replaces it (it runs at
+every boot); by hand, not while the 03:00 run is in flight, since the chain
+ingests into the wiki:
 
 ```sh
-docker compose exec -T hermes hermes cron remove wiki-nightly
-./scripts/enable-wiki-nightly.sh
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
-Edit the group jobs in place rather than recreating them. `hostex-inbound`'s
-enabler primes a cold cursor, and an edit keeps the job, cursor included:
+Edit the group jobs in place rather than recreating them. register-jobs primes a
+cold cursor when it creates `hostex-inbound`, and an edit keeps the job, cursor
+included:
 
 ```sh
 docker compose exec -T hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
@@ -281,7 +282,7 @@ under `wiki-nightly`, and after its next run confirm the scheduler line
 ## 4.66 Update the hostex-inbound wrapper instruction, once
 
 Same drift as 4.6's `origin` and the `--failure-deliver` edit just above:
-`enable-hostex-inbound.sh`'s wrapper text is a positional argument baked into
+`bin/register-jobs`' wrapper text for `hostex-inbound` is a positional argument baked into
 the job at creation, not read live, so a commit that changes it — like this
 one — does not reach a job that already exists. README § [Inbound guest
 messages](../../../README.md#inbound-guest-messages) has the verified

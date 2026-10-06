@@ -57,7 +57,7 @@ HOSTEX_PROMPT = "Your final response is delivered to the owners' group as-is: ma
 
 
 def test_hostex_inbound_is_what_the_retired_enable_script_created():
-    """Golden: the argv and env scripts/enable-hostex-inbound.sh issued.
+    """Golden: the argv and env the retired host-side enable script issued.
     USER_ID stays absent: every member of the owners' group can approve."""
     job = next(j for j in register_jobs.desired_jobs(ENV_GROUP, {}) if j["name"] == "hostex-inbound")
     argv, extra_env = register_jobs.create_argv(job)
