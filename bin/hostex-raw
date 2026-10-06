@@ -49,30 +49,33 @@ PACE_EVERY = 60
 
 
 def read_token() -> str:
-    """HOSTEX_TOKEN as the gateway sees it: $HERMES_HOME/.env over the environment.
+    """HOSTEX_TOKEN as the gateway sees it, from bin/str_env.py.
 
-    Also documented as a host command, where HERMES_HOME is unset and the home
-    is a named volume with no host path -- so there it asks the container, which
-    parses the file with the same str_env. (The old host fallback read
-    ~/.hermes/.env, frozen at the cutover: a stale token that looked like success.)
+    Two contexts, unlike `bin/hostex-poll.py`, which cron only ever runs
+    in-container. This one is also documented as a host command, where
+    HERMES_HOME is unset and there is no host path to the home -- it is a named
+    volume -- so the container that mounts it is asked, through the same reader.
+    The fallback before that read ~/.hermes/.env, which still EXISTS on the
+    deploy host, frozen at the cutover: it returned a stale token and looked
+    like a success.
     """
-    env = dict(os.environ)
     if os.environ.get("HERMES_HOME"):
-        import str_env  # dotenv is in the image, not necessarily on the host
-        env.update(str_env.read_setup_env(Path(os.environ["HERMES_HOME"])))
-    if env.get("HOSTEX_TOKEN"):
-        return env["HOSTEX_TOKEN"]
+        import str_env  # python-dotenv: in the image, not necessarily on the host
+        token = {**os.environ, **str_env.read_setup_env(os.environ["HERMES_HOME"])}.get("HOSTEX_TOKEN", "")
+        if token.strip():
+            return token.strip()
+        sys.exit("HOSTEX_TOKEN not in $HERMES_HOME/.env or str/setup.env")
     compose = Path(__file__).resolve().parent.parent / "scripts" / "compose"
     found = subprocess.run(
         [str(compose), "exec", "-T", "hermes", "/opt/hermes/.venv/bin/python3", "-c",
          "import os, sys; sys.path.insert(0, '/opt/plow/str/bin'); import str_env; "
-         "print(str_env.read_setup_env(os.environ['HERMES_HOME']).get('HOSTEX_TOKEN') or '')"],
+         "print(str_env.read_setup_env(os.environ['HERMES_HOME']).get('HOSTEX_TOKEN', ''))"],
         capture_output=True, text=True)
     token = found.stdout.strip()
     if token:
         return token
-    sys.exit("HOSTEX_TOKEN not in $HERMES_HOME/.env, and the container could not "
-             f"be asked for it: {found.stderr.strip() or 'no output'}")
+    sys.exit("HOSTEX_TOKEN: the container has none, or could not be asked: "
+             f"{found.stderr.strip() or 'no output'}")
 
 
 def api_get(path: str, tok: str, **params: object) -> dict:

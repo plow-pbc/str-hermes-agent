@@ -56,7 +56,7 @@ def test_only_what_the_image_and_deploy_cannot_account_for_is_hermes_own(tmp_pat
     # stop -- then the authored namesake fell out of the final filter, its name
     # being bundled and its path not baked.
     ("one side is baked",
-     [*snap.BAKED_SKILLS, "guests/property-guest-messaging"], snap.BAKED_SKILLS),
+     ["productivity/property-guest-messaging", "guests/property-guest-messaging"], snap.BAKED_SKILLS),
 ])
 def test_a_name_the_image_also_ships_stops_the_run_rather_than_dropping_it(
         tmp_path, case, paths, baked):
@@ -149,7 +149,8 @@ def test_a_skill_this_repo_bakes_stays_hermes_own(tmp_path):
     agent-skills/, and it is one Hermes edits in place. Subtracted by name like
     any other bundled skill, its next live edit is dropped from the snapshot and
     lost on the rebuild this script exists for."""
-    (path,) = snap.BAKED_SKILLS
+    path = "productivity/property-guest-messaging"
+    assert path in snap.BAKED_SKILLS
     store = store_with(tmp_path, ["productivity/airtable", path],
                        manifest=("airtable", pathlib.Path(path).name))
     assert snap.authored(snap.find_skills(store), snap.read_bundled(store),

@@ -108,14 +108,16 @@ RUN chmod 0644 /opt/hermes/plow-seed/persona.md
 COPY runtime/config.yaml /opt/plow/str/home/
 RUN install -m 0644 -t /var/lib/hermes/ /opt/plow/str/home/config.yaml
 
-# This agent's own skill, under the base's bundled root rather than in the home.
+# This agent's own skills, under the base's bundled root rather than in the home.
 # tools/skills_sync.py rglobs /opt/hermes/skills for SKILL.md and reconciles
 # what it finds into $HERMES_HOME/skills preserving the category path, so a
-# volume home still receives this and an image update still reaches a copy the
+# volume home still receives them and an image update still reaches a copy the
 # agent has not customised. A copy written into the home at build time would be
 # masked by whatever mounts over it.
 COPY agent-skills/productivity/property-guest-messaging/ /opt/hermes/skills/productivity/property-guest-messaging/
-RUN chmod -R a=rX,u+w /opt/hermes/skills/productivity/property-guest-messaging
+COPY agent-skills/productivity/str-setup/ /opt/hermes/skills/productivity/str-setup/
+RUN chmod -R a=rX,u+w /opt/hermes/skills/productivity/property-guest-messaging \
+                      /opt/hermes/skills/productivity/str-setup
 
 # What the host used to hand in: compose.override.yml bind-mounted bin/ and
 # mcp-seam/ off the deploy clone. A published image has no deploy clone, so it
@@ -147,6 +149,8 @@ RUN chown -R root:root /opt/plow \
 # builder the build dies here, before pytest collects. Every cont-init script is
 # tracked 100755 and the chmod below sets 0755 regardless, so the bit never
 # depends on the checkout or the builder's umask.
+# What str-config wrote, into the container environment (allowlisted keys only).
+COPY docker/cont-init.d/02-str-setup-env /etc/cont-init.d/02-str-setup-env
 COPY docker/cont-init.d/03-str-timezone /etc/cont-init.d/03-str-timezone
 COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-require-ingest-manifest.sh
 
@@ -159,7 +163,8 @@ COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-requir
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
 # str's cron jobs, reconciled from config at every boot (bin/register-jobs).
 COPY docker/cont-init.d/06-register-jobs /etc/cont-init.d/06-register-jobs
-RUN chmod 0755 /etc/cont-init.d/03-str-timezone \
+RUN chmod 0755 /etc/cont-init.d/02-str-setup-env \
+               /etc/cont-init.d/03-str-timezone \
                /etc/cont-init.d/04-require-ingest-manifest.sh \
                /etc/cont-init.d/05-install-agent-payload.sh \
                /etc/cont-init.d/06-register-jobs

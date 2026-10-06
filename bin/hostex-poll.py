@@ -277,10 +277,10 @@ def hermes_home() -> pathlib.Path:
 
 
 def read_token() -> str:
-    """HOSTEX_TOKEN as the gateway sees it: $HERMES_HOME/.env over the environment."""
-    token = {**os.environ, **str_env.read_setup_env(hermes_home())}.get("HOSTEX_TOKEN")
+    """HOSTEX_TOKEN as the gateway sees it: str_env's files over the process env."""
+    token = {**os.environ, **str_env.read_setup_env(hermes_home())}.get("HOSTEX_TOKEN", "").strip()
     if not token:
-        sys.exit(f"hostex-poll: HOSTEX_TOKEN not found in {hermes_home() / '.env'}")
+        sys.exit(f"hostex-poll: HOSTEX_TOKEN not found in {hermes_home()}/.env or str/setup.env")
     return token
 
 

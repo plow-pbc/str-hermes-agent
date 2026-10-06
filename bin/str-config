@@ -1,0 +1,210 @@
+#!/opt/hermes/.venv/bin/python3
+r"""str-config -- write setup's answers.
+
+  str-config < PATCH.json     {"env": {...}, "ops": {...}} for the non-secret keys
+  str-config --latch-template write the empty key file on the owner's Mac
+  str-config --from-latch     take the keys from that file, then empty it
+
+The one writer for $HERMES_HOME/str/setup.env (the four keys setup owns; never
+.env, which plow-init owns) and ${VAULT:-$HERMES_HOME/repo/vault}/ops.toml
+(where checkin-watch reads it). Keys never pass through the model: the owner
+pastes them into ~/Plow/str-keys.env on their Mac and this reads it over the
+Latch relay, so a stdin patch carrying one is refused. Values are written
+unquoted as KEY=value; one with `"` `'` `\` `$` `#` CR/LF or edge whitespace is
+refused by key, never echoing the value. bin/str_env.py is the one reader.
+"""
+import importlib.machinery, importlib.util, io, json, os, pathlib, sys, tempfile, tomllib
+
+BIN = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN))
+import plow_relay  # noqa: E402
+import str_env  # noqa: E402
+from dotenv import dotenv_values  # noqa: E402
+
+ENV_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY", "PLOW_CHAT_GROUP_UIDS", "PLOW_CHAT_APPROVAL_GROUP")
+SECRET_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY")
+OPS_KEYS = ("timezone", "properties")
+PROPERTY_KEYS = ("hostex_property_id", "title", "timezone", "default_checkin_time",
+                 "seam_device_id", "cleaner_name", "cleaner_access_code_ids", "cleaners_thread")
+KEY_FILE = "~/Plow/str-keys.env"  # the Mac's ~, resolved by Latch
+TEMPLATE = """\
+# Your keys for str. Paste each one after its = sign, save, then tell str "done".
+# str reads this file once and empties it again. Never paste a key into chat.
+#
+# Your Hostex API key:
+HOSTEX_TOKEN=
+# Your Seam API key, only if you use smart locks through Seam:
+SEAM_API_KEY=
+"""
+
+
+class Owner(Exception):
+    """A failure with one sentence the owner can act on."""
+
+
+def mask(value):
+    return "…***" if len(value) < 8 else "…" + value[-3:]
+
+
+def _refuse_unwritable(key, value):
+    if any(c in value for c in "\"'\\$#\r\n") or value != value.strip():
+        raise SystemExit(f"str-config: {key} value has a character that cannot be written "
+                         "unquoted (quote, backslash, $, #, newline, edge whitespace)")
+
+
+def _refuse_unknown(given, allowed, where):
+    extra = sorted(set(given) - set(allowed))
+    if extra:
+        raise SystemExit(f"str-config: unknown {where} key(s): {', '.join(extra)}")
+
+
+def _atomic_write(path, text, mode):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    if path.exists():
+        st = path.stat()
+        if os.geteuid() == 0:
+            os.chown(tmp, st.st_uid, st.st_gid)
+        mode = st.st_mode & 0o777
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def _write_env(path, updates):
+    lines = path.read_text().splitlines() if path.exists() else []
+    kept = [l for l in lines
+            if l.split("=", 1)[0].strip().removeprefix("export ").strip() not in updates]
+    kept += [f"{k}={v}" for k, v in updates.items()]
+    _atomic_write(path, "\n".join(kept) + "\n", 0o600)
+
+
+def _toml_value(v):
+    if isinstance(v, bool) or not isinstance(v, (int, str, list)):
+        raise SystemExit(f"str-config: unsupported ops value {v!r}")
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    return json.dumps(v)  # a JSON string is a valid TOML basic string
+
+
+def _refuse_unreadable_ops(text):
+    """Checkin-watch's own parser: a property it would refuse is never written."""
+    loader = importlib.machinery.SourceFileLoader("checkin_watch", str(BIN / "checkin-watch.py"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("checkin_watch", loader))
+    loader.exec_module(module)
+    try:
+        module.load_ops_text(text)
+    except (Exception, SystemExit) as e:
+        raise SystemExit(f"str-config: ops.toml not written, checkin-watch would refuse it: {e}") from None
+
+
+def _ops_text(ops):
+    out = [f"timezone = {_toml_value(ops['timezone'])}"] if "timezone" in ops else []
+    for prop in ops.get("properties", []):
+        out += ["", "[[properties]]"] + [f"{k} = {_toml_value(prop[k])}" for k in PROPERTY_KEYS if k in prop]
+    text = "\n".join(out) + "\n"
+    if ops.get("properties"):  # load_ops_text refuses zero properties; a timezone alone is fine
+        _refuse_unreadable_ops(text)
+    return text
+
+
+def apply(patch, home, environ, secrets_ok=False):
+    """Every refusal happens before the first write, so a refused patch writes nothing."""
+    home = pathlib.Path(home)
+    env = patch.get("env", {})
+    _refuse_unknown(env, ENV_KEYS, "env")
+    if not secrets_ok and set(env) & set(SECRET_KEYS):
+        raise SystemExit("str-config: keys come from your Mac via --from-latch, never stdin")
+    for key, value in env.items():
+        _refuse_unwritable(key, value)
+    summary = [f"{key}: {mask(value) if key in SECRET_KEYS else value}" for key, value in env.items()]
+    if "ops" in patch:
+        ops = patch["ops"]
+        _refuse_unknown(ops, OPS_KEYS, "ops")
+        for prop in ops.get("properties", []):
+            _refuse_unknown(prop, PROPERTY_KEYS, "property")
+        vault = pathlib.Path(environ["VAULT"]) if "VAULT" in environ else home / "repo/vault"
+        path = vault / "ops.toml"
+        merged = {**(tomllib.loads(path.read_text()) if path.exists() else {}), **ops}
+        text = _ops_text(merged)
+        summary.append(f"ops.toml: timezone={merged.get('timezone')}, "
+                       f"{len(merged.get('properties', []))} propert(ies)")
+    if env:
+        _write_env(home / str_env.SETUP_ENV, env)
+    if "ops" in patch:
+        _atomic_write(path, text, 0o644)
+    return summary
+
+
+def _keys_in(text):
+    return {k: v for k, v in dotenv_values(stream=io.StringIO(text), interpolate=False).items()
+            if k in SECRET_KEYS and v}
+
+
+UNREACHABLE = "couldn't reach your Mac through Plow Latch; check Latch is running, then try again"
+
+
+def _relay(op, *args):
+    """One relay call. RelayError is Latch answering (no such file, say); a
+    transport failure or a missing relay config is the owner's to fix."""
+    try:
+        return op(*args)
+    except (OSError, KeyError):
+        raise Owner(UNREACHABLE) from None
+
+
+def latch_template():
+    try:
+        existing = _relay(plow_relay.read, KEY_FILE)
+    except plow_relay.RelayError:
+        existing = ""  # not there yet
+    if _keys_in(existing):
+        return [f"{KEY_FILE} already has a key in it; left as it is"]
+    try:
+        _relay(plow_relay.write, KEY_FILE, TEMPLATE)
+    except plow_relay.RelayError:
+        raise Owner(f"Latch wouldn't let me write {KEY_FILE}; check Latch is running, then try again") from None
+    return [f"{KEY_FILE} is ready on your Mac"]
+
+
+def from_latch(home, environ):
+    try:
+        keys = _keys_in(_relay(plow_relay.read, KEY_FILE))
+    except plow_relay.RelayError:
+        raise Owner(f"couldn't read {KEY_FILE} on your Mac; run --latch-template to put a fresh one there") from None
+    if not keys:
+        raise Owner(f"{KEY_FILE} has no key in it yet; paste it after the = sign and save")
+    summary = apply({"env": keys}, home, environ, secrets_ok=True)
+    try:
+        _relay(plow_relay.write, KEY_FILE, TEMPLATE)
+    except (Owner, plow_relay.RelayError):
+        raise Owner(f"saved ({'; '.join(summary)}), but couldn't empty {KEY_FILE}: delete it yourself") from None
+    return summary
+
+
+def main(argv=None, environ=None):
+    argv = sys.argv[1:] if argv is None else argv
+    environ = os.environ if environ is None else environ
+    home = pathlib.Path(environ.get("HERMES_HOME", "/var/lib/hermes"))
+    try:
+        if argv == ["--latch-template"]:
+            lines = latch_template()
+        elif argv == ["--from-latch"]:
+            lines = from_latch(home, environ)
+        elif not argv:
+            lines = apply(json.load(sys.stdin), home, environ)
+        else:
+            raise SystemExit("usage: str-config [--latch-template | --from-latch] (or a JSON patch on stdin)")
+    except Owner as e:
+        print(f"str-config: {e}.", file=sys.stderr)
+        return 2
+    for line in lines:
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
