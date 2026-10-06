@@ -1,8 +1,9 @@
 """Setup starting on the owner's first message is prompt-shaped; only its wiring is here.
 
 Asserted: the persona's First run section exists, its gather row loads the
-str-setup skill and probes setup-ness with a command that prints only set or
-unset, nothing in it reads an env file's content, and the base's first-message
+str-setup skill, checks Latch and probes setup-ness with a command that prints
+only set or unset, the key file is created before the reply that names it,
+nothing in it reads an env file's content, and the base's first-message
 profile offer stays off. NOT asserted: the wording. Whether the opener lands is
 decidable only from a live transcript (plow-pbc/life-assistant-hermes-agent
 tests/test_onboarding_contract.py draws the same line).
@@ -24,6 +25,13 @@ PROBE = re.search(r'terminal\(command="(.+?)"\)', GATHER).group(1)
 def test_gather_batches_the_probe_with_the_setup_skill():
     assert 'skill_view(name="str-setup")' in GATHER
     assert (ROOT / "agent-skills/productivity/str-setup/SKILL.md").exists()
+
+
+def test_key_file_exists_before_the_reply_names_it():
+    rows = [line for line in FIRST_RUN.splitlines() if re.match(r"\| \d ", line)]
+    template = next(i for i, row in enumerate(rows) if "str-config --latch-template" in row)
+    assert 'terminal(command="/opt/plow/str/bin/setup-discover latch")' in GATHER
+    assert 0 < template < len(rows) - 1 and "Reply" in rows[-1]
 
 
 def test_first_run_never_reads_an_env_file():
