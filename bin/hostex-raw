@@ -49,30 +49,24 @@ PACE_EVERY = 60
 
 
 def read_token() -> str:
-    """Resolve the token from whichever env file exists here.
+    """HOSTEX_TOKEN as the gateway sees it: $HERMES_HOME/.env over the environment.
 
-    Two contexts, unlike `bin/hostex-poll.py`, which indexes `HERMES_HOME`
-    directly because cron only ever runs it in-container. This one is also
-    documented as a host command, where that variable is unset — so the home
-    fallback stays and the literal home path goes: the image sets
-    HERMES_HOME to exactly that, so the literal was only reachable in a
-    container that had lost it, which is the "silently resolving somewhere the
-    enable script does not look" case the poller's docstring rejects.
+    Also documented as a host command, where HERMES_HOME is unset and the home
+    is a named volume with no host path -- so there it asks the container, which
+    parses the file with the same str_env. (The old host fallback read
+    ~/.hermes/.env, frozen at the cutover: a stale token that looked like success.)
     """
-    env = Path(os.environ["HERMES_HOME"]) / ".env" if os.environ.get("HERMES_HOME") else None
-    if env and env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("HOSTEX_TOKEN="):
-                return line.split("=", 1)[1].strip()
-    # Run from the host, HERMES_HOME is unset and there is no host path to the
-    # home -- it is a named volume. Ask the container that mounts it. The
-    # previous fallback read ~/.hermes/.env, which still EXISTS on the deploy
-    # host, frozen at the cutover: it returned a stale token and looked like a
-    # success.
+    env = dict(os.environ)
+    if os.environ.get("HERMES_HOME"):
+        import str_env  # dotenv is in the image, not necessarily on the host
+        env.update(str_env.read_setup_env(Path(os.environ["HERMES_HOME"])))
+    if env.get("HOSTEX_TOKEN"):
+        return env["HOSTEX_TOKEN"]
     compose = Path(__file__).resolve().parent.parent / "scripts" / "compose"
     found = subprocess.run(
-        [str(compose), "exec", "-T", "hermes", "sh", "-c",
-         'sed -n "s/^HOSTEX_TOKEN=//p" "$HERMES_HOME/.env" | tail -1'],
+        [str(compose), "exec", "-T", "hermes", "/opt/hermes/.venv/bin/python3", "-c",
+         "import os, sys; sys.path.insert(0, '/opt/plow/str/bin'); import str_env; "
+         "print(str_env.read_setup_env(os.environ['HERMES_HOME']).get('HOSTEX_TOKEN') or '')"],
         capture_output=True, text=True)
     token = found.stdout.strip()
     if token:

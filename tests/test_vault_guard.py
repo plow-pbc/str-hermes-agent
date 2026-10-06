@@ -23,10 +23,14 @@ import pytest
 IMAGE = "sams-str-hermes-agent:local"
 GUARD = "/etc/cont-init.d/04-require-ingest-manifest.sh"
 VAULT = "/tmp/scratch-home/repo/vault"
-MANIFEST = f"""echo '{{"sources": {{}}}}' > {VAULT}/.manifest.json"""
+KEPT = '{"sources": {"kept": {}}}'  # not the first-boot default, so an overwrite shows
+MANIFEST = f"echo '{KEPT}' > {VAULT}/.manifest.json"
 
 VAULT_SHAPES = [
-    ("no staging directory at all", "", "no ingest manifest"),
+    # A cloud VM has no bind: nothing exists yet, and a first ingest is the
+    # correct start. Distinct from the empty directory below, which is what
+    # compose leaves for a typo'd bind source.
+    ("no staging directory at all", "", None),
     # What `docker compose up -d` leaves when the bind source does not exist.
     ("an empty directory", f"mkdir -p {VAULT}", "no ingest manifest"),
     ("a present but zero-byte manifest", f"mkdir -p {VAULT} && : > {VAULT}/.manifest.json",
@@ -44,12 +48,15 @@ VAULT_SHAPES = [
 def test_the_guard_admits_only_staging_with_a_manifest(case, shape, refusal):
     run = subprocess.run(
         ["docker", "run", "--rm", "--entrypoint", "sh", IMAGE, "-c",
-         f"export HERMES_HOME=/tmp/scratch-home; {shape or 'true'}; {GUARD}"],
+         f"export HERMES_HOME=/tmp/scratch-home; {shape or 'true'}; "
+         f"{GUARD} && cat {VAULT}/.manifest.json"],
         capture_output=True, text=True,
     )
     assert (run.returncode == 0) is (refusal is None), run.stderr or case
     if refusal:
         assert refusal in run.stderr + run.stdout, case
+    else:
+        assert run.stdout.strip() == (KEPT if shape else '{"sources": {}}'), case
 
 
 def test_a_failing_cont_init_stops_the_container_rather_than_warning():

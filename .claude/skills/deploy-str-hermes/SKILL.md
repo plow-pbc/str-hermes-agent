@@ -233,9 +233,9 @@ nothing per-member left it ends nothing and prints `0`.
 A `hostex-inbound` job created before guest-reply drafts moved to the owners'
 group still delivers to the private chat, and one created before the delivery
 mirror has no `origin`, so its drafts never reach the session that approves
-them. Nothing above changes either — the enable script refuses to run while a
-job exists, so a redeploy recreates the container around the old job. `origin`
-is not in `cron list`, so an inspection cannot rule the second one out.
+them. register-jobs replaces the first at boot, but it leaves a job whose
+schedule, delivery and script match alone, so the second survives a redeploy.
+`origin` is not in `cron list`, so an inspection cannot rule it out.
 
 ```sh
 docker compose exec -T hermes hermes cron list
@@ -258,20 +258,21 @@ docker compose exec -T hermes hermes cron list
 
 Any `Deliver:` under `wiki-nightly` other than a bare `plow_chat` means it
 predates the change: `local` (before #52, the digest goes nowhere) or
-`plow_chat:cht_…` (the owners' group). Recreate it, but not while the 03:00 run
-is in flight, since the chain ingests into the wiki:
+`plow_chat:cht_…` (the owners' group). register-jobs replaces it (it runs at
+every boot); by hand, not while the 03:00 run is in flight, since the chain
+ingests into the wiki:
 
 ```sh
-docker compose exec -T hermes hermes cron remove wiki-nightly
-./scripts/enable-wiki-nightly.sh
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
-Edit the group jobs in place rather than recreating them. `hostex-inbound`'s
-enabler primes a cold cursor, and an edit keeps the job, cursor included:
+Edit the group jobs in place rather than recreating them. register-jobs primes a
+cold cursor when it creates `hostex-inbound`, and an edit keeps the job, cursor
+included:
 
 ```sh
-docker compose exec -T hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
-docker compose exec -T hermes hermes cron edit checkin-watch --failure-deliver plow_chat
+docker compose exec -T -u hermes hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
+docker compose exec -T -u hermes hermes hermes cron edit checkin-watch --failure-deliver plow_chat
 ```
 
 Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`
@@ -281,7 +282,7 @@ under `wiki-nightly`, and after its next run confirm the scheduler line
 ## 4.66 Update the hostex-inbound wrapper instruction, once
 
 Same drift as 4.6's `origin` and the `--failure-deliver` edit just above:
-`enable-hostex-inbound.sh`'s wrapper text is a positional argument baked into
+`bin/register-jobs`' wrapper text for `hostex-inbound` is a positional argument baked into
 the job at creation, not read live, so a commit that changes it — like this
 one — does not reach a job that already exists. README § [Inbound guest
 messages](../../../README.md#inbound-guest-messages) has the verified

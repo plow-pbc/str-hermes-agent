@@ -28,7 +28,7 @@ cron:
   #
   # Scoped by the image to the job's origin conversation, so it changes nothing
   # for a job without one — every other job here is CLI-created with origin
-  # null. enable-hostex-inbound.sh stamps the origin that opts this one in.
+  # null. bin/register-jobs stamps the origin that opts this one in.
   mirror_delivery: true
   # The agent's final response is the whole message; the default header and
   # "stop reminder" footer doubled every guest alert's length.

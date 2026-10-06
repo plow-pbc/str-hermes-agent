@@ -714,10 +714,10 @@ tool. The agent turn it feeds is *instructed* not to act, which is not the
 same as being unable to; see below.
 
 That instruction is a positional argument to `hermes cron create`
-(`scripts/enable-hostex-inbound.sh`), baked into the job at creation — not
+(`bin/register-jobs`), baked into the job at creation — not
 read from this file live. Editing it here changes nothing for a job that
-already exists, and the enable script refuses to run while one does, so a
-redeploy cannot pick the edit up either. Updating the deployed job in place:
+already exists, and register-jobs replaces a job only when its schedule,
+delivery target or script differ, so a redeploy cannot pick the edit up either. Updating the deployed job in place:
 
 ```sh
 docker compose exec -T hermes hermes cron edit hostex-inbound --prompt "<new text>"
@@ -781,8 +781,8 @@ just restart             # 2 — through the nightly veto
 ```
 
 Wait for the gateway to serve — see [applying a `runtime/`
-edit](#applying-a-runtime-edit) — then run step 3, which needs the gateway
-for its own checks.
+edit](#applying-a-runtime-edit) — then run step 3.  It needs no gateway
+checks of its own; waiting just keeps it out of the restart's boot-time run.
 
 **Deal with anyone already waiting before running step 3.** Priming adopts
 every conversation as seen, so a guest whose message is outstanding at that
@@ -790,7 +790,7 @@ moment never gets announced — the same hazard as deleting the cursor file,
 noted with the state file above.
 
 ```sh
-./scripts/enable-hostex-inbound.sh                       # 3
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs   # 3
 ```
 
 **1** applies the tracked runtime config, which is what puts `send_message` on
@@ -802,21 +802,20 @@ gateway start and `up -d` alone is a no-op once the mount has landed.
 `restart` returns before the gateway serves, and both follow-ups above need
 it serving — hence the wait.
 
-**3** refuses to create the job unless step 1 took, refuses outright if a
-`hostex-inbound` job already exists, and primes the cursor only if there isn't
-one. That refusal is why the `cron remove` in the reactivation recipe is
-required rather than tidy: the one path that can produce a second job is the
-one where the first is *already broken*, pointing at a retired chat UID. Both
+**3** creates the job if it is missing, replaces it (remove, then create) when
+its delivery target moved, and primes the cursor only if there isn't one. It
+also runs at every boot. It never creates a second
+job, and that matters: the one path that could produce one is the one where the
+first is *already broken*, pointing at a retired chat UID. Both
 jobs share the cursor, and the poller advances it for whatever it walked
 whether or not the delivery landed — so a stale-UID job consumes the
 longest-waiting guest, the adapter drops its announcement, and the healthy
 job's next tick finds nothing pending. Two jobs are only harmless when both
 can deliver, and that is exactly the case reactivation does not produce.
 
-A create the gateway refuses exits non-zero under `set -e`; the priming line
-printed just above says whether the cursor had been advanced, and so whether
-anyone waiting was marked seen. `cron create` echoes the job it
-made — name, schedule, next run — which is what confirms the enable landed.
+A create the gateway refuses exits non-zero, after priming if priming ran (a
+cold cursor is primed only on the way to a create). Each job it creates,
+replaces or removes is printed as one `register-jobs: <action> <name>` line.
 
 Day to day: `hermes cron run hostex-inbound` fires a one-shot tick and
 `hermes cron runs` shows durable history, both via `docker compose exec`.
@@ -826,11 +825,17 @@ Day to day: `hermes cron run hostex-inbound` fires a one-shot tick and
 A job created before drafts moved there still delivers to the private chat, and
 a job created before the delivery mirror has no `origin` — which is what scopes
 the mirror, so its drafts never reach the session that approves them. Nothing in
-a redeploy changes either: the enable script refuses to run while a job exists,
-so restoring config and recreating the container leaves the old job in place.
+a redeploy changes either: register-jobs leaves a job alone while its schedule,
+delivery target and script match, and a missing `origin` is none of those.
 One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `/var/lib/hermes/.env`,
-restart the gateway, then follow the recreate recipe below. Read the delivery
-target back afterwards; it is the one thing the enable script cannot confirm.
+restart the gateway, then remove the job and let register-jobs recreate it:
+
+```sh
+docker compose exec -u hermes hermes hermes cron remove hostex-inbound
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
+```
+
+Read the delivery target back afterwards.
 
 Recreate any job predating this section rather than inspecting one: `cron list`
 shows `Deliver:` but not `origin`, so a job already naming the owners' group can
@@ -905,17 +910,14 @@ trigger. In order:
 2. Recreate the job:
 
    ```sh
-   docker compose exec hermes hermes cron remove hostex-inbound
-   ./scripts/enable-hostex-inbound.sh
-   docker compose exec hermes hermes cron remove checkin-watch
-   ./scripts/enable-checkin-watch.sh
+   docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
    ```
 
-   Skip any that `hermes cron list` does not show.
+   The resolved UID moved, so it replaces `hostex-inbound` and
+   `checkin-watch` itself.
 
-3. Read the delivery target back, which is the one thing the enable script
-   cannot confirm — `cron create` echoes name, schedule and next run, not
-   `Deliver:`, and the whole hazard here is a job baked with the *old* UID:
+3. Read the delivery target back — the whole hazard here is a job baked with
+   the *old* UID:
 
    ```sh
    docker compose exec hermes hermes cron list
@@ -1115,7 +1117,7 @@ returning.
 
 ```sh
 docker compose exec hermes date                      # must print PDT/PST, not UTC
-./scripts/enable-wiki-nightly.sh
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 docker compose exec hermes hermes cron list          # confirm it is registered
 docker compose exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
 ```
@@ -1230,11 +1232,11 @@ conversations again and appends their facts a second time. Run it directly
 instead, where nothing is watching the clock:
 
 ```sh
-docker compose exec hermes hermes cron remove wiki-nightly
+docker compose exec -u hermes hermes hermes cron remove wiki-nightly
 AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
   && docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
        /command/s6-setuidgid hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
-./scripts/enable-wiki-nightly.sh
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
 `s6-envdir` as root, then `s6-setuidgid hermes`: the chain's relay steps and its
@@ -1331,11 +1333,12 @@ in it (the vouch — § Plow group chats), and it is labelled in
 gives it. `ops.toml` is written. Then, on the deployed checkout:
 
 ```sh
-./scripts/enable-checkin-watch.sh
+docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
-It refuses without `HERMES_HOME`, without an `ops.toml` in staging, and if a
-`checkin-watch` job already exists. Read the job back:
+It creates `checkin-watch` once `SEAM_API_KEY` is set, `ops.toml` lists at least
+one property, and every `cleaners_thread` is a label in `PLOW_CHAT_GROUP_UIDS`;
+until then it leaves the job out. Read the job back:
 
 ```sh
 docker compose exec -T hermes hermes cron list
@@ -1541,6 +1544,6 @@ this host, so turning it on is a fleet decision rather than this repo's.
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 The Plow Collective, Inc.
+MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 The Plow Collective, Inc.
 
 "Plow" and the Plow logo are trademarks of The Plow Collective, Inc. The license grants no trademark rights.

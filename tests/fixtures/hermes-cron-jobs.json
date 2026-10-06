@@ -1,0 +1,63 @@
+{
+  "jobs": [
+    {
+      "name": "hostex-inbound",
+      "script": "hostex-poll.py",
+      "no_agent": false,
+      "schedule": {
+        "kind": "interval",
+        "minutes": 2,
+        "display": "every 2m"
+      },
+      "enabled": true,
+      "paused_at": null,
+      "deliver": "plow_chat:cht_owners_fixture",
+      "origin": {
+        "platform": "plow_chat",
+        "chat_id": "cht_owners_fixture",
+        "chat_name": null,
+        "thread_id": null,
+        "user_id": null
+      },
+      "failure_deliver": "plow_chat",
+      "skill": null,
+      "id": "job-hostex-inbound",
+      "prompt": "(fixture prompt)"
+    },
+    {
+      "name": "deliver-probe",
+      "script": "deliver-probe.sh",
+      "no_agent": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "*/1 * * * *",
+        "display": "*/1 * * * *"
+      },
+      "enabled": false,
+      "paused_at": null,
+      "deliver": "local",
+      "origin": null,
+      "skill": null,
+      "id": "job-deliver-probe",
+      "prompt": "(fixture prompt)"
+    },
+    {
+      "name": "wiki-nightly",
+      "script": "nightly.sh",
+      "no_agent": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 3 * * *",
+        "display": "0 3 * * *"
+      },
+      "enabled": true,
+      "paused_at": null,
+      "deliver": "plow_chat",
+      "origin": null,
+      "skill": null,
+      "id": "job-wiki-nightly",
+      "prompt": "(fixture prompt)"
+    }
+  ],
+  "updated_at": "2026-10-05T00:00:00Z"
+}

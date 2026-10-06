@@ -10,8 +10,10 @@
 # by being named here.
 *
 !Dockerfile
+!docker/cont-init.d/03-str-timezone
 !docker/cont-init.d/04-require-ingest-manifest.sh
 !docker/cont-init.d/05-install-agent-payload.sh
+!docker/cont-init.d/06-register-jobs
 !runtime/persona.md
 !runtime/config.yaml
 !agent-skills/productivity/property-guest-messaging

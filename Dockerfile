@@ -24,12 +24,16 @@ FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-aeae7c96989b292563b98e91ccf8
 # 2026.9.1 is the version plow-wiki requires and is younger than that, so the
 # exception is scoped to this one package and dated to its release, the way
 # upstream scopes its own. Every dependency stays quarantined.
+#
+# python-dotenv too: being first on PATH, this venv's python is the one bin/'s
+# `#!/usr/bin/env python3` scripts run on when the nightly calls them by path,
+# and bin/str_env.py reads setup's answers with it (the Hermes venv has it).
 ARG OBSIDIAN_WIKI_VERSION=2026.9.1
 ENV WIKI_VENV=/opt/wiki-venv
 RUN uv venv "$WIKI_VENV" \
     && uv pip install --python "$WIKI_VENV/bin/python" \
          --exclude-newer-package "obsidian-wiki=2026-09-13T00:00:00Z" \
-         "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
+         "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" "python-dotenv==1.2.2" \
     && "$WIKI_VENV/bin/obsidian-wiki" --help > /dev/null
 ENV PATH="/opt/wiki-venv/bin:${PATH}"
 
@@ -140,9 +144,10 @@ RUN chown -R root:root /opt/plow \
 # cont-init, both ways round. Nothing else here fails: on the live agent's own
 # boot log all three of the base's cont-init scripts exit 0.
 # Plain COPY, not `COPY --chmod`: that option requires BuildKit, and on a stock
-# builder the build dies here, before pytest collects. Both scripts are tracked
-# 100755 so the executable bit travels; the chmod below normalises the rest,
-# which a plain COPY would otherwise take from the builder's umask.
+# builder the build dies here, before pytest collects. Every cont-init script is
+# tracked 100755 and the chmod below sets 0755 regardless, so the bit never
+# depends on the checkout or the builder's umask.
+COPY docker/cont-init.d/03-str-timezone /etc/cont-init.d/03-str-timezone
 COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-require-ingest-manifest.sh
 
 # The one image-to-home seam. Everything above is authoritative under /opt/plow
@@ -152,7 +157,11 @@ COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-requir
 # receives the image's SOUL or config at all. One script closes all three rather
 # than three copies of the payload closing one each.
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
-RUN chmod 0755 /etc/cont-init.d/04-require-ingest-manifest.sh \
-               /etc/cont-init.d/05-install-agent-payload.sh
+# str's cron jobs, reconciled from config at every boot (bin/register-jobs).
+COPY docker/cont-init.d/06-register-jobs /etc/cont-init.d/06-register-jobs
+RUN chmod 0755 /etc/cont-init.d/03-str-timezone \
+               /etc/cont-init.d/04-require-ingest-manifest.sh \
+               /etc/cont-init.d/05-install-agent-payload.sh \
+               /etc/cont-init.d/06-register-jobs
 
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2

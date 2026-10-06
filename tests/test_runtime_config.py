@@ -116,9 +116,9 @@ def test_every_tool_soul_names_is_one_some_server_offers():
     anything about check-in, and `get_access_code` before publishing a PIN a
     guest will type. Drop either name from its server's `include` and the
     instruction survives, pointing at a tool the agent was never offered — it
-    cannot comply and nothing reports that it could not. Same shape as the
-    enable gate and `send_message` below: two files naming one tool, neither
-    able to see the other. `hermes tools list` cannot stand in for this — it
+    cannot comply and nothing reports that it could not. Same shape as
+    `send_message` below: two files naming one tool, neither able to see the
+    other. `hermes tools list` cannot stand in for this — it
     reports the surface, not that SOUL names something missing from it.
 
     Both servers, because SOUL now names tools from each: a Hostex-only slice
@@ -148,31 +148,14 @@ def test_every_tool_soul_names_is_one_some_server_offers():
     assert "search_staffs" not in offered
 
 
-def test_the_enable_gate_and_the_tracked_config_agree_on_send_message():
-    """`send_message` is what lets an owner's approval reach the guest, and the
-    enable script proves step 1's restore took by grepping the live tool list
-    for it. Two files therefore have to name the same tool, in the same
-    direction, and neither side is covered: the fake-docker test in
-    test_hostex_poll.py answers every outer `docker compose exec` and never
-    runs the script's inner shell, so the gate's polarity can invert with the
-    suite green — which is exactly how it shipped inverted once.
-
-    Sliced to the hostex include block rather than searched over the whole
-    file, so a stray occurrence under another server cannot satisfy it.
+def test_the_tracked_config_offers_send_message():
+    """`send_message` is what lets an owner's approval reach the guest. Sliced
+    to the hostex include block rather than searched over the whole file, so a
+    stray occurrence under another server cannot satisfy it.
     """
     config = (ROOT / "runtime/config.yaml").read_text()
     hostex_include = config.split("include:")[1].split("resources:")[0]
     assert "- send_message" in hostex_include
-
-    # Both arms. The pass arm alone lets the polarity invert while the wording
-    # stays; the fail arm alone lets it be collapsed to a no-op gate. Each is
-    # the other's blind spot, and both have shipped as real bugs here.
-    gate = (ROOT / "scripts/enable-hostex-inbound.sh").read_text()
-    assert "*send_message*) ;;" in gate               # present is the pass arm
-    # Bounded at `esac` for the same reason the include slice above is bounded:
-    # unsliced, the arm's own `exit 1` could be deleted and this would still
-    # match a later guard's, leaving a gate that warns and continues.
-    assert "exit 1" in gate.split("send_message not allowlisted")[1].split("esac")[0]
 
 
 def test_the_draft_reaches_the_session_that_approves_it():
@@ -184,9 +167,7 @@ def test_the_draft_reaches_the_session_that_approves_it():
     mirrors nothing. Nothing else fails when one half goes; the loop just
     quietly answers about the wrong guest, which is the bug that prompted this.
 
-    Text, not behaviour, for the same reason the gate above is: proving the
-    mirror lands needs a live gateway, and the fake-docker test never runs the
-    inner shell.
+    Text, not behaviour: proving the mirror lands needs a live gateway.
     """
     config = (ROOT / "runtime/config.yaml").read_text()
     assert re.search(r"^cron:\n(?:\s+#.*\n|\s*\n)*\s+mirror_delivery: true$",
@@ -201,17 +182,8 @@ def test_the_draft_reaches_the_session_that_approves_it():
     # form under `platforms:` is the shape that already failed here.
     assert re.search(r"^group_sessions_per_user: false$", config, re.MULTILINE)
 
-    enable = (ROOT / "scripts/enable-hostex-inbound.sh").read_text()
-    # The last exec in the file is the create; sliced so the env pair has to sit
-    # on that call rather than anywhere earlier, where it would do nothing.
-    create = enable.rsplit("compose exec", 1)[1]
-    assert "cron create" in create
-    assert "-e HERMES_SESSION_PLATFORM=plow_chat" in create
-    assert '-e HERMES_SESSION_CHAT_ID="$chat_uid"' in create
-    # Absent on purpose: it resolves the mirror to the one member it names, and
-    # every member of the owners' group can approve. Setting it would strand the
-    # others with the same missing draft, silently.
-    assert "HERMES_SESSION_USER_ID" not in enable
+    # The origin stamping (HERMES_SESSION_PLATFORM + _CHAT_ID, no USER_ID) is
+    # pinned by tests/test_register_jobs.py's golden create_argv test.
 
     # The marker is a contract across two files: the poller's prompt tells the
     # announcement to mark the wording, the group prompt sends what the marker
