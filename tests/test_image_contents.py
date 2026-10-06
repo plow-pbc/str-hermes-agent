@@ -40,7 +40,11 @@ def _present(path):
 IMAGE_CLAIMS = [
     ("the agent's own skill",
      *_present("/opt/hermes/skills/productivity/property-guest-messaging/SKILL.md")),
+    ("the setup skill a fresh deploy starts with",
+     *_present("/opt/hermes/skills/productivity/str-setup/SKILL.md")),
     ("the scheduler's scripts", *_present("/opt/plow/str/bin/nightly.sh")),
+    ("the PATH python the nightly runs bin/ on reads setup through str_env",
+     "cd /opt/plow/str/bin && python3 -c 'import str_env' && echo present", "present"),
     ("the seam mcp server", *_present("/opt/plow/str/mcp-seam/server.py")),
     ("the boot hook that registers the cron jobs",
      "test -x /etc/cont-init.d/06-register-jobs && echo present || echo missing", "present"),

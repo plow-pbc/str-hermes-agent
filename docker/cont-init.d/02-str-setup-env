@@ -1,0 +1,28 @@
+#!/command/with-contenv sh
+# Publish what str-config wrote into the container environment, so the gateway
+# and the MCP servers it starts (config.yaml's ${HOSTEX_TOKEN}, ${SEAM_API_KEY})
+# see it from this boot on. str-config writes $HERMES_HOME/str/setup.env because
+# the agent cannot write .env: plow-init rewrites that root-owned every boot.
+# The gateway's load_dotenv(override=True) still lets .env win over these.
+#
+# Only the four keys setup owns, by name: setup.env is agent-writable and this
+# runs as root, so any other name (PATH, LD_PRELOAD) must never reach the
+# environment. Never fatal, like 03: a missing or odd file is logged and skipped.
+set -u
+SRC=${STR_SETUP_ENV:-${HERMES_HOME:-/var/lib/hermes}/str/setup.env}
+OUT=${STR_ENV_DIR:-/run/s6/container_environment}
+
+if [ ! -f "$SRC" ]; then
+  echo "str-setup-env: no $SRC yet -- nothing to publish" >&2
+  exit 0
+fi
+while IFS= read -r line || [ -n "$line" ]; do
+  key=${line%%=*}
+  case $line in
+    HOSTEX_TOKEN=*|SEAM_API_KEY=*|PLOW_CHAT_GROUP_UIDS=*|PLOW_CHAT_APPROVAL_GROUP=*)
+      printf '%s' "${line#*=}" > "$OUT/$key" && echo "str-setup-env: $key published" >&2 ;;
+    ''|'#'*) ;;
+    *) echo "str-setup-env: ignored a line that is not one of setup's keys" >&2 ;;
+  esac
+done < "$SRC"
+exit 0

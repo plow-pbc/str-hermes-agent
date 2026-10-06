@@ -10,6 +10,7 @@
 # by being named here.
 *
 !Dockerfile
+!docker/cont-init.d/02-str-setup-env
 !docker/cont-init.d/03-str-timezone
 !docker/cont-init.d/04-require-ingest-manifest.sh
 !docker/cont-init.d/05-install-agent-payload.sh
@@ -17,6 +18,7 @@
 !runtime/persona.md
 !runtime/config.yaml
 !agent-skills/productivity/property-guest-messaging
+!agent-skills/productivity/str-setup
 !bin
 !mcp-seam
 

@@ -49,11 +49,11 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SNAPSHOT = ROOT / "agent-skills"
-# The skill the Dockerfile bakes, and so the one the manifest reports as bundled
-# while Hermes still edits it in place. Named rather than discovered: the
-# Dockerfile alone decides what gets baked, and a second schema for working that
-# out earns nothing until a second self-modifying skill exists.
-BAKED_SKILLS = {"productivity/property-guest-messaging"}
+# The skills the Dockerfile bakes, and so the ones the manifest reports as
+# bundled while Hermes may still edit them in place. Named rather than
+# discovered: the Dockerfile alone decides what gets baked, and a test holds the
+# two lists together.
+BAKED_SKILLS = {"productivity/property-guest-messaging", "productivity/str-setup"}
 
 
 def refuse_in_the_deployed_clone(root: pathlib.Path) -> None:
