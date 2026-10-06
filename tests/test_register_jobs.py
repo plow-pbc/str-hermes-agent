@@ -226,3 +226,11 @@ def test_a_timezone_edited_without_a_restart_refuses(tmp_path):
     env = {**_home(tmp_path, ops='timezone = "America/Chicago"\n'), "TZ": "America/Los_Angeles"}
     with pytest.raises(SystemExit, match="restart"):
         register_jobs.main([], env=env, runner=fail_if_called)
+
+
+def test_a_hung_hermes_call_is_a_failure_not_a_hang(monkeypatch):
+    def hang(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+    monkeypatch.setattr(register_jobs.subprocess, "run", hang)
+    with pytest.raises(SystemExit, match="timed out"):
+        register_jobs._check(register_jobs._run, [register_jobs.HERMES, "cron", "list"])

@@ -142,9 +142,9 @@ RUN chown -R root:root /opt/plow \
 # cont-init, both ways round. Nothing else here fails: on the live agent's own
 # boot log all three of the base's cont-init scripts exit 0.
 # Plain COPY, not `COPY --chmod`: that option requires BuildKit, and on a stock
-# builder the build dies here, before pytest collects. Both scripts are tracked
-# 100755 so the executable bit travels; the chmod below normalises the rest,
-# which a plain COPY would otherwise take from the builder's umask.
+# builder the build dies here, before pytest collects. Every cont-init script is
+# tracked 100755 and the chmod below sets 0755 regardless, so the bit never
+# depends on the checkout or the builder's umask.
 COPY docker/cont-init.d/03-str-timezone /etc/cont-init.d/03-str-timezone
 COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-require-ingest-manifest.sh
 

@@ -233,9 +233,9 @@ nothing per-member left it ends nothing and prints `0`.
 A `hostex-inbound` job created before guest-reply drafts moved to the owners'
 group still delivers to the private chat, and one created before the delivery
 mirror has no `origin`, so its drafts never reach the session that approves
-them. Nothing above changes either — the enable script refuses to run while a
-job exists, so a redeploy recreates the container around the old job. `origin`
-is not in `cron list`, so an inspection cannot rule the second one out.
+them. register-jobs replaces the first at boot, but it leaves a job whose
+schedule, delivery and script match alone, so the second survives a redeploy.
+`origin` is not in `cron list`, so an inspection cannot rule it out.
 
 ```sh
 docker compose exec -T hermes hermes cron list
@@ -271,8 +271,8 @@ cold cursor when it creates `hostex-inbound`, and an edit keeps the job, cursor
 included:
 
 ```sh
-docker compose exec -T hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
-docker compose exec -T hermes hermes cron edit checkin-watch --failure-deliver plow_chat
+docker compose exec -T -u hermes hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
+docker compose exec -T -u hermes hermes hermes cron edit checkin-watch --failure-deliver plow_chat
 ```
 
 Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`
