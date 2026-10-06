@@ -24,8 +24,11 @@ from dotenv import dotenv_values  # noqa: E402
 ENV_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY", "PLOW_CHAT_GROUP_UIDS", "PLOW_CHAT_APPROVAL_GROUP")
 SECRET_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY")
 OPS_KEYS = ("timezone", "properties")
-PROPERTY_KEYS = ("hostex_property_id", "title", "timezone", "default_checkin_time",
-                 "seam_device_id", "cleaner_name", "cleaner_access_code_ids", "cleaners_thread")
+# checkin-watch reads ops.toml: its own field list and parser are the schema.
+_loader = importlib.machinery.SourceFileLoader("checkin_watch", str(BIN / "checkin-watch.py"))
+watch = importlib.util.module_from_spec(importlib.util.spec_from_loader("checkin_watch", _loader))
+_loader.exec_module(watch)
+PROPERTY_KEYS = watch.REQUIRED
 KEY_FILE = "~/Plow/str-keys.env"  # the Mac's ~, resolved by Latch
 TEMPLATE = """\
 # Your keys for str. Paste each one after its = sign, save, then tell str "done".
@@ -92,11 +95,8 @@ def _toml_value(v):
 
 def _refuse_unreadable_ops(text):
     """Checkin-watch's own parser: a property it would refuse is never written."""
-    loader = importlib.machinery.SourceFileLoader("checkin_watch", str(BIN / "checkin-watch.py"))
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("checkin_watch", loader))
-    loader.exec_module(module)
     try:
-        module.load_ops_text(text)
+        watch.load_ops_text(text)
     except (Exception, SystemExit) as e:
         raise SystemExit(f"str-config: ops.toml not written, checkin-watch would refuse it: {e}") from None
 
