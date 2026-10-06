@@ -11,7 +11,9 @@ bin/hostex-raw split on the first `=` and do not strip quotes. A value with
 never echoing the value; inner spaces are fine. read_setup_env is the one
 reader.
 """
-import json, os, pathlib, sys, tempfile, tomllib
+import importlib.machinery, importlib.util, json, os, pathlib, sys, tempfile, tomllib
+
+BIN = pathlib.Path(__file__).resolve().parent
 
 ENV_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY", "PLOW_CHAT_GROUP_UIDS", "PLOW_CHAT_APPROVAL_GROUP")
 SECRET_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY")
@@ -78,11 +80,25 @@ def _toml_value(v):
     return json.dumps(v)  # a JSON string is a valid TOML basic string
 
 
+def _refuse_unreadable_ops(text):
+    """Checkin-watch's own parser: a property it would refuse is never written."""
+    loader = importlib.machinery.SourceFileLoader("checkin_watch", str(BIN / "checkin-watch.py"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("checkin_watch", loader))
+    loader.exec_module(module)
+    try:
+        module.load_ops_text(text)
+    except (Exception, SystemExit) as e:
+        raise SystemExit(f"str-config: ops.toml not written, checkin-watch would refuse it: {e}") from None
+
+
 def _write_ops(path, ops):
     out = [f"timezone = {_toml_value(ops['timezone'])}"] if "timezone" in ops else []
     for prop in ops.get("properties", []):
         out += ["", "[[properties]]"] + [f"{k} = {_toml_value(prop[k])}" for k in PROPERTY_KEYS if k in prop]
-    _atomic_write(path, "\n".join(out) + "\n", 0o644)
+    text = "\n".join(out) + "\n"
+    if ops.get("properties"):  # load_ops_text refuses zero properties; a timezone alone is fine
+        _refuse_unreadable_ops(text)
+    _atomic_write(path, text, 0o644)
 
 
 def apply(patch, home, environ):

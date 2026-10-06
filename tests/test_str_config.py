@@ -101,3 +101,15 @@ def test_ops_merge_keeps_timezone_when_only_properties_sent(tmp_path):
 def test_unknown_keys_refused(tmp_path, patch):
     with pytest.raises(SystemExit):
         str_config.apply(patch, tmp_path, environ={})
+
+
+@pytest.mark.parametrize("prop", [
+    {k: v for k, v in PROP.items() if k != "cleaners_thread"},
+    {**PROP, "default_checkin_time": "4pm"},
+], ids=["incomplete", "bad time"])
+def test_a_property_checkin_watch_would_refuse_is_never_written(tmp_path, prop):
+    (tmp_path / "repo/vault").mkdir(parents=True)
+    (tmp_path / "repo/vault/ops.toml").write_text('timezone = "America/Chicago"\n')
+    with pytest.raises(SystemExit, match="ops.toml not written"):
+        str_config.apply({"ops": {"properties": [prop]}}, tmp_path, environ={})
+    assert (tmp_path / "repo/vault/ops.toml").read_text() == 'timezone = "America/Chicago"\n'
