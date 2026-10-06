@@ -143,11 +143,16 @@ def apply(env, runner):
         if kind != "create":
             _check(runner, [HERMES, "cron", "remove", registered[name]["id"]])
         if kind != "remove":
-            # Prime only a cold cursor: the first tick would otherwise adopt
-            # whatever arrived meanwhile, and priming a warm one retires a guest.
-            if name == "hostex-inbound" and not cursor_path(home).exists():
-                _check(runner, [str(BIN / "hostex-poll.py")])
-            _check(runner, *create_argv(x))
+            try:
+                # Prime only a cold cursor: the first tick would otherwise adopt
+                # whatever arrived meanwhile, and priming a warm one retires a guest.
+                if name == "hostex-inbound" and not cursor_path(home).exists():
+                    _check(runner, [str(BIN / "hostex-poll.py")])
+                _check(runner, *create_argv(x))
+            except SystemExit as exc:
+                if kind == "replace":
+                    raise SystemExit(f"{exc}\n{name} was removed and will be recreated on the next run") from None
+                raise
         print(f"register-jobs: {kind} {name}")
     return 0
 
@@ -156,12 +161,14 @@ def main(argv=None, env=None, runner=_run):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--boot", action="store_true", help="never fail: called from cont-init")
     args = parser.parse_args(argv)
-    if env is None:
-        env = {**_read_setup_env(os.environ.get("HERMES_HOME", "/var/lib/hermes")), **os.environ}
-    if args.boot and not env.get("HOSTEX_TOKEN"):
-        print("str: not set up yet -- jobs wait for str-setup")
-        return 0
     try:
+        if env is None:
+            env = {**_read_setup_env(os.environ.get("HERMES_HOME", "/var/lib/hermes")), **os.environ}
+        if not env.get("HOSTEX_TOKEN"):
+            if args.boot:
+                print("str: not set up yet -- jobs wait for str-setup")
+                return 0
+            raise SystemExit("register-jobs: str is not set up (no HOSTEX_TOKEN) -- refusing to remove jobs")
         return apply(env, runner)
     except (Exception, SystemExit) as exc:
         if not args.boot:

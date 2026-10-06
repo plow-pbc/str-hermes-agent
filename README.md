@@ -781,8 +781,8 @@ just restart             # 2 — through the nightly veto
 ```
 
 Wait for the gateway to serve — see [applying a `runtime/`
-edit](#applying-a-runtime-edit) — then run step 3, which needs the gateway
-for its own checks.
+edit](#applying-a-runtime-edit) — then run step 3.  It needs no gateway
+checks of its own; waiting just keeps it out of the restart's boot-time run.
 
 **Deal with anyone already waiting before running step 3.** Priming adopts
 every conversation as seen, so a guest whose message is outstanding at that
@@ -831,7 +831,7 @@ One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `/var/lib/hermes/.env
 restart the gateway, then remove the job and let register-jobs recreate it:
 
 ```sh
-docker compose exec hermes hermes cron remove hostex-inbound
+docker compose exec -u hermes hermes hermes cron remove hostex-inbound
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
@@ -1232,7 +1232,7 @@ conversations again and appends their facts a second time. Run it directly
 instead, where nothing is watching the clock:
 
 ```sh
-docker compose exec hermes hermes cron remove wiki-nightly
+docker compose exec -u hermes hermes hermes cron remove wiki-nightly
 AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
   && docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
        /command/s6-setuidgid hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'

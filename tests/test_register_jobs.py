@@ -134,6 +134,20 @@ def test_boot_before_setup_skips(capsys):
     assert "not set up yet" in capsys.readouterr().out
 
 
+def test_setup_run_without_a_token_refuses_rather_than_removing_jobs():
+    with pytest.raises(SystemExit, match="refusing to remove jobs"):
+        register_jobs.main([], env={}, runner=fail_if_called)
+
+
+def test_an_unreadable_env_file_never_fails_the_boot(tmp_path, monkeypatch, capsys):
+    """S6_BEHAVIOUR_IF_STAGE2_FAILS=2 stops the container on a non-zero cont-init."""
+    (tmp_path / ".env").write_bytes(b"HOSTEX_TOKEN=\xff\xfe\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert register_jobs.main(["--boot"], runner=fail_if_called) == 0
+    err = capsys.readouterr().err
+    assert "codec" in err and "the boot carries on" in err
+
+
 class Recorder:
     def __init__(self, fail=None):
         self.calls, self.fail = [], fail
@@ -177,6 +191,12 @@ def test_a_warm_cursor_is_not_reprimed_and_a_replace_removes_by_id(tmp_path):
     assert register_jobs.main([], env=env, runner=run) == 0
     assert [c[1:4] for c in run.calls] == [["cron", "remove", "job-hostex-inbound"],
                                            ["cron", "create", "every 2m"]]
+
+
+def test_a_failed_recreate_says_the_job_is_now_missing(tmp_path):
+    env = _home(tmp_path, cursor=True, jobs=_registered(hostex_inbound={"deliver": "plow_chat"}))
+    with pytest.raises(SystemExit, match="hostex-inbound was removed and will be recreated on the next run"):
+        register_jobs.main([], env=env, runner=Recorder(fail="create"))
 
 
 @pytest.mark.parametrize("argv,code", [([], SystemExit), (["--boot"], 0)], ids=["setup", "boot"])
