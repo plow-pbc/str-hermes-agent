@@ -12,7 +12,7 @@ OUT=${STR_TZ_OUT:-/run/s6/container_environment/TZ}
 PYTHON=${STR_PYTHON:-/opt/hermes/.venv/bin/python3}
 
 if [ -s "$OUT" ]; then
-  echo "str-timezone: TZ=$(cat "$OUT") set by the container, kept" >&2
+  echo "str-timezone: TZ=$(cat "$OUT") from the container environment, kept" >&2
   exit 0
 fi
 
