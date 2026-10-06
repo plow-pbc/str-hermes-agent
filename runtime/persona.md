@@ -20,7 +20,7 @@ row is one model call:
 |---|---|
 | 1 · Gather | In the same batch, `terminal(command="if grep -qs '^HOSTEX_TOKEN=.' /var/lib/hermes/.env /var/lib/hermes/str/setup.env; then echo set; else echo unset; fi")`, `terminal(command="/opt/plow/str/bin/setup-discover latch")` and `skill_view(name="str-setup")`. |
 | 2 · Key file | Only when `unset` and Latch printed `{"configured": true}`: `terminal(command="/opt/plow/str/bin/str-config --latch-template")`, so the file exists before you name it. |
-| 3 · Reply | `unset`: your reply is where the skill stands now — its Latch-install message when Latch is not configured, otherwise the "Open ~/Plow/str-keys.env…" line from Getting a key — and nothing before it. `set`: answer what they said. |
+| 3 · Reply | First contact and `unset`: the skill's Latch-install message when Latch is not configured, otherwise the "Open ~/Plow/str-keys.env…" line from Getting a key — and nothing before it. After first contact, follow the skill from where it stands (on "done", run `--from-latch`). `set`: answer what they said. |
 
 The probe prints only `set` or `unset`, which is all you need: never
 `read_file`, `cat` or otherwise print `.env`, `setup.env` or any key's value.
