@@ -3,7 +3,8 @@ r"""str-config -- write setup's answers. JSON patch on stdin; never argv.
 
 The one writer for $HERMES_HOME/.env (the four keys setup owns) and
 ${VAULT:-$HERMES_HOME/repo/vault}/ops.toml (where checkin-watch reads it).
-Container env wins: a key already in the process environment is not written.
+The file wins over the process env, as in Hermes' gateway (load_dotenv
+override=True): a turn's processes inherit the gateway's start-time values.
 Values are written unquoted as KEY=value, because bin/hostex-poll.py and
 bin/hostex-raw split on the first `=` and do not strip quotes. A value with
 `"` `'` `\` `$` `#` CR/LF or leading/trailing whitespace is refused by key,
@@ -91,15 +92,10 @@ def apply(patch, home, environ):
     _refuse_unknown(env, ENV_KEYS, "env")
     for key, value in env.items():
         _refuse_unwritable(key, value)
-    updates = {}
     for key, value in env.items():
-        if environ.get(key):
-            summary.append(f"{key}: set by the container, not written")
-            continue
-        updates[key] = value
         summary.append(f"{key}: {mask(value) if key in SECRET_KEYS else value}")
-    if updates:
-        _write_env(home / ".env", updates)
+    if env:
+        _write_env(home / ".env", env)
     if "ops" in patch:
         ops = patch["ops"]
         _refuse_unknown(ops, OPS_KEYS, "ops")

@@ -163,7 +163,7 @@ def main(argv=None, env=None, runner=_run):
     args = parser.parse_args(argv)
     try:
         if env is None:
-            env = {**_read_setup_env(os.environ.get("HERMES_HOME", "/var/lib/hermes")), **os.environ}
+            env = {**os.environ, **_read_setup_env(os.environ.get("HERMES_HOME", "/var/lib/hermes"))}
         if not env.get("HOSTEX_TOKEN"):
             if args.boot:
                 print("str: not set up yet -- jobs wait for str-setup")

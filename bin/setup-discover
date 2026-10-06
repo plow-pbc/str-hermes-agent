@@ -4,8 +4,8 @@ offer choices instead of asking for IDs. Exit 2 and one sentence on stderr on fa
 
   latch | hostex-properties | seam-devices | seam-codes <seam_device_id> | groups
 
-Secrets come from the process environment over $HERMES_HOME/.env (container env
-wins), never argv. Hostex reuses hostex_api's base URL and no-redirect opener.
+Secrets come from $HERMES_HOME/.env over the process environment (the file
+wins, as in Hermes' gateway), never argv. Hostex reuses hostex_api's base URL and no-redirect opener.
 Seam is called over REST, not the SDK: `seam` lives only in the mcp-seam uv
 environment, not in this interpreter. One HTTP seam, fetch(url, headers) -> dict.
 """
@@ -133,7 +133,7 @@ def main(argv, environ=None, fetch=fetch):
     service = SERVICE.get(name, "setup")
     try:
         home = pathlib.Path(environ.get("HERMES_HOME", "/var/lib/hermes"))
-        env = {**_read_setup_env(home), **environ}
+        env = {**environ, **_read_setup_env(home)}
         result = COMMANDS[name](env, fetch, *args)
     except Owner as e:
         print(f"setup-discover: {e}", file=sys.stderr)

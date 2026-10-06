@@ -32,9 +32,8 @@ JSON
 ```
 
 Never print `.env` or repeat a key; confirm only the masked form `str-config`
-printed. "set by the container, not written" means the deployment fixed that
-value: say so and move on. If it refuses a value's characters, ask the owner
-to copy the key again without surrounding spaces or quotes.
+printed. If it refuses a value's characters, ask the owner to copy the key
+again without surrounding spaces or quotes.
 
 ## 1. Plow Latch
 

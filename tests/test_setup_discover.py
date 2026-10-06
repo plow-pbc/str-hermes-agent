@@ -112,15 +112,18 @@ def test_fetch_names_itself_to_the_api(monkeypatch):
     assert sent[0].get_header("Authorization") == "Bearer t"
 
 
-def test_setup_env_fills_in_and_process_env_wins(tmp_path):
-    (tmp_path / ".env").write_text("HOSTEX_TOKEN=from-file\nSEAM_API_KEY=seam-file\n")
+def test_the_file_beats_a_stale_process_env_and_the_env_fills_gaps(tmp_path):
+    """A turn's processes inherit the gateway's start-time values; setup's
+    newer write to .env is the truth, as in the gateway's own loader."""
+    (tmp_path / ".env").write_text("HOSTEX_TOKEN=from-file\n")
     seen = []
-    discover.main(["hostex-properties"], {"HERMES_HOME": str(tmp_path), "HOSTEX_TOKEN": "from-container"},
+    environ = {"HERMES_HOME": str(tmp_path), "HOSTEX_TOKEN": "stale", "SEAM_API_KEY": "seam-env"}
+    discover.main(["hostex-properties"], environ,
                   fetch=lambda url, headers: seen.append(headers) or {"data": {"properties": []}})
-    discover.main(["seam-devices"], {"HERMES_HOME": str(tmp_path)},
+    discover.main(["seam-devices"], environ,
                   fetch=lambda url, headers: seen.append(headers) or {"devices": []})
-    assert seen[0]["Hostex-Access-Token"] == "from-container"
-    assert seen[1]["Authorization"] == "Bearer seam-file"
+    assert seen[0]["Hostex-Access-Token"] == "from-file"
+    assert seen[1]["Authorization"] == "Bearer seam-env"
 
 
 def test_missing_secret_and_unreachable_exit_2(tmp_path, capsys):

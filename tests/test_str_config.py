@@ -23,17 +23,16 @@ PROP = {"hostex_property_id": 12345, "title": "Example Property",
         "cleaner_access_code_ids": ["code-1"], "cleaners_thread": "Cleaners"}
 
 
-def test_preserves_unrelated_lines_and_env_wins(tmp_path):
+def test_preserves_unrelated_lines_and_writes_over_a_process_env_value(tmp_path):
     env = tmp_path / ".env"
     env.write_text("# keep me\nOTHER=1\nSEAM_API_KEY=old\n")
     lines = str_config.apply(
         {"env": {"HOSTEX_TOKEN": "tok-abcdefgh", "SEAM_API_KEY": "new-12345678"}},
-        tmp_path, environ={"HOSTEX_TOKEN": "from-compose"})
+        tmp_path, environ={"HOSTEX_TOKEN": "stale-inherited"})
     text = env.read_text()
     assert text.startswith("# keep me\nOTHER=1\n")
     assert "SEAM_API_KEY=new-12345678" in text and "SEAM_API_KEY=old" not in text
-    assert "HOSTEX_TOKEN" not in text                      # container value wins
-    assert any("HOSTEX_TOKEN: set by the container" in l for l in lines)
+    assert str_config.read_setup_env(tmp_path)["HOSTEX_TOKEN"] == "tok-abcdefgh"  # the file is the source
     assert not any("new-12345678" in l for l in lines)     # summary is masked
     assert any("…678" in l for l in lines)
 

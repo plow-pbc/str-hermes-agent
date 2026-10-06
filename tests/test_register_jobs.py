@@ -148,6 +148,17 @@ def test_an_unreadable_env_file_never_fails_the_boot(tmp_path, monkeypatch, caps
     assert "codec" in err and "the boot carries on" in err
 
 
+def test_the_file_beats_a_stale_process_env_and_an_empty_group_means_here(tmp_path, monkeypatch):
+    """Choosing "here" on a re-run writes PLOW_CHAT_APPROVAL_GROUP empty; a
+    stale label inherited from the gateway's start must not override it."""
+    env = _home(tmp_path, cursor=True)
+    (tmp_path / ".env").write_text("HOSTEX_TOKEN=t\nPLOW_CHAT_APPROVAL_GROUP=\n")
+    monkeypatch.setattr(register_jobs.os, "environ", {**env, "PLOW_CHAT_APPROVAL_GROUP": "STR Owners"})
+    run = Recorder()
+    assert register_jobs.main([], runner=run) == 0
+    assert [c[c.index("--deliver") + 1] for c in run.calls] == ["plow_chat", "plow_chat"]
+
+
 class Recorder:
     def __init__(self, fail=None):
         self.calls, self.fail = [], fail
