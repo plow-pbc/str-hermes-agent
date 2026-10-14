@@ -90,18 +90,27 @@ reconcile() {
   checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
 }
 
+# The manifest as of the last snapshot: what a restore of str's pages pairs
+# with. Taken when a snapshot commits, never at the start of a night -- a night
+# whose restore failed would otherwise leave the next night backing up a
+# manifest ahead of the pages, and a later restore would pair them wrong. Seeded
+# from the live manifest once, on the first run that has none.
 MANIFEST="$VAULT/.manifest.json"
-BEFORE="$(mktemp)"
-cp -p "$MANIFEST" "$BEFORE" || { notify "Wiki nightly FAILED: cannot back up $MANIFEST. The wiki is unchanged."; exit 1; }
+SNAPSHOTTED="$HERMES_HOME/wiki-manifest.snapshotted.json"
+if [ ! -e "$SNAPSHOTTED" ]; then
+  echo "nightly: no snapshotted manifest yet; seeding it from $MANIFEST" >&2
+  cp -p "$MANIFEST" "$SNAPSHOTTED" || { notify "Wiki nightly FAILED: cannot seed $SNAPSHOTTED. The wiki is unchanged."; exit 1; }
+fi
 
-# Undo the night. The manifest goes back only once the pages have: a manifest
-# that forgot pages still on the wiki is the double-append the manifest exists
-# to prevent. A restore that fails is said so, and tomorrow's checks retry it.
+# Undo everything since the last snapshot. The manifest goes back only once the
+# pages have: a manifest that forgot pages still on the wiki is the
+# double-append the manifest exists to prevent. A restore that fails is said
+# so, and the next failing night retries it from the same pair.
 roll_back() {
   local why="$STATUS"
   STATUS=""
   checked "wiki restore" "$RELAY" run --write "$WIKI" --write "$WIKI.git" -- wiki restore --writer str
-  [ -z "$STATUS" ] && cp -p "$BEFORE" "$MANIFEST"
+  [ -z "$STATUS" ] && cp -p "$SNAPSHOTTED" "$MANIFEST"
   checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki index
   STATUS="rolled back: ${why}${STATUS:+rollback incomplete: $STATUS}"
 }
@@ -139,6 +148,7 @@ checked "wiki validation" "$RELAY" run -- wiki validate --writer str
 if [ -n "$STATUS" ]; then
   roll_back
 else
+  cp -p "$MANIFEST" "$SNAPSHOTTED"
   # History lives beside the wiki on the Mac and is pushed off it: a compiled
   # corpus on one disk with no other copy is the exposure promote-vault was
   # written to close. `--push` scans what leaves for credentials, and refuses
@@ -146,7 +156,6 @@ else
   # digest, not a silent single copy.
   checked "wiki push" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
 fi
-rm -f "$BEFORE"
 
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the wiki and writes a summary. The turn only has to PRINT it --

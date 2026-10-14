@@ -77,15 +77,20 @@ def ingest(tmp_path):
     return run
 
 
-def test_a_damaged_page_is_named_to_the_next_round_and_repaired(ingest):
-    result, prompts = ingest(repairs=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert len(prompts) == 2
+@pytest.mark.parametrize(("repairs", "rc", "rounds", "diagnostic"), [
+    pytest.param(True, 0, 2, "manifest covers everything in scope", id="repaired"),
+    pytest.param(False, 1, 3, "FATAL", id="never repaired"),
+])
+def test_a_damaged_page_is_named_to_every_later_round(ingest, repairs, rc, rounds, diagnostic):
+    result, prompts = ingest(repairs=repairs)
+    assert result.returncode == rc, result.stdout + result.stderr
+    assert len(prompts) == rounds
     assert "repair" not in prompts[0] and "_raw/hostex/20-80f4.md" in prompts[0]
-    assert prompts[1].startswith("Before anything else, repair these problems")
-    assert "hvac: cites 20-8044, which the manifest never recorded" in prompts[1]
-    assert "There are no new files to process this round." in prompts[1]
-    assert "manifest covers everything in scope" in result.stdout
+    for prompt in prompts[1:]:
+        assert prompt.startswith("Before anything else, repair these problems")
+        assert "hvac: cites 20-8044, which the manifest never recorded" in prompt
+        assert "There are no new files to process this round." in prompt
+    assert diagnostic in result.stdout + result.stderr
 
 
 def test_damage_already_on_the_wiki_gets_a_repair_round_with_nothing_new(ingest, tmp_path):
@@ -97,10 +102,3 @@ def test_damage_already_on_the_wiki_gets_a_repair_round_with_nothing_new(ingest,
     assert result.returncode == 0, result.stdout + result.stderr
     assert len(prompts) == 1
     assert prompts[0].startswith("Before anything else, repair these problems")
-
-
-def test_damage_the_turn_never_repairs_fails_the_run(ingest):
-    result, prompts = ingest(repairs=False)
-    assert result.returncode == 1
-    assert "FATAL" in result.stderr
-    assert all("hvac: cites 20-8044" in p for p in prompts[1:]) and len(prompts) >= 2

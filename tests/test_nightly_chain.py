@@ -131,3 +131,21 @@ def test_a_failed_fetch_says_so_and_stops(night):
     assert result.returncode == 1
     assert "Wiki nightly FAILED at fetch" in result.stdout
     assert [c.split()[0] for c in calls] == ["hostex-raw"]
+
+
+def test_a_rollback_always_lands_on_the_manifest_of_the_last_snapshot(night):
+    """Pages and manifest go back as a pair. A night whose restore failed keeps
+    its manifest (its pages are still on the wiki); the next failing night whose
+    restore works returns both to the last snapshot -- not to that night's start,
+    which would leave the first night's records describing pages gone from the wiki."""
+    run, vault = night
+    manifest = vault / ".manifest.json"
+    snapshotted = manifest.read_bytes()
+    run(VALIDATE_RC=1, RESTORE_RC=2)
+    assert manifest.read_bytes() == snapshotted + b"tonight\n"
+    run(VALIDATE_RC=1)
+    assert manifest.read_bytes() == snapshotted
+    run()
+    clean = manifest.read_bytes()
+    run(PROVENANCE_RC=1)
+    assert manifest.read_bytes() == clean
