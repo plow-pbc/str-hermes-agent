@@ -148,7 +148,7 @@ checked "wiki validation" "$RELAY" run -- wiki validate --writer str
 if [ -n "$STATUS" ]; then
   roll_back
 else
-  cp -p "$MANIFEST" "$SNAPSHOTTED"
+  { cp -p "$MANIFEST" "$SNAPSHOTTED.tmp" && mv "$SNAPSHOTTED.tmp" "$SNAPSHOTTED"; } || note "manifest checkpoint FAILED"
   # History lives beside the wiki on the Mac and is pushed off it: a compiled
   # corpus on one disk with no other copy is the exposure promote-vault was
   # written to close. `--push` scans what leaves for credentials, and refuses
