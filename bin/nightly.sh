@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Nightly wiki chain. Runs INSIDE the container, invoked by `hermes cron`.
 #
-#   fetch → ingest → index → provenance → validate → snapshot → digest
+#   fetch → ingest → index → provenance → validate → snapshot | restore → digest
 #
 # The wiki is the owner's common plow-wiki on their Mac (~/Plow/wiki), and str's
 # pages live under its projects/str/ roots. The container reaches it only through the
@@ -64,9 +64,11 @@ notify() {
   echo "nightly: $1"
 }
 
-# The rest of the chain reports as a run of `note`s on this one invariant: past
-# ingest the pages are already written, so aborting would not unwrite them, it
-# would only withhold the news. The digest is this run's liveness signal.
+# A night is all or nothing. Every check from ingest onward that fails is a
+# `note`, and any note means tonight's pages do not reach history: str's roots
+# go back to the last snapshot and the manifest to its pre-run bytes, so the
+# next run re-ingests tonight's conversations instead of the bad pages being
+# snapshotted and reported every night with nothing repairing them.
 # Exit 1 from a check is the corpus; 2 is plow_relay failing to reach the Mac.
 # They mean opposite things and the digest is one line, so they are reported apart.
 checked() {
@@ -88,6 +90,21 @@ reconcile() {
   checked "provenance" "$BIN/wiki-provenance" "$VAULT" "$WIKI"
 }
 
+MANIFEST="$VAULT/.manifest.json"
+BEFORE="$(mktemp)"
+cp -p "$MANIFEST" "$BEFORE" || { notify "Wiki nightly FAILED: cannot back up $MANIFEST. The wiki is unchanged."; exit 1; }
+
+# Undo the night. A restore that itself fails is said so: the pages it would
+# have reverted are still on the wiki, unsnapshotted.
+roll_back() {
+  local why="$STATUS"
+  STATUS=""
+  checked "wiki restore" "$RELAY" run --write "$WIKI" --write "$WIKI.git" -- wiki restore --writer str
+  checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki index
+  cp -p "$BEFORE" "$MANIFEST"
+  STATUS="rolled back: ${why}${STATUS:+rollback incomplete: $STATUS}"
+}
+
 if ! "$BIN/hostex-raw" --vault "$VAULT"; then
   # Fetch failure leaves staging untouched and consistent — still report,
   # or the silence reads as death.
@@ -98,18 +115,9 @@ fi
 # Through ingest-all, not a bare `hermes chat` turn. A single turn self-bounds
 # — the bootstrap stopped at 14 of 235 conversations and reported success — so
 # doing it inline here meant the nightly run silently ingested a fraction of
-# what arrived and nothing noticed. ingest-all loops and asserts coverage from
-# the manifest between rounds.
-if ! "$BIN/ingest-all" "$VAULT" "$WIKI"; then
-  # Stop, do not note-and-continue. Carrying on after a terminal ingest failure
-  # reports a partially-ingested night as a normal one. But a failed turn can
-  # have written a page and not its manifest record, which the next run would
-  # re-ingest into that page, so the notice says whether it did.
-  echo "nightly: FAILED at ingest" >&2
-  reconcile
-  notify "Wiki nightly FAILED at ingest. No digest was generated. ${STATUS:-Every page it wrote has a manifest record. }See $LOG."
-  exit 1
-fi
+# what arrived and nothing noticed. ingest-all loops, asserts coverage from the
+# manifest between rounds, and hands each round's check failures to the next.
+"$BIN/ingest-all" "$VAULT" "$WIKI" || note "ingest FAILED"
 
 # The skill's own vault is $VAULT, so a turn that writes a page where the skill
 # says rather than where the prompt says leaves it here — on disk, recorded in
@@ -122,13 +130,18 @@ fi
 reconcile
 # Only str's roots: a page another writer owns is that writer's to fix (wiki.toml).
 checked "wiki validation" "$RELAY" run -- wiki validate --writer str
-# History lives beside the wiki on the Mac and is pushed off it: a compiled corpus
-# on one disk with no other copy is the exposure promote-vault was written to
-# close. `--push` scans what leaves for credentials, and refuses loudly when the
-# history repo has no origin, so a missing remote is in every digest, not a
-# silent single copy. Before the digest, so a failed snapshot is in the message
-# rather than only in the log.
-checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
+if [ -n "$STATUS" ]; then
+  roll_back
+else
+  # History lives beside the wiki on the Mac and is pushed off it: a compiled
+  # corpus on one disk with no other copy is the exposure promote-vault was
+  # written to close. `--push` scans what leaves for credentials, and refuses
+  # loudly when the history repo has no origin, so a missing remote is in every
+  # digest, not a silent single copy. Only a night that passed every check gets
+  # here, so the last snapshot is always one restore can trust.
+  checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
+fi
+rm -f "$BEFORE"
 
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the wiki and writes a summary. The turn only has to PRINT it --

@@ -106,7 +106,7 @@ container environment. The wiki's recall is optional: setup works without it.
 | Capability | State |
 |---|---|
 | Read Hostex conversations | **Working** — Hostex hosted MCP, narrow tool allowlist (§ Hostex). Reactive: it reads when an owner asks. |
-| Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
+| Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot-or-restore/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `~/Plow/wiki/index.md`, and a turn reads that over the relay to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (read from Hermes' run record), which it then sends unless an owner stopped it; an approval-path draft or a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
@@ -1106,12 +1106,17 @@ because the pages are LLM-authored from raw guest threads. A snapshot with no
 origin refuses loudly, and the refusal is in every digest: a compiled corpus on
 one disk is how 22 days of guest knowledge once sat unpushed.
 
-Every step after ingest is note-and-continue, and a relay that could not reach
-the Mac is noted apart from a check that failed. A failed ingest reconciles on
-its way out too: an ingest turn can write a page and fail before recording it,
-so the failure notice names any page the manifest never recorded. To reconcile
-by hand before re-running ingest — the CLI is on the Mac, so both go through the
-container, as root because only root reads the relay's environment:
+`ingest-all` runs index, provenance and validation after every round and puts
+what they find at the head of the next round's prompt, so a page the model
+damaged is repaired while its source is still in hand; damage that survives
+the round cap fails ingest. A night is all or nothing: if ingest or any check
+fails, `wiki restore --writer str` puts str's roots back to the last snapshot,
+the manifest goes back to its pre-run bytes (so tonight's conversations are
+re-ingested tomorrow), nothing is snapshotted, and the digest leads with
+`rolled back: …`. A relay that could not reach the Mac is noted apart from a
+check that failed. So the last snapshot is always a night that passed. To check
+by hand — the CLI is on the Mac, so both go through the container, as root
+because only root reads the relay's environment:
 
 ```sh
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
