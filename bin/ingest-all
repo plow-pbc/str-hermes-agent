@@ -13,6 +13,7 @@
 set -uo pipefail
 
 compose() { "$(dirname "$0")/../scripts/compose" "$@"; }
+BIN="$(cd "$(dirname "$0")" && pwd)"
 
 # The runtime vault, not a relative path into the checkout — there is no vault
 # there anymore. An operator run with no argument should reach the real one.
@@ -40,6 +41,7 @@ BATCH=10
 if [ -n "${HERMES_HOME:-}" ] && [ -d "$HERMES_HOME/repo" ]; then
   CVAULT="$VAULT"
   turn() { hermes chat -q "$1"; }
+  wiki_tool() { "$BIN/$1" "${@:2}"; }
 else
   # A host run brings its own vault in, at the one container path a vault ever
   # has. Only `vault/` is mounted now, not the checkout around it (see
@@ -83,7 +85,38 @@ else
       --entrypoint bash hermes \
       -c '[ -d "$HERMES_HOME/skills/wiki-ingest" ] || { echo "no wiki skills in $HERMES_HOME/skills — boot the container once so the runtime seeds them from the image" >&2; exit 1; }; exec hermes chat -q "$INGEST_PROMPT"'
   }
+  # The checks reach the Mac through the live gateway's relay, whose credential
+  # only root can read (README § Compiling the wiki nightly). They hold pages
+  # against the production manifest, so a host run on another vault checks
+  # production's -- which is the only vault this branch is ever pointed at.
+  wiki_tool() {
+    compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+      "$CHOME/scripts/$1" "${@:2}"
+  }
 fi
+
+# What is wrong with str's pages right now, one line per problem; empty when
+# clean. These are the nightly's own checks, run after every round rather than
+# once at the end: a page the model damaged is named to the very next turn,
+# which still has the source in hand, instead of being snapshotted into
+# history and reported every night with nothing ever repairing it.
+# Exit 1 from a check is the corpus. Anything else is the Mac not answering,
+# which returns 2: an unknown is not a clean wiki.
+problem() {
+  local out
+  out=$("$@" 2>&1)
+  case $? in
+    0) ;;
+    1) printf '%s\n' "$out" ;;
+    *) echo "ingest-all: the owner's Mac did not answer: $out" >&2; return 2 ;;
+  esac
+}
+wiki_problems() {
+  # The index first: provenance lists pages from it.
+  problem wiki_tool plow_relay.py run --write "$WIKI" -- wiki index || return
+  problem wiki_tool wiki-provenance "$CVAULT" "$WIKI" || return
+  problem wiki_tool plow_relay.py run -- wiki validate --writer str
+}
 
 # Conversations in scope, and which the manifest already records.
 remaining() {
@@ -217,6 +250,7 @@ MAX_ROUNDS=$(( (TOTAL_SCOPE / BATCH) * 2 + 5 ))
 
 round=0
 stalls=0
+PROBLEMS=""
 while :; do
   refresh_scope
   # Straight from $SCOPE, which refresh_scope just set. It used to round-trip
@@ -232,7 +266,10 @@ while :; do
   # after it, so the last conversation of every batch was silently dropped —
   # and a round with exactly one left fed nothing, stalled, and aborted the run.
   before=$(printf '%s\n' "$SCOPE" | grep -c .)
-  [ "$before" -eq 0 ] && { echo "ingest-all: manifest covers everything in scope"; break; }
+  if [ "$before" -eq 0 ] && [ -z "$PROBLEMS" ]; then
+    echo "ingest-all: manifest covers everything in scope"
+    break
+  fi
 
   round=$((round + 1))
   if [ "$round" -gt "$MAX_ROUNDS" ]; then
@@ -250,7 +287,16 @@ while :; do
   # The skill's own vault is staging, which is where it keeps the manifest, so
   # the prompt has to move the pages: left to the skill, they land in a
   # directory no agent reads (nightly.sh checks for exactly that).
-  turn "Use the wiki-ingest skill. Its vault is the local staging directory ${CVAULT}, which holds only the raw sources and .manifest.json: record every file you process in that manifest, including ones that yield no page. Process exactly these files and no others: ${files%, }. The pages do NOT go in ${CVAULT}. They live in the owner's wiki at ${WIKI} on the owner's Mac, and you read and write them only with plow_read_file and plow_write_file: property hubs under ${WIKI}/projects/str/properties/, operations pages under ${WIKI}/projects/str/operations/, standing roles in ${WIKI}/entities/people/key-people.md. Link pages as markdown from the wiki's root, [Lake House](/projects/str/properties/lake-house.md), never [[wikilinks]]; a page's property: is such a link. Read ${WIKI}/AGENTS.md and ${WIKI}/projects/str/AGENTS.md first and follow them, including str's worked examples and calibration note. Any of these files you have ingested before is a conversation whose guest has since replied — read the existing page and update it rather than creating a second one. Do not edit ${WIKI}/index.md or any page marked generated_by: wiki-index; wiki index rebuilds them." \
+  # A round with nothing left to ingest is a repair round: the turn gets only
+  # the problems.
+  repair=""
+  [ -n "$PROBLEMS" ] && repair="Before anything else, repair these problems the wiki's checks found on str's pages after your last round, reading each page and rewriting it whole and well-formed: ${PROBLEMS//$'\n'/; }. "
+  if [ "$before" -eq 0 ]; then
+    work="There are no new files to process this round."
+  else
+    work="Process exactly these files and no others: ${files%, }."
+  fi
+  turn "${repair}Use the wiki-ingest skill. Its vault is the local staging directory ${CVAULT}, which holds only the raw sources and .manifest.json: record every file you process in that manifest, including ones that yield no page. ${work} The pages do NOT go in ${CVAULT}. They live in the owner's wiki at ${WIKI} on the owner's Mac, and you read and write them only with plow_read_file and plow_write_file: property hubs under ${WIKI}/projects/str/properties/, operations pages under ${WIKI}/projects/str/operations/, standing roles in ${WIKI}/entities/people/key-people.md. Link pages as markdown from the wiki's root, [Lake House](/projects/str/properties/lake-house.md), never [[wikilinks]]; a page's property: is such a link. Read ${WIKI}/AGENTS.md and ${WIKI}/projects/str/AGENTS.md first and follow them, including str's worked examples and calibration note. Any of these files you have ingested before is a conversation whose guest has since replied — read the existing page and update it rather than creating a second one. Do not edit ${WIKI}/index.md or any page marked generated_by: wiki-index; wiki index rebuilds them. Copy every sources: URL character for character from the raw file's own sources: line; never retype one." \
     > "/tmp/ingest-round-$round.log" 2>&1
   rc=$?
   # A failed turn stops the run. Acknowledging it and looping meant a retry
@@ -263,11 +309,18 @@ while :; do
 
   refresh_scope
   after=$(printf '%s\n' "$SCOPE" | grep -c .)
-  echo "ingest-all: round $round done — $after remaining"
+  previous="$PROBLEMS"
+  if ! PROBLEMS="$(wiki_problems)"; then
+    echo "ingest-all: FATAL — could not check the wiki after round $round." >&2
+    exit 1
+  fi
+  echo "ingest-all: round $round done — $after remaining, $(printf '%s' "$PROBLEMS" | grep -c .) problem(s)"
+  [ -n "$PROBLEMS" ] && printf '%s\n' "$PROBLEMS"
 
   # A round that advances nothing is the failure mode this script exists to
-  # catch: without it, the loop would spin forever reporting success.
-  if [ "$after" -eq "$before" ]; then
+  # catch: without it, the loop would spin forever reporting success. A repair
+  # round advances by changing what the checks find.
+  if [ "$after" -eq "$before" ] && [ "$PROBLEMS" = "$previous" ]; then
     stalls=$((stalls + 1))
     echo "ingest-all: WARNING round $round recorded no new sources (stall $stalls/2) — see /tmp/ingest-round-$round.log"
     [ "$stalls" -ge 2 ] && {
