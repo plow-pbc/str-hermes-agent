@@ -250,7 +250,12 @@ MAX_ROUNDS=$(( (TOTAL_SCOPE / BATCH) * 2 + 5 ))
 
 round=0
 stalls=0
-PROBLEMS=""
+# Before the first round too: damage already on the wiki gets a repair round
+# whether or not anything new arrived tonight.
+if ! PROBLEMS="$(wiki_problems)"; then
+  echo "ingest-all: FATAL — could not check the wiki before round 1." >&2
+  exit 1
+fi
 while :; do
   refresh_scope
   # Straight from $SCOPE, which refresh_scope just set. It used to round-trip

@@ -33,7 +33,8 @@ def night(tmp_path):
     _stub(bin_dir / "wiki-provenance", 'echo "${PROVENANCE_SAYS:-}"; exit "${PROVENANCE_RC:-0}"')
     _stub(bin_dir / "plow_relay.py",
           'case "$*" in *" index") exit "${INDEX_RC:-0}";; *" validate --writer str") exit "${VALIDATE_RC:-0}";;'
-          ' *snapshot*) exit "${SNAPSHOT_RC:-0}";; *restore*) exit "${RESTORE_RC:-0}";; esac')
+          ' *"snapshot --push"*) exit "${PUSH_RC:-0}";; *snapshot*) exit "${SNAPSHOT_RC:-0}";;'
+          ' *restore*) exit "${RESTORE_RC:-0}";; esac')
     path_dir = tmp_path / "path"
     path_dir.mkdir()
     _stub(path_dir / "hermes", 'printf "%s\\n" "${@: -1}"')  # the digest turn prints its prompt
@@ -61,15 +62,18 @@ FRONT = [
     "wiki-provenance {vault} ~/Plow/wiki",
     "plow_relay.py run -- wiki validate --writer str",
 ]
-SNAPSHOT = ["plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
+COMMIT = "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki snapshot --author str"
+SNAPSHOT = [COMMIT, "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
             " wiki snapshot --push --author str"]
 ROLLBACK = ["plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki restore --writer str",
             "plow_relay.py run --write ~/Plow/wiki -- wiki index"]
 
 NIGHTS = [
     ("a clean night", {}, "'ok'", SNAPSHOT),
-    ("a Mac that did not answer the snapshot", {"SNAPSHOT_RC": 2},
-     "wiki snapshot could not run: the owner's Mac did not answer; see ", SNAPSHOT),
+    ("a push that failed", {"PUSH_RC": 1}, "wiki push FAILED; see ", SNAPSHOT),
+    ("a snapshot that could not commit", {"SNAPSHOT_RC": 2},
+     "rolled back: wiki snapshot could not run: the owner's Mac did not answer; see ",
+     [COMMIT] + ROLLBACK),
     ("a failed ingest", {"INGEST_RC": 1}, "rolled back: ingest FAILED; see ", ROLLBACK),
     ("invalid pages", {"VALIDATE_RC": 1}, "rolled back: wiki validation FAILED; see ", ROLLBACK),
     ("an index that refused, here and again after restore", {"INDEX_RC": 1},
@@ -94,8 +98,10 @@ def test_only_a_night_that_passes_every_check_reaches_history(night, case, rcs, 
     assert status in result.stdout, result.stdout
     assert calls[-1].startswith("hermes chat -Q -q Use the wiki-digest skill")
     assert calls[:-1] == [c.format(vault=vault) for c in FRONT] + tail
+    # Only once the pages are back: a manifest that forgot pages still on the
+    # wiki re-ingests them into those pages.
     rolled_back = (vault / ".manifest.json").read_bytes() == manifest
-    assert rolled_back == (tail == ROLLBACK)
+    assert rolled_back == (tail[-2:] == ROLLBACK and "RESTORE_RC" not in rcs)
 
 
 def test_what_a_check_found_is_in_the_log_the_message_names_not_the_message(night, tmp_path):

@@ -29,8 +29,13 @@ for rel in re.findall(r"_raw/hostex/[\w-]+\.md", prompt):
     data["sources"]["/var/lib/hermes/repo/vault/" + rel] = {
         "content_hash": "sha256:" + hashlib.sha256((vault / rel).read_bytes()).hexdigest()}
 mf.write_text(json.dumps(data))
-if "repair these problems" in prompt and os.environ.get("REPAIRS") == "yes":
-    pathlib.Path(os.environ["DAMAGE"]).unlink()
+damage = pathlib.Path(os.environ["DAMAGE"])
+if "repair these problems" in prompt:
+    if os.environ.get("REPAIRS") == "yes":
+        damage.unlink()
+else:
+    damage.touch()  # an ingest turn that leaves a mistyped citation behind
+
 '''
 
 
@@ -59,8 +64,9 @@ def ingest(tmp_path):
     (vault / ".manifest.json").write_text('{"sources": {}}')
     prompts = tmp_path / "prompts"
 
-    def run(repairs: bool):
-        damage.touch()  # the first round's turn leaves a mistyped citation behind
+    def run(repairs: bool, already_damaged: bool = False):
+        if already_damaged:
+            damage.touch()
         env = {**os.environ, "HERMES_HOME": str(home), "VAULT_DIR": str(vault),
                "PROMPTS": str(prompts), "DAMAGE": str(damage),
                "REPAIRS": "yes" if repairs else "no", "PATH": f"{path_dir}:{os.environ['PATH']}"}
@@ -80,6 +86,17 @@ def test_a_damaged_page_is_named_to_the_next_round_and_repaired(ingest):
     assert "hvac: cites 20-8044, which the manifest never recorded" in prompts[1]
     assert "There are no new files to process this round." in prompts[1]
     assert "manifest covers everything in scope" in result.stdout
+
+
+def test_damage_already_on_the_wiki_gets_a_repair_round_with_nothing_new(ingest, tmp_path):
+    """Damage from before tonight -- a night that predates these checks -- is
+    repaired too, not only damage tonight's turn caused."""
+    vault = tmp_path / "home" / "repo" / "vault"
+    (vault / "_raw" / "hostex" / "20-80f4.md").unlink()
+    result, prompts = ingest(repairs=True, already_damaged=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(prompts) == 1
+    assert prompts[0].startswith("Before anything else, repair these problems")
 
 
 def test_damage_the_turn_never_repairs_fails_the_run(ingest):

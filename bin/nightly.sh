@@ -94,14 +94,15 @@ MANIFEST="$VAULT/.manifest.json"
 BEFORE="$(mktemp)"
 cp -p "$MANIFEST" "$BEFORE" || { notify "Wiki nightly FAILED: cannot back up $MANIFEST. The wiki is unchanged."; exit 1; }
 
-# Undo the night. A restore that itself fails is said so: the pages it would
-# have reverted are still on the wiki, unsnapshotted.
+# Undo the night. The manifest goes back only once the pages have: a manifest
+# that forgot pages still on the wiki is the double-append the manifest exists
+# to prevent. A restore that fails is said so, and tomorrow's checks retry it.
 roll_back() {
   local why="$STATUS"
   STATUS=""
   checked "wiki restore" "$RELAY" run --write "$WIKI" --write "$WIKI.git" -- wiki restore --writer str
+  [ -z "$STATUS" ] && cp -p "$BEFORE" "$MANIFEST"
   checked "wiki index" "$RELAY" run --write "$WIKI" -- wiki index
-  cp -p "$BEFORE" "$MANIFEST"
   STATUS="rolled back: ${why}${STATUS:+rollback incomplete: $STATUS}"
 }
 
@@ -130,6 +131,11 @@ fi
 reconcile
 # Only str's roots: a page another writer owns is that writer's to fix (wiki.toml).
 checked "wiki validation" "$RELAY" run -- wiki validate --writer str
+# The commit is the night's; the push is not. A night that failed to commit is
+# undone like any other failure: left in place, a later restore would revert its
+# pages while the manifest still recorded them. A failed push is only noted --
+# the next snapshot sends commits left behind origin.
+[ -z "$STATUS" ] && checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" -- wiki snapshot --author str
 if [ -n "$STATUS" ]; then
   roll_back
 else
@@ -137,9 +143,8 @@ else
   # corpus on one disk with no other copy is the exposure promote-vault was
   # written to close. `--push` scans what leaves for credentials, and refuses
   # loudly when the history repo has no origin, so a missing remote is in every
-  # digest, not a silent single copy. Only a night that passed every check gets
-  # here, so the last snapshot is always one restore can trust.
-  checked "wiki snapshot" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
+  # digest, not a silent single copy.
+  checked "wiki push" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
 fi
 rm -f "$BEFORE"
 
