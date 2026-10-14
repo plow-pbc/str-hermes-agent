@@ -28,16 +28,19 @@ def night(tmp_path):
     bin_dir.mkdir()
     shutil.copy(REPO / "bin" / "nightly.sh", bin_dir / "nightly.sh")
     _stub(bin_dir / "hostex-raw", 'exit "${FETCH_RC:-0}"')
-    _stub(bin_dir / "ingest-all", 'exit "${INGEST_RC:-0}"')
+    # A night's ingest rewrites the manifest; rollback must undo exactly that.
+    _stub(bin_dir / "ingest-all", 'echo tonight >> "$1/.manifest.json"; exit "${INGEST_RC:-0}"')
     _stub(bin_dir / "wiki-provenance", 'echo "${PROVENANCE_SAYS:-}"; exit "${PROVENANCE_RC:-0}"')
     _stub(bin_dir / "plow_relay.py",
           'case "$*" in *" index") exit "${INDEX_RC:-0}";; *" validate --writer str") exit "${VALIDATE_RC:-0}";;'
-          ' *snapshot*) exit "${SNAPSHOT_RC:-0}";; esac')
+          ' *"snapshot --push"*) exit "${PUSH_RC:-0}";; *snapshot*) exit "${SNAPSHOT_RC:-0}";;'
+          ' *restore*) exit "${RESTORE_RC:-0}";; esac')
     path_dir = tmp_path / "path"
     path_dir.mkdir()
     _stub(path_dir / "hermes", 'printf "%s\\n" "${@: -1}"')  # the digest turn prints its prompt
     vault = tmp_path / "home" / "repo" / "vault"
     (vault / "_raw" / "hostex").mkdir(parents=True)
+    (vault / ".manifest.json").write_bytes(b'{"sources": {}}\n')
     (tmp_path / "home" / "logs").mkdir()
     calls = tmp_path / "calls"
 
@@ -52,32 +55,53 @@ def night(tmp_path):
     return run, vault
 
 
+FRONT = [
+    "hostex-raw --vault {vault}",
+    "ingest-all {vault} ~/Plow/wiki",
+    "plow_relay.py run --write ~/Plow/wiki -- wiki index",
+    "wiki-provenance {vault} ~/Plow/wiki",
+    "plow_relay.py run -- wiki validate --writer str",
+]
+COMMIT = "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki snapshot --author str"
+SNAPSHOT = [COMMIT, "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
+            " wiki snapshot --push --author str"]
+ROLLBACK = ["plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki restore --writer str",
+            "plow_relay.py run --write ~/Plow/wiki -- wiki index"]
+
 NIGHTS = [
-    ("a clean night", {}, "'ok'"),
-    ("invalid pages", {"VALIDATE_RC": 1}, "wiki validation FAILED; see "),
-    ("an index that refused", {"INDEX_RC": 1}, "wiki index FAILED; see "),
-    ("a provenance defect", {"PROVENANCE_RC": 1}, "provenance FAILED; see "),
-    ("a Mac that did not answer the snapshot", {"SNAPSHOT_RC": 2},
-     "wiki snapshot could not run: the owner's Mac did not answer; see "),
+    ("a clean night", {}, "'ok'", SNAPSHOT),
+    ("a push that failed", {"PUSH_RC": 1}, "wiki push FAILED; see ", SNAPSHOT),
+    ("a snapshot that could not commit", {"SNAPSHOT_RC": 2},
+     "rolled back: wiki snapshot could not run: the owner's Mac did not answer; see ",
+     [COMMIT] + ROLLBACK),
+    ("a failed ingest", {"INGEST_RC": 1}, "rolled back: ingest FAILED; see ", ROLLBACK),
+    ("invalid pages", {"VALIDATE_RC": 1}, "rolled back: wiki validation FAILED; see ", ROLLBACK),
+    ("an index that refused, here and again after restore", {"INDEX_RC": 1},
+     "rolled back: wiki index FAILED; rollback incomplete: wiki index FAILED; see ", ROLLBACK),
+    ("a provenance defect", {"PROVENANCE_RC": 1}, "rolled back: provenance FAILED; see ", ROLLBACK),
+    ("a Mac that did not answer validation", {"VALIDATE_RC": 2},
+     "rolled back: wiki validation could not run: the owner's Mac did not answer; see ", ROLLBACK),
+    ("a restore that failed", {"VALIDATE_RC": 1, "RESTORE_RC": 2},
+     "rolled back: wiki validation FAILED; rollback incomplete: wiki restore could not run", ROLLBACK),
 ]
 
 
-@pytest.mark.parametrize(("case", "rcs", "status"), NIGHTS, ids=[n[0] for n in NIGHTS])
-def test_the_digest_carries_what_every_post_ingest_step_found(night, case, rcs, status):
+@pytest.mark.parametrize(("case", "rcs", "status", "tail"), NIGHTS, ids=[n[0] for n in NIGHTS])
+def test_only_a_night_that_passes_every_check_reaches_history(night, case, rcs, status, tail):
+    """Any failure from ingest onward restores str's pages and the manifest
+    instead of snapshotting them, and the digest -- the liveness signal --
+    still goes out saying which."""
     run, vault = night
+    manifest = (vault / ".manifest.json").read_bytes()
     result, calls = run(**rcs)
     assert result.returncode == 0, result.stderr
     assert status in result.stdout, result.stdout
     assert calls[-1].startswith("hermes chat -Q -q Use the wiki-digest skill")
-    assert calls[:-1] == [
-        f"hostex-raw --vault {vault}",
-        f"ingest-all {vault} ~/Plow/wiki",
-        "plow_relay.py run --write ~/Plow/wiki -- wiki index",
-        f"wiki-provenance {vault} ~/Plow/wiki",
-        "plow_relay.py run -- wiki validate --writer str",
-        "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
-        " wiki snapshot --push --author str",
-    ]
+    assert calls[:-1] == [c.format(vault=vault) for c in FRONT] + tail
+    # Only once the pages are back: a manifest that forgot pages still on the
+    # wiki re-ingests them into those pages.
+    rolled_back = (vault / ".manifest.json").read_bytes() == manifest
+    assert rolled_back == (tail[-2:] == ROLLBACK and "RESTORE_RC" not in rcs)
 
 
 def test_what_a_check_found_is_in_the_log_the_message_names_not_the_message(night, tmp_path):
@@ -109,17 +133,19 @@ def test_a_failed_fetch_says_so_and_stops(night):
     assert [c.split()[0] for c in calls] == ["hostex-raw"]
 
 
-def test_a_failed_ingest_names_any_page_it_left_unrecorded(night):
-    """A turn that wrote a page and then failed leaves a citation the manifest
-    never recorded. The index is regenerated first, or provenance reads one
-    that cannot list tonight's page."""
+def test_a_rollback_always_lands_on_the_manifest_of_the_last_snapshot(night):
+    """Pages and manifest go back as a pair. A night whose restore failed keeps
+    its manifest (its pages are still on the wiki); the next failing night whose
+    restore works returns both to the last snapshot -- not to that night's start,
+    which would leave the first night's records describing pages gone from the wiki."""
     run, vault = night
-    result, calls = run(INGEST_RC=1, PROVENANCE_RC=1)
-    assert result.returncode == 1
-    assert "FAILED at ingest" in result.stdout
-    assert "provenance FAILED; See " in result.stdout
-    assert calls[1:] == [
-        f"ingest-all {vault} ~/Plow/wiki",
-        "plow_relay.py run --write ~/Plow/wiki -- wiki index",
-        f"wiki-provenance {vault} ~/Plow/wiki",
-    ]
+    manifest = vault / ".manifest.json"
+    snapshotted = manifest.read_bytes()
+    run(VALIDATE_RC=1, RESTORE_RC=2)
+    assert manifest.read_bytes() == snapshotted + b"tonight\n"
+    run(VALIDATE_RC=1)
+    assert manifest.read_bytes() == snapshotted
+    run()
+    clean = manifest.read_bytes()
+    run(PROVENANCE_RC=1)
+    assert manifest.read_bytes() == clean

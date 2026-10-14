@@ -66,12 +66,12 @@ def run_ingest(tmp_path):
     def run(vault_path: Path, turn_exit: int = 0):
         # docker: the host branch of ingest-all reaches the container through
         # `docker compose run` now, so that is the boundary a stub stands at.
-        # ingest-all no longer spawns a container to read HERMES_HOME back off
-        # the image, so there is no non-turn call to special-case here: every
-        # invocation the stub sees is a turn, and turn_exit applies to all of
-        # them.
+        # The one non-turn call is `compose exec -T hermes`, the wiki's checks
+        # reaching the live container; they find nothing here. Every other
+        # invocation is a turn, and turn_exit applies to all of them.
         (stub / "docker").write_text(
             '#!/bin/sh\n'
+            'case "$*" in *" exec -T hermes "*) exit 0;; esac\n'
             f'echo "$@" >> {fed}\n'
             f'exit {turn_exit}\n'
         )
