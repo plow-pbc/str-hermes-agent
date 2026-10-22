@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Detect the longest-waiting Hostex conversation with unread guest messages.
 
-Prints a prompt for a Hermes cron agent turn — a new guest message, or a
-reminder that a draft the owners were shown is still unsent past its veto
-window — or the wake-gate sentinel when there is nothing to say. Detection
-only: composes no reply, calls no model, sends nothing. See README § Inbound
-guest messages.
+Hands the owners' chat a turn — a new guest message, or a reminder that a draft
+the owners were shown is still unsent past its veto window — through the
+plow_chat plugin's wake inbox, so the draft is written in the session that
+holds what the owners already said about this guest. Detection only: composes
+no reply, calls no model, sends nothing. See README § Inbound guest messages.
 
 Probed against 479 live messages — and the newest-first invariant re-probed
 across all 366 conversations, 4,993 messages, once whole threads began
@@ -26,6 +26,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api
@@ -33,6 +34,9 @@ import str_env
 
 PAGE = 100
 SILENT = '{"wakeAgent": false}'
+# The plugin drains its wake inbox every few seconds; a wake still here after
+# this long means nothing is reading it, and the guest it carries is unheard.
+WAKE_STALE_SECONDS = 600
 
 PROMPT = """\
 New guest message on Hostex.
@@ -97,17 +101,13 @@ Conversation: {conversation_id}
 
 Keep your response to one line.
 
-Find that draft and act on it — do not compose a new one; the owners let
-particular words stand. This turn is a new session and does not carry the
-owners' thread with it: recall past conversations with `session_search` to find
-the delivery that carried this draft and whatever the owners said after it. If
-that search returns nothing you can read, send the guest nothing and say so.
-An owner objection that names no draft objects to every draft in flight, this
+Find that draft in this chat and act on it — do not compose a new one; the
+owners let particular words stand. An owner objection that names no draft objects to every draft in flight, this
 one included: a bare "stop" in that thread stops this send, and counts as an
 owner having objected in everything below. The owners are asked to name the id
 and need not have.
 If you did not announce this draft under the veto window, send the guest
-nothing and respond with exactly [SILENT].
+nothing and say nothing.
 If no owner objected to, edited, or questioned it, send exactly those words to
 the conversation id above: the window has closed and the silence is the
 approval you said it would be. If an owner approved it, send what they
@@ -157,27 +157,6 @@ def overdue(conversations: list[dict], cursor: dict[str, dict],
 
 
 VETO = "sending in 30 minutes unless an owner says stop"
-
-
-def announced_without_veto(home: pathlib.Path, cid: str) -> bool:
-    """True when the newest announcement of `cid` is on record and was not a
-    veto-window draft — the one kind with anything left to do when its window
-    closes. An approval-path draft waits on an owner and "No reply needed"
-    waits on nothing; waking the agent for either spent a turn searching for a
-    draft that does not exist.
-
-    Read from Hermes' own run record, `cron/output/<job>/<time>.md`: a
-    `## Prompt` carrying this script's report and a `## Response` carrying what
-    the owners received; Hermes keeps 50 per job, hours at a two-minute tick.
-    A filter, not the gate: no record (a changed layout) still wakes the
-    agent, and a guest quoting the veto line only buys a wake in which
-    FOLLOWUP has the agent check the path itself.
-    """
-    for run in sorted(home.glob("cron/output/*/*.md"), key=lambda f: f.name, reverse=True):
-        prompt, _, response = run.read_text().rpartition("## Response")
-        if PROMPT.splitlines()[0] in prompt and f"Conversation: {cid}\n" in prompt:
-            return VETO not in " ".join(response.split())
-    return False
 
 
 def conversation_thread(messages: list[dict]) -> list[dict]:
@@ -269,6 +248,33 @@ def message_text(message: dict) -> str:
     the type keeps them visible instead of rendering a blank line.
     """
     return one_line(message["content"]) or f"({message['display_type']})"
+
+
+def require_drained(home: pathlib.Path) -> None:
+    """Raise — which the scheduler reports to the operator — while an earlier
+    wake sits unread: nothing is serving the owners' chat, and every guest from
+    here on would be recorded as announced and never heard."""
+    inbox = home / "plow_chat_wakes"
+    stale = [w.name for w in inbox.glob("*.json") if time.time() - w.stat().st_mtime > WAKE_STALE_SECONDS]
+    if stale:
+        raise RuntimeError(f"hostex-poll: undrained wakes in {inbox}: {stale}")
+
+
+def hand_to_owners(home: pathlib.Path, chat: str, text: str) -> None:
+    """Write `text` as a turn for the owners' chat into the plugin's wake inbox,
+    renamed into place so the plugin never reads it half-written."""
+    inbox = home / "plow_chat_wakes"
+    inbox.mkdir(exist_ok=True)
+    name = f"hostex-{time.time_ns()}"
+    tmp = inbox / f"{name}.tmp"
+    tmp.write_text(json.dumps({"chat": chat, "from": "Hostex", "text": text}))
+    os.replace(tmp, inbox / f"{name}.json")
+
+
+def drafts_chat() -> str:
+    """The chat guest drafts go to: the owners' group, else the owner's own chat."""
+    env = {**os.environ, **str_env.read_setup_env(hermes_home())}
+    return str_env.approval_group(env) or env["PLOW_HOME_CHANNEL"]
 
 
 def hermes_home() -> pathlib.Path:
@@ -391,13 +397,14 @@ def read_thread(cid: str, token: str) -> list[dict]:
     return thread
 
 
-def run(token: str, cursor_file: pathlib.Path,
+def run(token: str, cursor_file: pathlib.Path, chat: str,
         now: datetime.datetime | None = None) -> str:
-    """Emit a prompt for the longest-waiting guest, a reminder that a veto
-    window has closed, or the wake-gate sentinel."""
+    """Hand `chat` a turn for the longest-waiting guest or a reminder that a
+    veto window has closed; return it, or the wake-gate sentinel."""
     # Keyed on the file, not the loaded dict: an account with no conversations
     # writes {} and would re-adopt every tick, swallowing the first real one.
     cold_start = not cursor_file.exists()
+    require_drained(cursor_file.parent)
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cursor = load_cursor(cursor_file)
     conversations = list_conversations(token)
@@ -407,8 +414,8 @@ def run(token: str, cursor_file: pathlib.Path,
         for conversation in conversations:
             record_seen(cursor, conversation["id"], conversation["last_message_at"])
     else:
-        # One conversation per run: cron injects a single agent turn, so a
-        # second guest here would share its attention.
+        # One conversation per run: a second guest in the same turn would
+        # share its attention.
         for conversation in pending_conversations(conversations, cursor):
             cid = conversation["id"]
             previous = cursor.get(cid, {}).get("seen", "")
@@ -432,8 +439,8 @@ def run(token: str, cursor_file: pathlib.Path,
                 break
 
     # Only when the tick has no new message to carry: a guest who just spoke
-    # and one who has been waiting thirty minutes both want the single turn
-    # cron injects, and the reminder is only two minutes behind.
+    # and one who has been waiting thirty minutes both want this tick's single
+    # turn, and the reminder is only two minutes behind.
     if output is SILENT:
         for conversation in overdue(conversations, cursor, now):
             cid = conversation["id"]
@@ -443,21 +450,21 @@ def run(token: str, cursor_file: pathlib.Path,
             # closed this wait, and a reminder about it would re-raise a
             # conversation that is already handled.
             cursor[cid]["owed"] = None
-            if (speaker is not None and speaker["sender_role"] != "host"
-                    and not announced_without_veto(cursor_file.parent, cid)):
+            if speaker is not None and speaker["sender_role"] != "host":
                 output = render(FOLLOWUP, conversation, thread)
                 break
 
-    # Emit before committing: if the process dies between the two, the next
-    # tick re-announces. A duplicate costs a glance, a swallowed one costs
+    # Hand over before committing: if the process dies between the two, the
+    # next tick re-announces. A duplicate costs a glance, a swallowed one costs
     # a guest their answer.
-    print(output, flush=True)
+    if output is not SILENT:
+        hand_to_owners(cursor_file.parent, chat, output)
     save_cursor(cursor_file, cursor)
     return output
 
 
 def main() -> None:
-    run(read_token(), cursor_path())
+    run(read_token(), cursor_path(), drafts_chat())
 
 
 if __name__ == "__main__":

@@ -20,11 +20,12 @@ agent:
   # restore reproduces the behaviour the operator has been running with.
   verify_on_stop: false
 cron:
-  # The approval rules in bin/hostex-poll.py's prompt are written against a
-  # draft the answering turn can see. It cannot: a cron delivery runs in its own
+  # checkin-watch's report is written for a group that may answer it, and the
+  # answering turn cannot see it: a cron delivery runs in its own
   # session, which ends before the owner replies, so the reply arrives in the
   # group's session with no draft in it. Mirroring appends the delivered text
-  # there, which is the antecedent those rules already name.
+  # there. (Guest drafts need no mirror: hostex-poll hands the group the turn
+  # that writes them.)
   #
   # Scoped by the image to the job's origin conversation, so it changes nothing
   # for a job without one — every other job here is CLI-created with origin
@@ -113,8 +114,8 @@ platforms:
           decisions about the properties get made, so it is the right place to
           raise something that needs an owner's judgement.
 
-          Guest-reply drafts are delivered here, by a scheduled job, each
-          carrying a short draft id. Most arrive for approval; one that passed
+          Guest-reply drafts are written here, on turns a scheduled job hands
+          this thread, each carrying a short draft id. Most arrive for approval; one that passed
           the SOUL.md veto-window test (SOUL.md owns that rule — apply it as
           written there) instead arrives announced as "sending in 30 minutes
           unless an owner says stop", with the wiki bullets it relied on quoted
@@ -122,8 +123,8 @@ platforms:
           id — "stop", an edit, even a question — stops the send: answer in
           this thread, naming the draft id, so the later turn that would have
           sent it can see the objection, and treat an edit as a fresh draft on
-          the approval path. Each delivery is mirrored into this thread, so the
-          draft an owner is answering is above you — read it there.
+          the approval path. Every draft is in this thread, so the draft an
+          owner is answering is above you — read it there.
 
           In this thread, a reply directed at you approving, editing, or
           declining a draft is still directed at you however brief it is —

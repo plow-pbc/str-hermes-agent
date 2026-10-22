@@ -3,7 +3,7 @@
     {
       "name": "hostex-inbound",
       "script": "hostex-poll.py",
-      "no_agent": false,
+      "no_agent": true,
       "schedule": {
         "kind": "interval",
         "minutes": 2,
@@ -11,15 +11,8 @@
       },
       "enabled": true,
       "paused_at": null,
-      "deliver": "plow_chat:cht_owners_fixture",
-      "origin": {
-        "platform": "plow_chat",
-        "chat_id": "cht_owners_fixture",
-        "chat_name": null,
-        "thread_id": null,
-        "user_id": null
-      },
-      "failure_deliver": "plow_chat",
+      "deliver": "plow_chat",
+      "origin": null,
       "skill": null,
       "id": "job-hostex-inbound",
       "prompt": "(fixture prompt)"
