@@ -19,3 +19,21 @@ def read_setup_env(home) -> dict:
     home = pathlib.Path(home)
     return {k: v for path in (home / SETUP_ENV, home / ".env") if path.exists()
             for k, v in dotenv_values(path).items()}
+
+
+def groups(env) -> dict:
+    """PLOW_CHAT_GROUP_UIDS `uid=Label,...` as {label: uid}."""
+    pairs = (item.split("=", 1) for item in env.get("PLOW_CHAT_GROUP_UIDS", "").split(",") if "=" in item)
+    return {label.strip(): uid.strip() for uid, label in pairs}
+
+
+def approval_group(env) -> str | None:
+    """The owners' group's uid, or None when drafts go to the owner's own chat.
+    Named rather than pinned by id, so re-creating the group means relabelling
+    PLOW_CHAT_GROUP_UIDS and nothing else."""
+    label = env.get("PLOW_CHAT_APPROVAL_GROUP", "").strip()
+    if not label:
+        return None
+    if label not in groups(env):
+        raise SystemExit(f"PLOW_CHAT_APPROVAL_GROUP {label!r} names no group in PLOW_CHAT_GROUP_UIDS")
+    return groups(env)[label]

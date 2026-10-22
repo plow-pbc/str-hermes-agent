@@ -725,43 +725,30 @@ turns on. The wiki stays on our side of that line.
 
 ## Inbound guest messages
 
-Once enabled, `bin/hostex-poll.py` runs every two minutes, finds the guest
-who has been waiting longest, and hands that conversation to Hermes, which
-texts the owners' group what came in and what it would do next.
+Once enabled, `bin/hostex-poll.py` runs every two minutes as a no-agent cron
+job. It finds the guest who has been waiting longest and hands that
+conversation to the owners' chat as a turn, through the plow_chat plugin's
+wake inbox (`$HERMES_HOME/plow_chat_wakes/`). The draft is therefore written
+in the session that already holds what the owners said about this guest, and
+any draft still pending for them. A separate cron session once redrafted over
+a revision the owners had asked for, because it never saw it (#111).
 
 The script itself sends nothing — it composes no reply and has no messaging
-tool. The agent turn it feeds is *instructed* not to act, which is not the
-same as being unable to; see below.
+tool. The turn it hands over is *instructed* not to send before an owner
+approves, which is not the same as being unable to. Its prompt is
+`PROMPT`/`FOLLOWUP` in the script, so a deploy picks up any edit to it.
 
-That instruction is a positional argument to `hermes cron create`
-(`bin/register-jobs`), baked into the job at creation — not
-read from this file live. Editing it here changes nothing for a job that
-already exists, and register-jobs replaces a job only when its schedule,
-delivery target or script differ, so a redeploy cannot pick the edit up either. Updating the deployed job in place:
-
-```sh
-docker compose exec -T hermes hermes cron edit hostex-inbound --prompt "<new text>"
-```
-
-Verified against the live image: `hermes cron` has no `update` subcommand —
-`edit` is the one that carries `--prompt`, and it replaces the job's stored
-instruction without touching its cursor or origin. Until that runs, the
-deployed job is still executing whatever text it was created with, and if
-that text forbids messaging the guest unconditionally, the follow-up in
-`bin/hostex-poll.py`'s reminder prompt cannot send regardless of what ships
-here.
-
-- One conversation per tick, since cron injects a single agent turn. The rest
+- One conversation per tick, so each guest gets a turn to themselves. The rest
   wait for later ticks, oldest first.
 - It surfaces unless a person on the owner side had the last word. If an owner
   answered between ticks, nobody is waiting. Hostex's own scheduled templates
   post on that side too and do not count as an answer; equally, a template
   arriving after a thread was announced does not re-announce it. Both stay in
   the transcript as context.
-- Nothing new prints `{"wakeAgent": false}`, Hermes' wake gate, so a quiet
-  tick costs no tokens.
-- The prompt is emitted before the cursor is written, so a crash re-announces
-  rather than swallows.
+- A quiet tick hands over nothing and costs no tokens.
+- The turn is handed over before the cursor is written, so a crash re-announces
+  rather than swallows. A wake left undrained for ten minutes fails every tick
+  until something reads the inbox.
 - The prompt lists no capabilities. It asks for a next step "with the tools
   you have right now", so suggestions track the live tool surface — lock
   suggestions appear once Seam is enabled (#21), with no change here.
@@ -773,14 +760,14 @@ State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id
 it announced a wait on that conversation that it still owes the owners a
 follow-up on — null when it owes none. The veto window is measured from
 `owed`, so a draft announced late off a backlog still gets its full thirty
-minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text; Hermes' own run records (`cron/output/<job>/`, last 50 kept) do, prompt transcript and response both, and the follow-up check reads them. A first run adopts what exists and
+minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text. Every announced wait comes back when its window closes, and the agent, which can see its own draft, decides whether it was a veto-window send. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
 history all reads as new. **Adopting is silent about anyone waiting** — a
 guest whose message is outstanding when the next tick runs is marked seen and
 never announced, so deal with them before deleting the cursor file.
 
-Any failure exits non-zero with the cursor untouched, and Hermes turns that
-into a "Script Error" prompt, so the owners are told. It repeats every two minutes
+Any failure exits non-zero with the cursor untouched, and Hermes alerts the
+operator's chat. It repeats every two minutes
 until fixed — `cron pause hostex-inbound` stops the paging, `cron resume`
 restarts it. An unrenderable message blocks later guests deliberately: it
 means the API is not the shape this code believes, and guessing past that is
@@ -823,7 +810,7 @@ gateway start and `up -d` alone is a no-op once the mount has landed.
 it serving — hence the wait.
 
 **3** creates the job if it is missing, replaces it (remove, then create) when
-its delivery target moved, and primes the cursor only if there isn't one. It
+its delivery target or no-agent mode moved, and primes the cursor only if there isn't one. It
 also runs at every boot and at the end of str-setup. It never creates a second
 job, and that matters: the one path that could produce one is the one where the
 first is *already broken*, pointing at a retired chat UID. Both

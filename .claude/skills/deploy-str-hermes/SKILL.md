@@ -228,22 +228,22 @@ sessions](../../../README.md#shared-group-session) — after step 4, because
 before it the next message just opens another one. It is its own gate: with
 nothing per-member left it ends nothing and prints `0`.
 
-## 4.6 Retarget the inbound job, once
+## 4.6 Confirm guest messages reach the owners' chat
 
-A `hostex-inbound` job created before guest-reply drafts moved to the owners'
-group still delivers to the private chat, and one created before the delivery
-mirror has no `origin`, so its drafts never reach the session that approves
-them. register-jobs replaces the first at boot, but it leaves a job whose
-schedule, delivery and script match alone, so the second survives a redeploy.
-`origin` is not in `cron list`, so an inspection cannot rule it out.
+`hostex-inbound` is a no-agent job: it hands each guest message to the owners'
+chat through the plow_chat plugin's wake inbox (`$HERMES_HOME/plow_chat_wakes/`),
+and the chat's own session writes the draft (#111). register-jobs replaces an
+older agent-drafting job at boot. Confirm both halves:
 
 ```sh
-docker compose exec -T hermes hermes cron list
+docker compose exec -T hermes hermes cron list                       # hostex-inbound: no-agent, Deliver: plow_chat
+docker compose exec -T hermes ls /var/lib/hermes/plow_chat_wakes/    # empty, or only files seconds old
 ```
 
-No `hostex-inbound` job — skip. A job predating either change is recreated, not
-diagnosed; work through README § [One-time: point an existing job at the owners'
-group](../../../README.md#owners-group-migration), which owns this path.
+A `*.json` that stays put means the image's plugin predates the inbox. The
+poller fails every tick after ten minutes and alerts the operator, so this can't
+stay silent, but nobody is hearing guests until it's fixed: roll back to the
+previous image.
 
 ## 4.65 Retarget the nightly digest and failure alerts, once
 
@@ -266,28 +266,15 @@ ingests into the wiki:
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
-Edit the group jobs in place rather than recreating them. register-jobs primes a
-cold cursor when it creates `hostex-inbound`, and an edit keeps the job, cursor
-included:
+Edit `checkin-watch` in place rather than recreating it:
 
 ```sh
-docker compose exec -T -u hermes hermes hermes cron edit hostex-inbound --failure-deliver plow_chat
 docker compose exec -T -u hermes hermes hermes cron edit checkin-watch --failure-deliver plow_chat
 ```
 
 Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`
 under `wiki-nightly`, and after its next run confirm the scheduler line
 `Job 'wiki-nightly': delivered to plow_chat:…` names the home chat.
-
-## 4.66 Update the hostex-inbound wrapper instruction, once
-
-Same drift as 4.6's `origin` and the `--failure-deliver` edit just above:
-`bin/register-jobs`' wrapper text for `hostex-inbound` is a positional argument baked into
-the job at creation, not read live, so a commit that changes it — like this
-one — does not reach a job that already exists. README § [Inbound guest
-messages](../../../README.md#inbound-guest-messages) has the verified
-`cron edit … --prompt` command and why `edit`, not recreate, is the right one
-here too.
 
 ## 4.7 Register the host-side promote, once
 
