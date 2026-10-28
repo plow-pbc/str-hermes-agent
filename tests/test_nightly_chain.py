@@ -149,3 +149,17 @@ def test_a_rollback_always_lands_on_the_manifest_of_the_last_snapshot(night):
     clean = manifest.read_bytes()
     run(PROVENANCE_RC=1)
     assert manifest.read_bytes() == clean
+
+
+def test_the_digest_covers_only_strs_pages_and_writes_nothing(night):
+    """The wiki is the owner's common one: other writers' roots -- an investor
+    pipeline among them -- sit beside str's, and the skill digests whatever it
+    is pointed at and then appends to log.md. The owners' digest is str's
+    pages, and this turn only reads."""
+    run, _ = night
+    result, _ = run()
+    prompt = result.stdout
+    for root in ("~/Plow/wiki/projects/str/properties/", "~/Plow/wiki/projects/str/operations/"):
+        assert root in prompt, prompt
+    assert "Do not read, list or mention any other page" in prompt, prompt
+    assert "skip the skill's log.md append" in prompt, prompt
