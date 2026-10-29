@@ -133,11 +133,16 @@ def test_ready_waits_for_lock_online():
 def test_hold_suppresses_everything_but_escalation():
     led = ledger(woke={"cleaner_coming": T0}, hold=True)
     assert due(S, sig(now=T0 + 11 * MIN, code="live"), led) == ["escalate:cleaner_coming"]
+    held_clean = ledger(clean_by="Jane", hold=True)
+    assert due(S, sig(code="live"), held_clean) == []
+    assert due(S, sig(code="live"), CLEAN_LEDGER) == ["ready"]  # would fire without the hold
 
 
 def test_woke_without_sent_escalates_once():
     led = ledger(woke={"ready": T0, "escalate:ready": T0 + 10 * MIN})
-    assert "escalate:ready" not in due(S, sig(now=T0 + 30 * MIN), led)
+    got = due(S, sig(now=T0 + 30 * MIN), led)
+    assert "escalate:ready" not in got
+    assert not [n for n in got if n.startswith("escalate:escalate:")]
 
 
 def test_ready_can_fire_before_checkin_time():  # readiness IS the early check-in
