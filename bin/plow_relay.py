@@ -28,7 +28,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-# latch exec's own ceiling.
+# latch exec's own ceiling, and every call's: a Mac gone quiet mid-call is exit 2,
+# never a nightly that hangs.
 TIMEOUT_S = 600
 
 
@@ -38,7 +39,10 @@ class RelayError(RuntimeError):
 
 def latch(*args: str) -> dict:
     """One latch call's JSON, or RelayError carrying latch's own error code."""
-    done = subprocess.run(["latch", *args], capture_output=True, text=True)
+    try:
+        done = subprocess.run(["latch", *args], capture_output=True, text=True, timeout=TIMEOUT_S + 30)
+    except subprocess.TimeoutExpired:
+        raise RelayError(f"latch {args[0]}: no answer in {TIMEOUT_S + 30}s") from None
     if done.returncode == 0:
         return json.loads(done.stdout)
     try:

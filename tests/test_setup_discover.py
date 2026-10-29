@@ -47,20 +47,24 @@ def test_command_prints_choices(tmp_path, capsys, fake_http, name, args, env, pa
     assert json.loads(capsys.readouterr().out) == expected
 
 
-@pytest.mark.parametrize("status,configured", [
-    ({"hosts": [{"name": "cloud", "online": False}, {"name": "mba", "online": True}]}, True),
-    ({"hosts": [{"name": "mba", "online": False}]}, False),
-    ({"hosts": []}, False),
-    (discover.plow_relay.RelayError("latch status: not_logged_in: no login here"), False),
+BOTH = {"hosts": [{"name": "cloud", "online": True}, {"name": "mba", "online": False}]}
+
+
+@pytest.mark.parametrize("status,env,configured", [
+    (BOTH, {}, True),
+    (BOTH, {"LATCH_HOST": "cloud"}, True),
+    (BOTH, {"LATCH_HOST": "mba"}, False),  # the Mac is the host latch reaches, and it is offline
+    ({"hosts": []}, {}, False),
+    (discover.plow_relay.RelayError("latch status: not_logged_in: no login here"), {}, False),
 ])
-def test_latch_is_configured_when_a_host_is_online(tmp_path, capsys, monkeypatch, status, configured):
+def test_latch_is_configured_when_its_host_is_online(tmp_path, capsys, monkeypatch, status, env, configured):
     def latch(*args):
         assert args == ("status",)
         if isinstance(status, Exception):
             raise status
         return status
     monkeypatch.setattr(discover.plow_relay, "latch", latch)
-    assert run(tmp_path, ["latch"], {}, None) == 0
+    assert run(tmp_path, ["latch"], env, None) == 0
     assert json.loads(capsys.readouterr().out) == {"configured": configured}
 
 
