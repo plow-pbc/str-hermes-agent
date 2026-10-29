@@ -52,6 +52,19 @@ IMAGE_CLAIMS = [
      "/opt/plow/str/bin/register-jobs --boot", "str: not set up yet -- jobs wait until HOSTEX_TOKEN is set"),
     ("the relay client the nightly's wiki steps run through",
      "test -x /opt/plow/str/bin/plow_relay.py && echo present || echo missing", "present"),
+    ("the latch client, with the skill written from it",
+     "latch --version > /dev/null && grep -qx 'name: latch' /opt/hermes/skills/latch/SKILL.md && echo present",
+     "present"),
+    ("latch's login lives on the home volume", "echo $LATCH_STATE_DIR", "/var/lib/hermes/latch"),
+    ("latch-boot runs after plow-init and before the gateway",
+     "cd /etc/s6-overlay/s6-rc.d && test -e str-latch/dependencies.d/plow-init "
+     "&& test -e hermes-gateway/dependencies.d/str-latch && test -e user/contents.d/str-latch && echo ordered",
+     "ordered"),
+    ("latch-boot removes the old relay's MCP server plow-init wrote, and only it",
+     "h=$(mktemp -d); printf 'mcp_servers:\\n  plow: {url: x}\\n  hostex: {url: y}\\n' > $h/config.yaml; "
+     "HERMES_HOME=$h STR_ENV_DIR=$h /opt/plow/str/bin/latch-boot 2>/dev/null; "
+     "/opt/hermes/.venv/bin/python3 -c 'import sys, yaml; print(*yaml.safe_load(open(sys.argv[1]))[\"mcp_servers\"])' "
+     "$h/config.yaml", "hostex"),
     *((f"wiki skill {name}", *_present(f"/opt/hermes/skills/{name}/SKILL.md"))
       for name in ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest", "plow-wiki")),
     # plow-wiki requires it, and the manifest cache-check the ingest turn runs

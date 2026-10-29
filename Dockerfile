@@ -73,9 +73,24 @@ RUN set -eu; \
 # plow-wiki commit whose `wiki` CLI runs on the owner's Mac, so the skill never
 # describes a CLI the Mac does not have. The CLI itself is not installed here:
 # the wiki is on the Mac, and the container reaches it only over the relay.
-ARG PLOW_WIKI_SHA=de844bd3ef81adda8cf10b7fa8cd6023b21f6a74
+ARG PLOW_WIKI_SHA=142d546f5a72961d0aea9cae1c303a4d9ac10aca
 ADD https://raw.githubusercontent.com/plow-pbc/plow-wiki/${PLOW_WIKI_SHA}/skill.md /opt/hermes/skills/plow-wiki/SKILL.md
 RUN chmod -R a=rX,u+w /opt/hermes/skills/plow-wiki
+
+# latch, the command-line tool the agent reaches the owner's Mac with: the
+# release out at build time, with latch's own installer, as a client only (it
+# asks hosts and is never one). Root-owned on PATH, so a turn cannot replace the
+# binary the nightly runs. Its skill is written from that binary, so the two
+# match. Its login is the agent's own, in the home volume, made at boot by
+# bin/latch-boot; the installer's state folder only marks it client-only.
+ENV LATCH_STATE_DIR=/var/lib/hermes/latch LATCH_NO_UPDATE_CHECK=1
+RUN set -eu; work="$(mktemp -d)"; cd "$work"; \
+    curl -fsSLO https://releases.plow.co/latch-cli/install.sh; \
+    sh install.sh --client-only --non-interactive --bin-dir /usr/local/bin --state-dir "$work/state"; \
+    mkdir -p /opt/hermes/skills/latch; \
+    latch skill > /opt/hermes/skills/latch/SKILL.md; \
+    chmod -R a=rX,u+w /opt/hermes/skills/latch; \
+    cd /; rm -rf "$work"; latch --version
 
 # Identity: only what is specific to this agent. plow-init writes the home's
 # SOUL.md on every boot as the base persona followed by this file, so nothing
@@ -91,7 +106,7 @@ RUN chmod 0644 /opt/hermes/plow-seed/persona.md
 # agent-mgr's ~/.hermes bind mount; it is what a named-volume home initialises
 # from.
 #
-# config.yaml carries overrides only. Every base-owned key -- mcp_servers.plow,
+# config.yaml carries overrides only. Every base-owned key --
 # model.*, display, agent.api_max_retries, cron.model_drift_guard,
 # tools.tool_search -- is re-asserted by plow-init on every boot, so declaring
 # one here could only drift from what actually runs.
@@ -163,6 +178,11 @@ COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-requir
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
 # str's cron jobs, reconciled from config at every boot (bin/register-jobs).
 COPY docker/cont-init.d/06-register-jobs /etc/cont-init.d/06-register-jobs
+# latch for this boot (bin/latch-boot): after plow-init, which writes the old
+# relay's MCP server back at every boot, and before the gateway loads it.
+COPY docker/s6-rc.d/str-latch/ /etc/s6-overlay/s6-rc.d/str-latch/
+RUN touch /etc/s6-overlay/s6-rc.d/user/contents.d/str-latch \
+          /etc/s6-overlay/s6-rc.d/hermes-gateway/dependencies.d/str-latch
 RUN chmod 0755 /etc/cont-init.d/02-str-setup-env \
                /etc/cont-init.d/03-str-timezone \
                /etc/cont-init.d/04-require-ingest-manifest.sh \
