@@ -371,9 +371,8 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
                  id="the-agent-still-checks-the-path"),
     pytest.param('a bare "stop" in that thread stops this send',
                  id="an-unaddressed-stop-stops-every-draft"),
-    # SOUL.md treats an edit as a fresh draft on the
-    # approval path, not a variant of approval — so the words an owner typed
-    # to change a draft must never be the words that reach the guest.
+    # The reminder runs after an owner may have changed the draft, so an edit
+    # or objection must stop this send rather than let the old words go.
     pytest.param("If an owner edited or objected to it",
                  id="an-edit-does-not-authorise-the-send"),
     # PROMPT's clause, carried across. The poller prints before it commits the
