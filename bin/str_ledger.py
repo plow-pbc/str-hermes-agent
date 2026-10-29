@@ -72,14 +72,21 @@ class Board:
         out = self._run(["create", title, "--idempotency-key", key, "--body", body, "--json"])
         return json.loads(out)["id"]
 
-    def open_tasks(self, prefix: str = "notify-when-house-is-ready ") -> dict[str, str]:
-        """{key: id} for tasks not done or archived whose title starts with `prefix`.
+    def by_key(self, prefix: str = "notify-when-house-is-ready ") -> dict[str, tuple[str, str]]:
+        """{key: (id, status)} for every task whose title starts with `prefix`,
+        archived included, and an archived task wins its key: `create
+        --idempotency-key` skips archived tasks, so a key ever archived must be
+        known in order never to be created, and woken, again.
 
         `list --json` does not expose the idempotency key, so titles carry it as
         their second token: `<prefix><key> ...`.
         """
-        return {t["title"].split()[1]: t["id"] for t in json.loads(self._run(["list", "--json"]))
-                if t["title"].startswith(prefix) and t["status"] not in ("done", "archived")}
+        out: dict[str, tuple[str, str]] = {}
+        for t in json.loads(self._run(["list", "--archived", "--json"])):
+            key = t["title"].split()[1] if t["title"].startswith(prefix) else None
+            if key and out.get(key, ("", ""))[1] != "archived":
+                out[key] = (t["id"], t["status"])
+        return out
 
     def ledger(self, task_id: str) -> tuple[str, Ledger]:
         shown = json.loads(self._run(["show", task_id, "--json"]))

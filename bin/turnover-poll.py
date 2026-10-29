@@ -196,10 +196,14 @@ def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict
 
 
 def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, seam, board,
-          home: pathlib.Path, chats: dict, now: datetime.datetime) -> str:
+          home: pathlib.Path, chats: dict, now: datetime.datetime, known: dict) -> str:
     """One stay's tick; returns its key. Hostex /tasks and Seam are read only
-    for a task still open: a finished stay costs no API calls."""
+    for a task still open: a finished stay costs no API calls. An archived
+    stay is left alone: re-creating it would start an empty ledger and wake
+    every step again, `ready` included."""
     stay, prev = stay_of(r, prop, history, today)
+    if known.get(stay.key, ("", ""))[1] == "archived":
+        return stay.key
     task = board.ensure(stay.key, f"{PREFIX}{stay.key} {stay.guest} {today}",
                         f"Tell {stay.guest} when {prop['title']} is ready for the "
                         f"{stay.checkin_at:%H:%M} check-in today. Rules: README § Turnover readiness.")
@@ -225,12 +229,13 @@ def run(ops: list[dict], hostex, seam, board, home: pathlib.Path, groups: dict,
     after the others have run; the archive sweep waits for a clean tick, since
     a task a failed property owns would read as no longer checking in."""
     require_drained(home)
+    known = board.by_key(PREFIX)
     live, errors = set(), []
     for prop in ops:
         today = now.astimezone(ZoneInfo(prop["timezone"])).date()
-        chats = {"owners": groups[OWNERS], "cleaners": groups[prop["cleaners_thread"]],
-                 "maintenance": groups[prop["maintenance_thread"]]}
         try:
+            chats = {"owners": groups[OWNERS], "cleaners": groups[prop["cleaners_thread"]],
+                     "maintenance": groups[prop["maintenance_thread"]]}
             history = hostex("/reservations", property_id=prop["hostex_property_id"], status="accepted",
                              start_check_in_date=(today - timedelta(days=HISTORY_DAYS)).isoformat(),
                              end_check_in_date=today.isoformat(), limit=100)["data"]["reservations"]
@@ -240,13 +245,13 @@ def run(ops: list[dict], hostex, seam, board, home: pathlib.Path, groups: dict,
             for r in history:
                 if r["check_in_date"] == today.isoformat():
                     live.add(drive(r, prop, history, today.isoformat(), hostex_tasks, seam, board,
-                                   home, chats, now))
+                                   home, chats, now, known))
         except Exception as error:  # one property must not silence the rest
             errors.append(f"{prop['title']}: {error!r}")
     if errors:
         raise RuntimeError("turnover-poll: " + "; ".join(errors))
-    for key, task in board.open_tasks(PREFIX).items():
-        if key not in live:
+    for key, (task, status) in known.items():
+        if key not in live and status not in ("done", "archived"):
             board.note(task, f"STALE {now.astimezone().date().isoformat()}")
             board.archive(task)
     return SILENT

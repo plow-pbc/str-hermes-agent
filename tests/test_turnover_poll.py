@@ -81,9 +81,9 @@ class Board:
         self.log.append(("note", text))
         self.tasks[task_id]["comments"].append({"body": text, "created_at": self.now.timestamp()})
 
-    def open_tasks(self, prefix):
-        return {t["key"]: t["id"] for t in self.tasks.values()
-                if t["title"].startswith(prefix) and t["status"] not in ("done", "archived")}
+    def by_key(self, prefix):  # an archived task wins its key, as in str_ledger
+        rows = sorted(self.tasks.values(), key=lambda t: t["status"] == "archived")
+        return {t["key"]: (t["id"], t["status"]) for t in rows if t["title"].startswith(prefix)}
 
     def block(self, task_id, reason):
         self.tasks[task_id]["status"] = "blocked"
@@ -175,6 +175,27 @@ def test_cancelled_stay_archives_task(tick):
     (task,) = board.tasks.values()
     assert task["status"] == "archived" and task["comments"][-1]["body"].startswith("STALE ")
     assert wakes() == []
+
+
+def test_an_archived_stay_is_never_recreated_or_woken_again(tick):
+    """Hermes' idempotency key skips archived tasks, so ensure would start an
+    empty ledger and re-wake every step, `ready` (a guest message) included."""
+    run, board, log, wakes = tick
+    clean = hostex_fake(cleaning="completed")
+    run("14:00", hostex=clean)                            # ready woken
+    (task,) = board.tasks.values()
+    board.archive(task["id"])                             # an owner stops it, or a STALE sweep
+    log.clear()
+    run("14:02", hostex=clean)
+    assert list(board.tasks) == [task["id"]] and wakes() == [] and log == []
+
+
+def test_a_missing_thread_label_fails_its_property_after_the_others_ran(tick):
+    run, board, _, wakes = tick
+    relabelled = {**prop(), "title": "Relabelled Property", "cleaners_thread": "Gone"}
+    with pytest.raises(RuntimeError, match="Relabelled Property.*Gone"):
+        run("14:00", ops=[relabelled, prop()])
+    assert [w["chat"] for w in wakes()] == ["cht_cleaners"]
 
 
 def test_a_failing_property_raises_after_the_others_and_archives_nothing(tick):

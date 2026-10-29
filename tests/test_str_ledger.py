@@ -58,11 +58,14 @@ def test_ledger_reads_show_json():
     assert json.loads(fixture)["task"]["id"] == "t_1"
 
 
-def test_open_tasks_keys_live_tasks_by_the_titles_second_token():
+def test_by_key_keys_every_task_by_the_titles_second_token_and_archived_wins():
     rows = [{"id": "t_1", "title": "notify-when-house-is-ready turnover:S1 Pat 2026-11-03", "status": "ready"},
-            {"id": "t_2", "title": "notify-when-house-is-ready turnover:S2 Ann 2026-11-02", "status": "blocked"},
-            {"id": "t_3", "title": "notify-when-house-is-ready turnover:S3 Bo 2026-11-01", "status": "done"},
-            {"id": "t_4", "title": "notify-when-house-is-ready turnover:S4 Cy 2026-11-01", "status": "archived"},
+            {"id": "t_2", "title": "notify-when-house-is-ready turnover:S2 Ann 2026-11-02", "status": "done"},
+            {"id": "t_3", "title": "notify-when-house-is-ready turnover:S3 Bo 2026-11-01", "status": "archived"},
+            {"id": "t_4", "title": "notify-when-house-is-ready turnover:S3 Bo 2026-11-01", "status": "ready"},
             {"id": "t_5", "title": "buy towels", "status": "ready"}]
-    board = str_ledger.Board(run=lambda argv: json.dumps(rows))
-    assert board.open_tasks() == {"turnover:S1": "t_1", "turnover:S2": "t_2"}
+    calls = []
+    board = str_ledger.Board(run=lambda argv: calls.append(argv) or json.dumps(rows))
+    assert board.by_key() == {"turnover:S1": ("t_1", "ready"), "turnover:S2": ("t_2", "done"),
+                             "turnover:S3": ("t_3", "archived")}
+    assert "--archived" in calls[0]
