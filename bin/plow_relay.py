@@ -34,7 +34,12 @@ TIMEOUT_S = 600
 
 
 class RelayError(RuntimeError):
-    """latch answered, but not with what was asked for."""
+    """latch answered, but not with what was asked for. `code` is latch's own
+    error code when it gave one (`not_found`, `host_offline`, ...)."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 def latch(*args: str) -> dict:
@@ -47,10 +52,9 @@ def latch(*args: str) -> dict:
         return json.loads(done.stdout)
     try:
         error = json.loads(done.stderr.strip().splitlines()[-1])["error"]
-        reason = f"{error['code']}: {error['message']}"
     except (IndexError, KeyError, ValueError):
-        reason = done.stderr.strip() or f"exited {done.returncode}"
-    raise RelayError(f"latch {args[0]}: {reason}")
+        raise RelayError(f"latch {args[0]}: {done.stderr.strip() or f'exited {done.returncode}'}") from None
+    raise RelayError(f"latch {args[0]}: {error['code']}: {error['message']}", error["code"])
 
 
 def read(path: str) -> str:

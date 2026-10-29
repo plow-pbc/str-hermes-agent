@@ -147,12 +147,21 @@ def _keys_in(text):
 UNREACHABLE = "couldn't reach your Mac through Plow Latch; check Latch is running, then try again"
 
 
+# latch's codes for a Mac it never got an answer from; anything else (no such
+# file, a refusal) is the Mac answering. A latch with no code timed out.
+UNANSWERED = {None, "host_offline", "host_unreachable", "gatekeeper_unavailable", "outcome_unknown"}
+
+
 def _relay(op, *args):
-    """One relay call. RelayError is Latch answering (no such file, say); a
-    transport failure or a missing relay config is the owner's to fix."""
+    """One relay call. RelayError is the Mac answering (no such file, say); a Mac
+    that did not answer is the owner's to fix, never an absent file."""
     try:
         return op(*args)
-    except (OSError, KeyError):
+    except plow_relay.RelayError as e:
+        if e.code in UNANSWERED:
+            raise Owner(UNREACHABLE) from None
+        raise
+    except OSError:
         raise Owner(UNREACHABLE) from None
 
 
