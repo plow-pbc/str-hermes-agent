@@ -1,152 +1,105 @@
-"""bin/plow_relay.py against a loopback stand-in for the Latch relay.
+"""bin/plow_relay.py against a stand-in `latch` on PATH.
 
-A real HTTP server rather than a mock of urllib: what matters is what goes over
-the wire (the bearer, the tool arguments) and what the CLI does with each shape
-Latch answers in. The response payloads are the shapes measured against the live
-relay on 2026-09-14.
+A real executable rather than a mock of subprocess: what matters is the argv the
+CLI hands latch and what it does with each shape latch answers in. The answer
+shapes are latch 0.1.0's, measured against the owner's Mac on 2026-10-29.
 """
 from __future__ import annotations
 
-import http.server
 import io
 import json
+import os
 import pathlib
 import sys
-import threading
 
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "bin"))
 import plow_relay
 
-
-def _text(payload, is_error=False):
-    result = {"content": [{"type": "text", "text": json.dumps(payload)}]}
-    if is_error:
-        result["isError"] = True
-    return {"jsonrpc": "2.0", "id": 1, "result": result}
+# Records its argv, copies a successful `file get`'s fixture to the destination and
+# `file put`'s source aside, then answers with the canned stdout, stderr and exit code.
+FAKE = """#!/usr/bin/env python3
+import json, os, shutil, sys
+d = os.environ["FAKE_LATCH"]
+with open(os.path.join(d, "calls"), "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\\n")
+answer = json.load(open(os.path.join(d, "answer")))
+if sys.argv[1:3] == ["file", "get"] and not answer["code"]:
+    shutil.copy(os.path.join(d, "remote"), sys.argv[4])
+if sys.argv[1:3] == ["file", "put"]:
+    shutil.copy(sys.argv[3], os.path.join(d, "sent"))
+sys.stdout.write(answer.get("stdout", "{}"))
+sys.stderr.write(answer.get("stderr", ""))
+sys.exit(answer.get("code", 0))
+"""
 
 
 @pytest.fixture
-def relay(monkeypatch):
-    """Answers each tool from a per-tool queue and records every call."""
-    script: dict[str, list] = {}
-    calls: list[dict] = []
+def latch(tmp_path, monkeypatch):
+    (tmp_path / "latch").write_text(FAKE)
+    (tmp_path / "latch").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_LATCH", str(tmp_path))
 
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            params = body["params"]
-            calls.append({"tool": params["name"], "arguments": params["arguments"],
-                          "authorization": self.headers.get("Authorization")})
-            answer = script[params["name"]].pop(0)
-            if isinstance(answer, int):
-                self.send_response(answer)
-                self.send_header("Location", "http://127.0.0.1:9/elsewhere")
-                self.end_headers()
-                return
-            data = json.dumps(answer).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+    def answer(stdout: dict | str = "{}", stderr: str = "", code: int = 0):
+        stdout = stdout if isinstance(stdout, str) else json.dumps(stdout)
+        (tmp_path / "answer").write_text(json.dumps({"stdout": stdout, "stderr": stderr, "code": code}))
 
-        def log_message(self, *args):
-            pass
+    def calls():
+        return [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    monkeypatch.setenv("PLOW_MCP_URL", f"http://127.0.0.1:{server.server_address[1]}/mcp")
-    monkeypatch.setenv("PLOW_AGENT_TOKEN", "SECRET")
-    monkeypatch.setattr(plow_relay, "POLL_S", 0)
-    yield script, calls
-    server.shutdown()
+    answer()
+    return tmp_path, answer, calls
 
 
-def test_read_prints_the_file_and_carries_the_bearer(relay, capsys):
-    script, calls = relay
-    script["plow_read_file"] = [_text({"content": "# Wiki Index\n", "path": "/Users/o/Plow/wiki/index.md",
-                                       "status": "completed"})]
+def test_read_prints_the_file(latch, capsys):
+    tmp, answer, calls = latch
+    (tmp / "remote").write_text("# Wiki Index\n")
+    answer({"bytes": 13})
     assert plow_relay.main(["read", "~/Plow/wiki/index.md"]) == 0
     assert capsys.readouterr().out == "# Wiki Index\n"
-    assert calls == [{"tool": "plow_read_file", "arguments": {"path": "~/Plow/wiki/index.md"},
-                      "authorization": "Bearer SECRET"}]
+    assert calls()[0][:3] == ["file", "get", "~/Plow/wiki/index.md"]
 
 
-def test_write_sends_stdin_as_the_content(relay, monkeypatch):
-    script, calls = relay
-    script["plow_write_file"] = [_text({"bytes": 6, "path": "/Users/o/Plow/wiki/x.md", "status": "completed"})]
+def test_write_sends_stdin_to_the_path(latch, monkeypatch):
+    tmp, answer, calls = latch
     monkeypatch.setattr(sys, "stdin", io.StringIO("hello\n"))
     assert plow_relay.main(["write", "~/Plow/wiki/x.md"]) == 0
-    assert calls[0]["arguments"] == {"path": "~/Plow/wiki/x.md", "content": "hello\n"}
+    assert (tmp / "sent").read_text() == "hello\n"
+    assert calls()[0][:2] == ["file", "put"] and calls()[0][-1] == "~/Plow/wiki/x.md"
 
 
-RUNS = [
-    ("finished inside the wait",
-     {"plow_run_command": [_text({"exit_code": 1, "output": "people/x.md: missing required field: tags\n",
-                                  "status": "completed"})]},
-     1, "people/x.md: missing required field: tags\n", []),
-    ("pending, then ready wrapping a command still running",
-     {"plow_run_command": [_text({"status": "pending", "handle": "OUTER", "retry_after_ms": 1000})],
-      "plow_get_result": [_text({"status": "pending", "handle": "OUTER"}),
-                          _text({"status": "ready", "result": {"handle": "INNER", "status": "running"}})],
-      "plow_get_output": [_text({"status": "running", "output": "", "output_length": 0}),
-                          _text({"exit_code": 0, "output": "snapshot 62060f5\n", "status": "completed"})]},
-     0, "snapshot 62060f5\n", ["INNER", "INNER"]),
-    ("pending, then ready wrapping a command already finished",
-     {"plow_run_command": [_text({"status": "pending", "handle": "OUTER"})],
-      "plow_get_result": [_text({"status": "ready", "result": {
-          "handle": "INNER", "exit_code": 0, "output": "wiki/index.md\n", "status": "completed"}})]},
-     0, "wiki/index.md\n", []),
-    # The shape measured 2026-09-15: running with a handle, then plow_get_output
-    # answering running with none, before the command completes.
-    ("running, polled by the handle the first answer carried",
-     {"plow_run_command": [_text({"status": "running", "handle": "H", "output": "", "output_length": 0})],
-      "plow_get_output": [_text({"status": "running", "output": "", "output_length": 0}),
-                          _text({"exit_code": 0, "output": "snapshot 6fe1097\n", "status": "completed"})]},
-     0, "snapshot 6fe1097\n", ["H", "H"]),
-]
-
-
-@pytest.mark.parametrize(("case", "answers", "code", "output", "polled"), RUNS, ids=[r[0] for r in RUNS])
-def test_run_exits_with_the_commands_code_and_prints_its_output(
-        relay, capsys, case, answers, code, output, polled):
-    script, calls = relay
-    script.update(answers)
-    assert plow_relay.main(["run", "--write", "~/Plow/wiki", "--network", "--", "wiki", "index"]) == code
-    assert capsys.readouterr().out == output
-    assert calls[0]["arguments"]["argv"] == ["wiki", "index"]
-    assert calls[0]["arguments"]["write_paths"] == ["~/Plow/wiki"]
-    assert calls[0]["arguments"]["network"] is True
-    assert [c["arguments"]["handle"] for c in calls if c["tool"] == "plow_get_output"] == polled
+def test_run_grants_what_it_names_and_exits_with_the_commands_code(latch, capsys):
+    _, answer, calls = latch
+    answer({"exit_code": 1, "signal": None, "stdout": "people/x.md: missing required field: tags\n",
+            "stderr": "1 invalid\n"})
+    assert plow_relay.main(["run", "--write", "~/Plow/wiki", "--write", "~/Plow/wiki.git", "--network",
+                            "--", "wiki", "snapshot", "--push"]) == 1
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("people/x.md: missing required field: tags\n", "1 invalid\n")
+    assert calls() == [["exec", "--write", "~/Plow/wiki", "--write", "~/Plow/wiki.git", "--network",
+                        "--timeout", "600", "--", "wiki", "snapshot", "--push"]]
 
 
 FAILURES = [
-    ("a refused tool call names Latch's diagnosis",
-     {"plow_read_file": [_text({"error": "read failed: ENOENT", "diagnosis": {"cause": "not_found"}}, is_error=True)]},
-     ["read", "~/Plow/wiki/missing.md"], "read failed: ENOENT (not_found)"),
-    ("a redirect is refused, not followed with the token",
-     {"plow_read_file": [302]}, ["read", "~/Plow/wiki/index.md"], "refusing redirect"),
+    ("latch's error line names its code",
+     {"stderr": '{"error":{"code":"host_offline","message":"mba is not running","exit":3}}\n', "code": 3},
+     ["read", "~/Plow/wiki/index.md"], "latch file: host_offline: mba is not running"),
+    ("a command past its timeout is latch failing, not the command",
+     {"stderr": '{"error":{"code":"timed_out","message":"stopped after 600s","exit":1}}\n', "code": 1},
+     ["run", "--", "wiki", "index"], "latch exec: timed_out"),
+    ("stderr that is not latch's JSON is passed on",
+     {"stderr": "segfault\n", "code": 139}, ["run", "--", "wiki", "index"], "latch exec: segfault"),
+    ("a command ended by a signal has no exit code",
+     {"stdout": json.dumps({"exit_code": None, "signal": 9, "stdout": "", "stderr": ""})},
+     ["run", "--", "wiki", "index"], "ended by signal 9"),
 ]
 
 
-@pytest.mark.parametrize(("case", "answers", "argv", "message"), FAILURES, ids=[f[0] for f in FAILURES])
-def test_a_relay_that_cannot_answer_exits_2_and_says_why(relay, capsys, case, answers, argv, message):
-    script, calls = relay
-    script.update(answers)
+@pytest.mark.parametrize(("case", "reply", "argv", "message"), FAILURES, ids=[f[0] for f in FAILURES])
+def test_latch_that_cannot_answer_exits_2_and_says_why(latch, capsys, case, reply, argv, message):
+    _, answer, _ = latch
+    answer(**reply)
     assert plow_relay.main(argv) == 2
-    err = capsys.readouterr().err
-    assert message in err
-    assert "SECRET" not in err
-    assert len(calls) == 1  # the redirect target never saw a request
-
-
-def test_a_command_still_running_at_the_deadline_is_a_relay_failure(relay, monkeypatch):
-    script, _ = relay
-    script["plow_run_command"] = [_text({"status": "pending", "handle": "OUTER"})]
-    script["plow_get_result"] = [_text({"status": "pending", "handle": "OUTER"})] * 3
-    clock = iter([0, 0, 1000, 2000])
-    monkeypatch.setattr(plow_relay.time, "monotonic", lambda: next(clock))
-    with pytest.raises(plow_relay.RelayError, match="still running at the deadline"):
-        plow_relay.run(["wiki", "snapshot"], timeout=1)
+    assert message in capsys.readouterr().err
