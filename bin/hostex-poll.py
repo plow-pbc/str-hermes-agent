@@ -31,12 +31,10 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api
 import str_env
+from str_wake import WAKE_STALE_SECONDS, require_drained, wake
 
 PAGE = 100
 SILENT = '{"wakeAgent": false}'
-# The plugin drains its wake inbox every few seconds; a wake still here after
-# this long means nothing is reading it, and the guest it carries is unheard.
-WAKE_STALE_SECONDS = 600
 
 PROMPT = """\
 New guest message on Hostex.
@@ -250,27 +248,6 @@ def message_text(message: dict) -> str:
     return one_line(message["content"]) or f"({message['display_type']})"
 
 
-def require_drained(home: pathlib.Path) -> None:
-    """Raise — which the scheduler reports to the operator — while an earlier
-    wake sits unread: nothing is serving the owners' chat, and every guest from
-    here on would be recorded as announced and never heard."""
-    inbox = home / "plow_chat_wakes"
-    stale = [w.name for w in inbox.glob("*.json") if time.time() - w.stat().st_mtime > WAKE_STALE_SECONDS]
-    if stale:
-        raise RuntimeError(f"hostex-poll: undrained wakes in {inbox}: {stale}")
-
-
-def hand_to_owners(home: pathlib.Path, chat: str, text: str) -> None:
-    """Write `text` as a turn for the owners' chat into the plugin's wake inbox,
-    renamed into place so the plugin never reads it half-written."""
-    inbox = home / "plow_chat_wakes"
-    inbox.mkdir(exist_ok=True)
-    name = f"hostex-{time.time_ns()}"
-    tmp = inbox / f"{name}.tmp"
-    tmp.write_text(json.dumps({"chat": chat, "from": "Hostex", "text": text}))
-    os.replace(tmp, inbox / f"{name}.json")
-
-
 def drafts_chat() -> str:
     """The chat guest drafts go to: the owners' group, else the owner's own chat."""
     env = {**os.environ, **str_env.read_setup_env(hermes_home())}
@@ -458,7 +435,7 @@ def run(token: str, cursor_file: pathlib.Path, chat: str,
     # next tick re-announces. A duplicate costs a glance, a swallowed one costs
     # a guest their answer.
     if output is not SILENT:
-        hand_to_owners(cursor_file.parent, chat, output)
+        wake(cursor_file.parent, chat, "Hostex", output)
     save_cursor(cursor_file, cursor)
     return output
 
