@@ -250,8 +250,7 @@ def message_text(message: dict) -> str:
 
 def drafts_chat() -> str:
     """The chat guest drafts go to: the owners' group, else the owner's own chat."""
-    env = {**os.environ, **str_env.read_setup_env(hermes_home())}
-    return str_env.approval_group(env) or env["PLOW_HOME_CHANNEL"]
+    return str_env.owners_chat({**os.environ, **str_env.read_setup_env(hermes_home())})
 
 
 def hermes_home() -> pathlib.Path:
