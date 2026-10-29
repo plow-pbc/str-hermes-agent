@@ -5,8 +5,11 @@ The agent reaches the owner's Mac through the latch CLI the image ships. Three
 things make that so, each never fatal: a failure is logged and the gateway
 starts on what there is.
 
-  - The old Latch relay's MCP server is gone from config.yaml. plow-init writes
-    it back at every boot from /me's mcp_url, so this runs after it, every boot.
+  - The old Latch relay is retired: its MCP server leaves config.yaml, and its
+    PLOW_MCP_URL leaves the dotenv and the container environment, which is what
+    switches off the chat plugin's instructions and recall for the relay's
+    plow_* tools. plow-init writes all three back at every boot from /me's
+    mcp_url, so this runs after it, every boot.
   - LATCH_PLOW_CHAT defaults to the home chat. Latch asks an agent whose line has
     several chats which one it acts for; scripts have none, and the model names
     its own with --plow-chat.
@@ -18,6 +21,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -30,18 +34,42 @@ def log(message):
     print(f"latch-boot: {message}", file=sys.stderr)
 
 
+def replace(path, text):
+    """Rewrite PATH, keeping its owner and mode. Staged with mkstemp: this runs as
+    root in a home the agent can write, so a predictable staging name is one the
+    agent could point elsewhere first."""
+    mode = path.stat()
+    fd, staged = tempfile.mkstemp(dir=path.parent, prefix=".latch-boot.")
+    try:
+        os.fchown(fd, mode.st_uid, mode.st_gid)
+        os.fchmod(fd, mode.st_mode & 0o7777)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        os.replace(staged, path)
+    except BaseException:
+        os.unlink(staged)
+        raise
+
+
 def drop_relay_server():
     config = HOME / "config.yaml"
     data = yaml.safe_load(config.read_text()) or {}
     if data.get("mcp_servers", {}).pop(RELAY_SERVER, None) is None:
         return
-    staged = config.with_name(".config.yaml.latch-boot")
-    staged.write_text(yaml.safe_dump(data, sort_keys=False))
-    mode = config.stat()
-    os.chown(staged, mode.st_uid, mode.st_gid)
-    os.chmod(staged, mode.st_mode & 0o7777)
-    os.replace(staged, config)
+    replace(config, yaml.safe_dump(data, sort_keys=False))
     log(f"removed the {RELAY_SERVER} MCP server; the Mac is reached through latch")
+
+
+def drop_relay_url():
+    (CONTAINER_ENV / "PLOW_MCP_URL").unlink(missing_ok=True)
+    dotenv = HOME / ".env"
+    if not dotenv.exists():
+        return
+    lines = dotenv.read_text().splitlines(keepends=True)
+    kept = [line for line in lines if not line.startswith("PLOW_MCP_URL=")]
+    if kept != lines:
+        replace(dotenv, "".join(kept))
+        log("removed PLOW_MCP_URL")
 
 
 def default_chat():
@@ -63,7 +91,7 @@ def log_in():
 
 
 def main():
-    for step in (drop_relay_server, default_chat, log_in):
+    for step in (drop_relay_server, drop_relay_url, default_chat, log_in):
         try:
             step()
         except Exception as e:  # never fatal: the gateway starts on what there is

@@ -1538,9 +1538,13 @@ a `cloud` host), and `LATCH_PLOW_CHAT` is the chat the gatekeeper reads the
 owner's request in — the home chat by default, which latch-boot publishes; the
 model names the chat it is answering with `--plow-chat`.
 
-The old Latch relay's `plow` MCP server is gone: plow-init still writes it into
-`config.yaml` at every boot from `/me`'s `mcp_url`, and latch-boot removes it
-again before the gateway starts.
+The old Latch relay is retired: plow-init still writes its `plow` MCP server
+into `config.yaml` and its `PLOW_MCP_URL` into the dotenv and the container
+environment at every boot from `/me`'s `mcp_url`, and latch-boot removes all
+three before the gateway starts. Without the URL, the chat plugin stops
+injecting its `plow_*` routing and relay recall; `config.yaml` disables the
+base's `owners-mac` and `google-workspace` skills, which route through those
+tools too.
 
 Verify from wakeup, as the agent:
 

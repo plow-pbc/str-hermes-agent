@@ -65,6 +65,11 @@ IMAGE_CLAIMS = [
      "HERMES_HOME=$h STR_ENV_DIR=$h /opt/plow/str/bin/latch-boot 2>/dev/null; "
      "/opt/hermes/.venv/bin/python3 -c 'import sys, yaml; print(*yaml.safe_load(open(sys.argv[1]))[\"mcp_servers\"])' "
      "$h/config.yaml", "hostex"),
+    ("latch-boot removes the old relay's URL, and only it, keeping the dotenv's owner",
+     "h=$(mktemp -d); cp /var/lib/hermes/config.yaml $h/; printf 'A=1\\nPLOW_MCP_URL=x\\nB=2\\n' > $h/.env; "
+     "chown root:hermes $h/.env; chmod 640 $h/.env; : > $h/PLOW_MCP_URL; "
+     "HERMES_HOME=$h STR_ENV_DIR=$h /opt/plow/str/bin/latch-boot 2>/dev/null; "
+     "echo $(cat $h/.env) $(stat -c %U:%G:%a $h/.env) $(ls $h/PLOW_MCP_URL 2>/dev/null)", "A=1 B=2 root:hermes:640"),
     *((f"wiki skill {name}", *_present(f"/opt/hermes/skills/{name}/SKILL.md"))
       for name in ("wiki-query", "wiki-ingest", "wiki-lint", "wiki-digest", "plow-wiki")),
     # plow-wiki requires it, and the manifest cache-check the ingest turn runs
