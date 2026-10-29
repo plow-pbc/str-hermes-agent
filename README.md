@@ -440,7 +440,7 @@ Examples:
   mechanism with its one owner:
   https://github.com/plow-pbc/str-hermes-agent/pull/4
 - Drift — #3 put the two-tier eligibility rule (this repo's) into ~40 lines of
-  `group_prompts` prose in `runtime/config.yaml` beside the one in
+  per-group prompt prose in `runtime/config.yaml` beside the one in
   `runtime/persona.md`, so the rule has two homes here and reads as a second
   approval path next to the plugin's send gate:
   https://github.com/plow-pbc/str-hermes-agent/pull/3
@@ -560,16 +560,6 @@ The upstream image re-applies that overlay on every directory build and every
 load, so `send_message` resolves the alias even though the group's own label
 stays the id-derived one, and unlike the derived `channel_directory.json` it is
 not overwritten.
-
-What a group is *for* is separate, and lives in `runtime/config.yaml` under
-`platforms.plow_chat.extra.group_prompts`, keyed by that display name — the
-tracked config carries no `cht_` id, since those are per-account and a redeploy
-onto a fresh host would bind to groups that no longer exist. A group's prompt is
-appended to the stay-quiet-unless-addressed policy and cannot replace it, so no
-group can be configured into answering everything. A prompt whose key matches no
-configured group is logged and skipped — that is the normal state of a fresh
-deploy, where the tracked prompts are present but the dotenv labels are not yet
-— so check the gateway log after renaming a group.
 
 Invalid configuration prevents the Plow platform from starting; the gateway log
 names the entry it refused and why.
@@ -911,8 +901,7 @@ Re-running activation does *not* strand it: that writes
 trigger. In order:
 
 1. Relabel the new group's `<cht_ id>=<display name>` in
-   `PLOW_CHAT_GROUP_UIDS`, keeping the name `PLOW_CHAT_APPROVAL_GROUP` and the
-   `group_prompts` key both point at, then restart the gateway so the adapter
+   `PLOW_CHAT_GROUP_UIDS`, keeping the name `PLOW_CHAT_APPROVAL_GROUP` points at, then restart the gateway so the adapter
    picks it up.
 2. Recreate the job:
 

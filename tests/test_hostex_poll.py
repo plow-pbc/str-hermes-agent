@@ -371,7 +371,7 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
                  id="the-agent-still-checks-the-path"),
     pytest.param('a bare "stop" in that thread stops this send',
                  id="an-unaddressed-stop-stops-every-draft"),
-    # config.yaml's group prompt treats an edit as a fresh draft on the
+    # SOUL.md treats an edit as a fresh draft on the
     # approval path, not a variant of approval — so the words an owner typed
     # to change a draft must never be the words that reach the guest.
     pytest.param("If an owner edited or objected to it",
@@ -579,9 +579,7 @@ def test_the_prompt_withholds_the_guest_until_an_owner_approves():
     # The veto tier is the one deliberate relaxation of the gate (see README
     # § Decisions already made, superseded 2026-08-31), and these clauses are
     # its whole boundary: the fact test, the commitment test, doubt failing
-    # closed, and the announcement wording the group prompt's cancel rule
-    # matches on. Producer half; the consumer half lives in
-    # test_runtime_config.py::test_the_draft_reaches_the_session_that_approves_it.
+    # closed, and the announcement wording.
     assert "a short draft id on its own line" in flowed
     # Eligibility lives in SOUL.md alone — this prompt may only reference it,
     # never restate it, or the two copies drift (the contract-drift finding on

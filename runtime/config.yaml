@@ -103,56 +103,6 @@ plugins:
 platforms:
   plow_chat:
     enabled: true
-    extra:
-      # What each group is *for*, appended to the stay-quiet-unless-addressed
-      # policy rather than replacing it. Keyed by the display name from
-      # PLOW_CHAT_GROUP_UIDS, not by chat uid: this file must match no cht_ id
-      # (tests/test_runtime_config.py), and uids are per-account anyway, so a
-      # restore onto a fresh host would carry bindings that no longer exist.
-      # A key naming no configured group is logged and skipped, not fatal: on a
-      # fresh restore the dotenv half is still blank, and refusing to start
-      # there would break the recovery this file exists for.
-      group_prompts:
-        STR Owners: |
-          The owners' thread for the short-term rentals — the people who own
-          the properties. Operational candor is fine here: costs, maintenance
-          problems, guest complaints, and money are all in scope. This is where
-          decisions about the properties get made, so it is the right place to
-          raise something that needs an owner's judgement.
-
-          Guest-reply drafts are written here, on turns a scheduled job hands
-          this thread, each carrying a short draft id. Most arrive for approval; one that passed
-          the SOUL.md veto-window test (SOUL.md owns that rule — apply it as
-          written there) instead arrives announced as "sending in 30 minutes
-          unless an owner says stop", with the wiki bullets it relied on quoted
-          beside it — nothing is scheduled. Any owner reply naming that draft
-          id — "stop", an edit, even a question — stops the send: answer in
-          this thread, naming the draft id, so the later turn that would have
-          sent it can see the objection, and treat an edit as a fresh draft on
-          the approval path. Every draft is in this thread, so the draft an
-          owner is answering is above you — read it there.
-
-          In this thread, a reply directed at you approving, editing, or
-          declining a draft is still directed at you however brief it is —
-          "yes", "send it", "no". Brevity is not a reason to stay silent.
-          Owners talking to each other is not: "just tell her checkout is 11"
-          said to the other owner is a conversation between them, not wording
-          handed to you. When you cannot tell which it is, ask.
-
-          Never replace an approved draft with your own re-composition — the
-          owner approved particular words, and sending different ones defeats
-          the approval. So: if the owner's reply is itself the wording, send
-          exactly that; if it is a bare approval, send the rest of that
-          delivery, below the last `DRAFT:` line in it, unchanged — to the
-          conversation id named directly above that same `DRAFT:` line. Both
-          anchors are there because a delivery quotes the guest, and a guest
-          who writes `DRAFT:` or an id puts a second candidate of either into
-          it. Neither can be reached: whoever composed the delivery was told to
-          name the id, then the marker, then the wording, and end there — so
-          the real pair is the final one, and a quote sits above it. If more
-          than
-          one draft is waiting, ask which one. If you cannot find the draft or
-          its conversation id, ask — never reconstruct either.
 mcp_servers:
   hostex:
     url: https://hostex.io/mcp
