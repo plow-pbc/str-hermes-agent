@@ -5,7 +5,7 @@ the API origin would hand the bearer token to whatever it points at. Verified
 against a local server that 302s elsewhere: as an ordinary header the token
 arrived at the second origin. Refusing beats stripping-and-following — a
 stripped redirect just fails authentication somewhere else. This used to be
-three copies (hostex-poll, hostex-raw, checkin-watch); now it is one.
+three copies (hostex-poll, hostex-raw, and the poller turnover-poll replaced); now it is one.
 
 Sibling scripts import this by name: run as scripts, bin/ is sys.path[0];
 loaded by path under test, each script inserts its own directory first.

@@ -266,12 +266,6 @@ ingests into the wiki:
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
-Edit `checkin-watch` in place rather than recreating it:
-
-```sh
-docker compose exec -T -u hermes hermes hermes cron edit checkin-watch --failure-deliver plow_chat
-```
-
 Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`
 under `wiki-nightly`, and after its next run confirm the scheduler line
 `Job 'wiki-nightly': delivered to plow_chat:…` names the home chat.

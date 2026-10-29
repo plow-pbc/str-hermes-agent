@@ -7,7 +7,7 @@
 #
 #   scripts   hermes cron refuses a script that resolves outside
 #             $HERMES_HOME/scripts (hermes_cli/cron.py:652), so wiki-nightly and
-#             checkin-watch cannot name /opt/plow at all.
+#             turnover cannot name /opt/plow at all.
 #   mcp-seam  config.yaml names the server by path, and a home migrated from the
 #             agent-mgr shape carries the old spelling until it is refreshed.
 #   config.yaml  a named-volume home seeds from the image only while EMPTY, so

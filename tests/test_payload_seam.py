@@ -25,7 +25,7 @@ CRON_CHECK = (
     'cd /opt/hermes && /opt/hermes/.venv/bin/python -c '
     '"import sys; sys.path.insert(0, \'/opt/hermes\'); '
     'from hermes_cli.cron import _script_health_issue as c; '
-    "print(c('nightly.sh') or 'ACCEPTED', c('checkin-watch.py') or 'ACCEPTED', "
+    "print(c('nightly.sh') or 'ACCEPTED', c('turnover-poll.py') or 'ACCEPTED', "
     "'REFUSED' if c('../../etc/passwd') else 'ACCEPTED')\""
 )
 

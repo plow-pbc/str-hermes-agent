@@ -118,6 +118,7 @@ each one:
 - the cleaner's codes: run `/opt/plow/str/bin/setup-discover seam-codes <seam_device_id>`,
   offer them by `name`, keep each chosen `access_code_id`;
 - the cleaner's first name;
+- the first name of whoever resets the lock's breaker (maintenance);
 - confirm the property's `timezone` and `default_checkin_time` from Hostex
   (ask for them if Hostex has none).
 
@@ -125,6 +126,7 @@ The cleaners group: pick it as in step 3, labelled exactly `Cleaners`, merged
 into the same `PLOW_CHAT_GROUP_UIDS` list. Never trust it: full trust would let
 cleaners use the owner's accounts. You may send one short intro there with
 `plow_send_message`, to its `cht_` id, so the cleaners know who you are.
+The maintenance group: the same way, labelled exactly `Maintenance`.
 
 Write everything in one patch. On a first run add `"timezone": "<IANA zone>"`
 to `ops`: the first property's zone unless the owner names another. On a
@@ -140,7 +142,8 @@ send every property, old and new.
    {"hostex_property_id": 123, "title": "<title>", "timezone": "<IANA zone>",
     "default_checkin_time": "16:00", "seam_device_id": "<id>",
     "cleaner_name": "<name>", "cleaner_access_code_ids": ["<id>"],
-    "cleaners_thread": "Cleaners"}]}}
+    "cleaners_thread": "Cleaners", "maintenance_name": "<name>",
+    "maintenance_thread": "Maintenance"}]}}
 JSON
 ```
 
@@ -161,7 +164,8 @@ happened: run `/opt/plow/str/bin/register-jobs` without asking again. Otherwise 
 - Each `register-jobs: create <name>` (or `replace`) line is a job now
   running. Tell the owner in plain words: `hostex-inbound` watches guest
   messages every two minutes, `wiki-nightly` updates the property notes at 3am,
-  `checkin-watch` checks the cleaners at noon. No output means they were
+  `turnover` checks every two minutes on check-in days that the house gets
+  cleaned and tells the guest when it is ready. No output means they were
   already installed: confirm with `hermes cron list`.
 - Any other failure: relay its first line and say setup is not finished.
 

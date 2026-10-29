@@ -22,24 +22,27 @@ register_jobs = _load("register_jobs", ROOT / "bin/register-jobs")
 
 ENV_HOME = {"HOSTEX_TOKEN": "t"}
 ENV_HOME_UID = {**ENV_HOME, "PLOW_HOME_CHANNEL": "cht_home"}
-ENV_GROUP = {"HOSTEX_TOKEN": "t", "PLOW_CHAT_GROUP_UIDS": "cht_o=STR Owners,cht_c=Cleaners",
+ENV_GROUP = {"HOSTEX_TOKEN": "t", "PLOW_CHAT_GROUP_UIDS": "cht_o=STR Owners,cht_c=Cleaners,cht_m=Maintenance",
              "PLOW_CHAT_APPROVAL_GROUP": "STR Owners"}
-OPS_PROP = {"timezone": "America/Los_Angeles", "properties": [{"cleaners_thread": "Cleaners"}]}
-OPS_STRAY = {"properties": [{"cleaners_thread": "Nobody"}]}
+ENV_SEAM = {**ENV_GROUP, "SEAM_API_KEY": "s"}
+OPS_PROP = {"timezone": "America/Los_Angeles",
+            "properties": [{"cleaners_thread": "Cleaners", "maintenance_thread": "Maintenance"}]}
+BOTH = {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat"}
 
 DESIRED = [
     # (id, env, ops, expected {name: deliver})
     # hostex-inbound hands its drafts to the owners' chat itself, so only its
     # failures are delivered, and those are the operator's.
-    ("home only", ENV_HOME, {}, {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat"}),
-    ("owners group", ENV_GROUP, {}, {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat"}),
-    ("checkin needs seam", ENV_GROUP, OPS_PROP,
-     {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat"}),
-    ("checkin needs every cleaners thread", {**ENV_GROUP, "SEAM_API_KEY": "s"}, OPS_STRAY,
-     {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat"}),
-    ("checkin on", {**ENV_GROUP, "SEAM_API_KEY": "s"}, OPS_PROP,
-     {"hostex-inbound": "plow_chat", "wiki-nightly": "plow_chat",
-      "checkin-watch": "plow_chat:cht_o"}),
+    # turnover wakes each step's thread itself, so it too delivers only failures.
+    ("home only", ENV_HOME, {}, BOTH),
+    ("owners group", ENV_GROUP, {}, BOTH),
+    ("turnover needs seam", ENV_GROUP, OPS_PROP, BOTH),
+    ("turnover needs a property", ENV_SEAM, {}, BOTH),
+    ("turnover needs the cleaners thread", ENV_SEAM,
+     {"properties": [{"cleaners_thread": "Nobody", "maintenance_thread": "Maintenance"}]}, BOTH),
+    ("turnover needs the maintenance thread", ENV_SEAM,
+     {"properties": [{"cleaners_thread": "Cleaners", "maintenance_thread": "Nobody"}]}, BOTH),
+    ("turnover on", ENV_SEAM, OPS_PROP, {**BOTH, "turnover": "plow_chat"}),
 ]
 
 
@@ -55,24 +58,23 @@ def test_label_missing_refuses():
         register_jobs.desired_jobs(env, {})
 
 
-# Golden: both are --no-agent and deliver to the operator's home chat (#49), a
-# bare plow_chat. hostex-inbound's turn reaches the owners through the plugin's
-# wake inbox (#111); wiki-nightly's keeps guest-derived stdout out of a prompt (#44).
+# Golden: every job is --no-agent and delivers to the operator's home chat (#49),
+# a bare plow_chat. hostex-inbound's and turnover's turns reach their threads
+# through the plugin's wake inbox (#111); wiki-nightly's keeps guest-derived
+# stdout out of a prompt (#44). None is stamped with an origin.
 CRON_ARGV = [
-    ("hostex-inbound", ENV_GROUP,
-     [register_jobs.HERMES, "cron", "create", "every 2m", "--name", "hostex-inbound",
-      "--script", "hostex-poll.py", "--no-agent", "--deliver", "plow_chat"], {}),
-    ("wiki-nightly", ENV_HOME_UID,
-     [register_jobs.HERMES, "cron", "create", "0 3 * * *", "--name", "wiki-nightly",
-      "--script", "nightly.sh", "--no-agent", "--deliver", "plow_chat"], {}),
+    ("hostex-inbound", ENV_GROUP, "every 2m", "hostex-poll.py"),
+    ("wiki-nightly", ENV_HOME_UID, "0 3 * * *", "nightly.sh"),
+    ("turnover", ENV_SEAM, "every 2m", "turnover-poll.py"),
 ]
 
 
-@pytest.mark.parametrize("name,env,argv,extra_env", CRON_ARGV,
-                         ids=[f"{r[0]}-{'group' if r[1] is ENV_GROUP else 'home'}" for r in CRON_ARGV])
-def test_create_argv(name, env, argv, extra_env):
-    job = next(j for j in register_jobs.desired_jobs(env, {}) if j["name"] == name)
-    assert register_jobs.create_argv(job) == (argv, extra_env)
+@pytest.mark.parametrize("name,env,schedule,script", CRON_ARGV, ids=[r[0] for r in CRON_ARGV])
+def test_create_argv(name, env, schedule, script):
+    job = next(j for j in register_jobs.desired_jobs(env, OPS_PROP) if j["name"] == name)
+    assert register_jobs.create_argv(job) == [
+        register_jobs.HERMES, "cron", "create", schedule, "--name", name,
+        "--script", script, "--no-agent", "--deliver", "plow_chat"]
 
 
 def _registered(**overrides):
@@ -85,9 +87,7 @@ def _registered(**overrides):
 
 
 ENV_FIXTURE = {**ENV_GROUP, "PLOW_CHAT_GROUP_UIDS": "cht_owners_fixture=STR Owners"}
-# No owners' group: checkin-watch's summaries go to the owner's own chat.
-ENV_HOME_CHECKIN = {**ENV_HOME, "SEAM_API_KEY": "s", "PLOW_CHAT_GROUP_UIDS": "cht_c=Cleaners"}
-CHECKIN = {"script": "checkin-watch.py", "deliver": "plow_chat", "no_agent": False,
+CHECKIN = {"script": "checkin-watch.py", "deliver": "plow_chat:cht_owners_fixture", "no_agent": False,
            "schedule": {"kind": "cron", "display": "0 12 * * *"}}
 
 RECONCILE = [
@@ -97,16 +97,13 @@ RECONCILE = [
     ("an agent-drafting hostex-inbound is replaced", ENV_FIXTURE,
      _registered(hostex_inbound={"no_agent": False, "deliver": "plow_chat:cht_owners_fixture"}),
      [("replace", "hostex-inbound")]),
-    # A boot run predates plow-init's home uid; the setup run that has it stamps.
-    ("home origin stamped once known", ENV_HOME_CHECKIN | {"PLOW_HOME_CHANNEL": "cht_home"},
-     _registered(checkin_watch=CHECKIN | {"origin": None}), [("replace", "checkin-watch")]),
-    ("a boot run without the uid keeps the stamp", ENV_HOME_CHECKIN,
-     _registered(checkin_watch=CHECKIN | {"origin": {"chat_id": "cht_home"}}), []),
     ("schedule changed", ENV_FIXTURE,
      _registered(wiki_nightly={"schedule": {"kind": "cron", "display": "0 4 * * *"}}),
      [("replace", "wiki-nightly")]),
-    ("checkin no longer desired", ENV_FIXTURE, _registered(checkin_watch={"script": "checkin-watch.py"}),
-     [("remove", "checkin-watch")]),
+    ("turnover no longer desired", ENV_FIXTURE, _registered(turnover={"script": "turnover-poll.py"}),
+     [("remove", "turnover")]),
+    ("a paused retired job is still removed", ENV_FIXTURE,
+     _registered(checkin_watch=CHECKIN | {"paused_at": "2026-10-01T00:00:00Z"}), [("remove", "checkin-watch")]),
     ("paused is left alone", ENV_FIXTURE,
      _registered(hostex_inbound={"deliver": "plow_chat", "paused_at": "2026-10-01T00:00:00Z"}), []),
     ("disabled is left alone", ENV_FIXTURE,  # a drifted schedule would otherwise be replaced
@@ -126,6 +123,16 @@ def test_reconcile(env, registered, expected, capsys):
     assert ("paused" in capsys.readouterr().out) == paused
 
 
+def test_checkin_watch_is_removed_and_turnover_registered():
+    """An image that ran checkin-watch upgrades to turnover in one reconcile."""
+    env = {**ENV_FIXTURE, "SEAM_API_KEY": "s",
+           "PLOW_CHAT_GROUP_UIDS": "cht_owners_fixture=STR Owners,cht_c=Cleaners,cht_m=Maintenance"}
+    actions = register_jobs.reconcile(register_jobs.desired_jobs(env, OPS_PROP),
+                                      _registered(checkin_watch=CHECKIN))
+    assert [(kind, x if kind == "remove" else x["name"]) for kind, x in actions] == [
+        ("create", "turnover"), ("remove", "checkin-watch")]
+
+
 def test_registered_jobs_reads_the_live_shape(tmp_path):
     assert set(register_jobs.registered_jobs(FIXTURE)) == {"hostex-inbound", "deliver-probe", "wiki-nightly"}
     assert register_jobs.registered_jobs(tmp_path / "absent.json") == {}
@@ -134,7 +141,7 @@ def test_registered_jobs_reads_the_live_shape(tmp_path):
         register_jobs.registered_jobs(tmp_path / "torn.json")
 
 
-def fail_if_called(argv, extra_env):
+def fail_if_called(argv):
     raise AssertionError(f"runner called: {argv}")
 
 
@@ -172,7 +179,7 @@ class Recorder:
     def __init__(self, fail=None):
         self.calls, self.fail = [], fail
 
-    def __call__(self, argv, extra_env):
+    def __call__(self, argv):
         self.calls.append(argv)
         failed = self.fail is not None and self.fail in argv
         return subprocess.CompletedProcess(argv, 1 if failed else 0, "", "refused" if failed else "")

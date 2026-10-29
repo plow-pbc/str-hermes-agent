@@ -11,7 +11,7 @@ BIN = pathlib.Path(__file__).resolve().parents[1] / "bin"
 
 # (script, reader, args)
 READERS = [("hostex-poll.py", "read_token", ()), ("hostex-raw", "read_token", ()),
-           ("checkin-watch.py", "read_env_key", ("HOSTEX_TOKEN",))]
+           ("turnover-poll.py", "read_env_key", ("HOSTEX_TOKEN",))]
 
 
 def _load(script):
