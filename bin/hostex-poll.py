@@ -107,7 +107,7 @@ one included: a bare "stop" in that thread stops this send, and counts as an
 owner having objected in everything below. The owners are asked to name the id
 and need not have.
 If you did not announce this draft under the veto window, send the guest
-nothing and say nothing.
+nothing and reply with exactly NO_REPLY.
 If no owner objected to, edited, or questioned it, send exactly those words to
 the conversation id above: the window has closed and the silence is the
 approval you said it would be. If an owner approved it, send what they

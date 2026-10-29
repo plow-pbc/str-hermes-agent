@@ -367,7 +367,7 @@ def test_the_reminder_names_the_draft_it_must_not_re_compose(monkeypatch, announ
     # Every announced wait comes back, so the agent is what tells a
     # veto-window draft from an approval-path one.
     pytest.param("If you did not announce this draft under the veto window, send "
-                 "the guest nothing and say nothing",
+                 "the guest nothing and reply with exactly NO_REPLY",
                  id="the-agent-still-checks-the-path"),
     pytest.param('a bare "stop" in that thread stops this send',
                  id="an-unaddressed-stop-stops-every-draft"),
