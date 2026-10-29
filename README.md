@@ -69,7 +69,7 @@ token and the ability to open doors.
 | Dev checkouts | `~/Hacking/str3` and numbered slots — edit here, never run from here |
 | Persistent state | the named volume `sams-str-hermes-agent_agent-home`, mounted at `/var/lib/hermes` |
 | Ingest staging | `~/hermes-vault` — the Hostex raw cache and the ingest manifest; outside every checkout, never a git repo (its history is `~/hermes-vault.git`, beside it) |
-| Operations wiki | `~/Plow/wiki` on the owner's Mac (mba), under `projects/str/`, reached over the Latch relay |
+| Operations wiki | `~/Plow/wiki` on the owner's Mac (mba), under `projects/str/`, reached with the latch CLI |
 
 Code is written in `~/Hacking` and deployed to `~/services`. Anything
 *scheduled* — the nightly wiki job, the message poller — must point at
@@ -84,7 +84,7 @@ not what the agent reads, and a check pointed at it reports on a dead home.
 
 ## Deploy your own
 
-str runs as a Plow agent, and it needs Plow Latch running on the owner's Mac:
+str runs as a Plow agent, and it needs latch serving the owner's Mac:
 its wiki lives at `~/Plow/wiki` there, and so does the file setup reads keys
 from. Deploy the image, then text the agent. In the owner's one-to-one chat it
 starts the `str-setup` skill (`agent-skills/productivity/str-setup/`) and asks
@@ -95,8 +95,8 @@ timezone. Then one restart from the Plow app, and it registers its jobs.
 
 **Keys never go through chat.** Setup writes `~/Plow/str-keys.env` on the Mac
 with empty `HOSTEX_TOKEN=` / `SEAM_API_KEY=` lines; the owner pastes the keys
-there and says done, and `bin/str-config --from-latch` reads them over the
-relay, saves them to `$HERMES_HOME/str/setup.env` and empties the file. The
+there and says done, and `bin/str-config --from-latch` reads them through
+latch, saves them to `$HERMES_HOME/str/setup.env` and empties the file. The
 model only ever sees the masked last three characters. At boot,
 `02-str-setup-env` publishes that file's four keys (and no others) into the
 container environment. The wiki's recall is optional: setup works without it.
@@ -112,7 +112,7 @@ container environment. The wiki's recall is optional: setup works without it.
 | Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (read from Hermes' run record), which it then sends unless an owner stopped it; an approval-path draft or a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
-| Drive the operator's Mac — its browser (Mercury, bank and vendor portals) and files — over Plow Latch | **Provisioned by the base image** — `plow-init` writes the `plow` MCP server from the agent's own Plow identity at every boot (§ Plow Latch) |
+| Drive the operator's Mac — its browser (Mercury, bank and vendor portals), files and messages — with latch | **Shipped in the image** — the latch CLI and its skill; boot logs the agent in with its own Plow credential (§ Plow Latch) |
 | Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
 
 ## Roadmap
@@ -184,7 +184,7 @@ between the two; #46 records why the allowlist never was.
 - **Generated wiki content is data, not code.** It is job output, not code
   review. The wiki is not in this checkout — str's pages live under `projects/str/` in
   the owner's common plow-wiki at `~/Plow/wiki` on their Mac, which the nightly
-  reaches over the Latch relay and snapshots with `wiki snapshot --push` behind
+  reaches with latch and snapshots with `wiki snapshot --push` behind
   a credential scan. Ingest staging — the raw conversations and the manifest —
   stays on `wakeup` in `~/hermes-vault`, which `scripts/promote-vault` commits
   and pushes into the private `sams-str-vault` repo behind the same kind of
@@ -1066,10 +1066,10 @@ runs inside the gateway container on Hermes' own scheduler.
 `~/Plow/wiki` on mba under two roots it writes, `projects/str/properties` (the
 hubs) and `projects/str/operations`, with the standing cast in the shared
 `entities/people/key-people.md`.
-Other agents share the same wiki. The container reaches it only over the Latch
-relay: the ingest and digest turns call `plow_read_file` / `plow_write_file`, and
-the `wiki` CLI steps go through `bin/plow_relay.py`, which runs the CLI on the
-Mac inside Latch's sandbox (writes need declared paths; a push declares network).
+Other agents share the same wiki. The container reaches it only through latch,
+and always by `bin/plow_relay.py`: the ingest and digest turns read and write
+pages with it, and the `wiki` CLI steps run the CLI on the Mac with it, inside
+latch's sandbox (writes need declared paths; a push declares network).
 What the Mac needs, once:
 
 - the `wiki` CLI at the commit the Dockerfile pins as `PLOW_WIKI_SHA`:
@@ -1100,16 +1100,17 @@ the round cap fails ingest. A night is all or nothing: if ingest or any check
 fails, `wiki restore --writer str` puts str's roots back to the last snapshot,
 the manifest goes back to its pre-run bytes (so tonight's conversations are
 re-ingested tomorrow), nothing is snapshotted, and the digest leads with
-`rolled back: …`. A relay that could not reach the Mac is noted apart from a
+`rolled back: …`. A latch that could not reach the Mac is noted apart from a
 check that failed. So the last snapshot is always a night that passed. To check
-by hand — the CLI is on the Mac, so both go through the container, as root
-because only root reads the relay's environment:
+by hand — the CLI is on the Mac, so both go through the container, under the
+environment boot publishes, which only root reads, as the agent whose latch
+login it is:
 
 ```sh
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-  /var/lib/hermes/scripts/plow_relay.py run --write '~/Plow/wiki' -- wiki index
+  /command/s6-setuidgid hermes /var/lib/hermes/scripts/plow_relay.py run --write '~/Plow/wiki' -- wiki index
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-  /var/lib/hermes/scripts/wiki-provenance /var/lib/hermes/repo/vault '~/Plow/wiki'
+  /command/s6-setuidgid hermes /var/lib/hermes/scripts/wiki-provenance /var/lib/hermes/repo/vault '~/Plow/wiki'
 ```
 
 **Staging is promoted from the host.** The raw cache and the manifest never
@@ -1517,25 +1518,39 @@ attempt.
 ## Plow Latch (the operator's Mac)
 
 Anything behind a login only the operator's Mac holds — Mercury for paying a
-handyman, the Airbnb and Hostex web UIs — the agent reaches through Plow
-Latch: an MCP server the Mac serves over the Plow relay, which authorises the
-connection and tells the Mac which agent is asking, while the Mac approves
-each action.
+handyman, the Airbnb and Hostex web UIs, the owner's texts — and the wiki
+itself, the agent reaches with the latch CLI (https://docs.plucas.dev/latch/):
+the Mac runs `latch serve`, and every call is judged against the owner's rules
+there and lands in its audit.
 
-Nothing in this repo configures it. The base image's `plow-init` asks Plow
-`GET /v1/agents/cloud/me` with the agent's own `PLOW_AGENT_TOKEN` at every
-boot and writes the answer into the home: the `plow` entry under
-`mcp_servers` in `config.yaml` (enabled when the account has a Mac, disabled
-when `mcp_url` comes back null) and `PLOW_MCP_URL` in the dotenv. The same
-token is the relay credential, so there is no Latch pair to mint and nothing
-carried by hand; a token minted before relay access existed answers 403 on
-the relay and needs a fresh activation (§ Private/home chat activation, #44) on an
-agent-mgr that keeps `relay:call` when it narrows (plow-pbc/agent-mgr#157).
+The image ships the client, root-owned at `/usr/local/bin/latch`, and the
+`latch` skill written from that binary by `latch skill`. Its login is the
+agent's own: `bin/latch-boot`, an s6 oneshot after plow-init, runs `latch login`
+with the agent's `PLOW_AGENT_TOKEN` when the state folder
+(`LATCH_STATE_DIR=/var/lib/hermes/latch`, on the home volume) has none, so
+there is no code to text and the login outlives the container. Never copy
+another machine's `~/.latch` in: the host would take the agent's calls for the
+owner's.
 
-Verify from wakeup: `docker compose exec -T hermes hermes mcp test plow`
-lists the Mac's tools. Widening the agent's reach to the Mac is deliberate
-(§ Review priority, "Tool reach is deliberate") — every action still lands in
-Latch's approval UI and audit log on the Mac.
+Two settings name what a call reaches, both latch's own environment:
+`LATCH_HOST` is the Mac (compose's `environment:`, since the account also has
+a `cloud` host), and `LATCH_PLOW_CHAT` is the chat the gatekeeper reads the
+owner's request in — the home chat by default, which latch-boot publishes; the
+model names the chat it is answering with `--plow-chat`.
+
+The old Latch relay is retired: plow-init still writes its `plow` MCP server
+into `config.yaml` and its `PLOW_MCP_URL` into the dotenv and the container
+environment at every boot from `/me`'s `mcp_url`, and latch-boot removes all
+three before the gateway starts. Without the URL, the chat plugin stops
+injecting its `plow_*` routing and relay recall; `config.yaml` disables the
+base's `owners-mac` and `google-workspace` skills, which route through those
+tools too.
+
+Verify from wakeup, as the agent:
+
+```sh
+docker compose exec -T -u hermes hermes latch status --pretty
+```
 
 ## Dashboard
 

@@ -9,7 +9,7 @@
 #   ./bin/ingest-all <staging vault> [wiki]
 #
 # The staging vault holds the raw cache and the manifest; the pages it produces
-# go to the owner's common wiki, on their Mac, through the plow_* tools.
+# go to the owner's common wiki, on their Mac, through latch (bin/plow_relay.py).
 set -uo pipefail
 
 compose() { "$(dirname "$0")/../scripts/compose" "$@"; }
@@ -85,13 +85,14 @@ else
       --entrypoint bash hermes \
       -c '[ -d "$HERMES_HOME/skills/wiki-ingest" ] || { echo "no wiki skills in $HERMES_HOME/skills — boot the container once so the runtime seeds them from the image" >&2; exit 1; }; exec hermes chat -q "$INGEST_PROMPT"'
   }
-  # The checks reach the Mac through the live gateway's relay, whose credential
-  # only root can read (README § Compiling the wiki nightly). They hold pages
+  # The checks reach the Mac through the live gateway's latch: its environment
+  # only root can read, and its login is the agent's, so they run as the agent
+  # under root's copy of that environment (README § Compiling the wiki nightly). They hold pages
   # against the production manifest, so a host run on another vault checks
   # production's -- which is the only vault this branch is ever pointed at.
   wiki_tool() {
     compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-      "$CHOME/scripts/$1" "${@:2}"
+      /command/s6-setuidgid hermes "$CHOME/scripts/$1" "${@:2}"
   }
 fi
 
@@ -301,7 +302,7 @@ while :; do
   else
     work="Process exactly these files and no others: ${files%, }."
   fi
-  turn "${repair}Use the wiki-ingest skill. Its vault is the local staging directory ${CVAULT}, which holds only the raw sources and .manifest.json: record every file you process in that manifest, including ones that yield no page. ${work} The pages do NOT go in ${CVAULT}. They live in the owner's wiki at ${WIKI} on the owner's Mac, and you read and write them only with plow_read_file and plow_write_file: property hubs under ${WIKI}/projects/str/properties/, operations pages under ${WIKI}/projects/str/operations/, standing roles in ${WIKI}/entities/people/key-people.md. Link pages as markdown from the wiki's root, [Lake House](/projects/str/properties/lake-house.md), never [[wikilinks]]; a page's property: is such a link. Read ${WIKI}/AGENTS.md and ${WIKI}/projects/str/AGENTS.md first and follow them, including str's worked examples and calibration note. Any of these files you have ingested before is a conversation whose guest has since replied — read the existing page and update it rather than creating a second one. Do not edit ${WIKI}/index.md or any page marked generated_by: wiki-index; wiki index rebuilds them. Copy every sources: URL character for character from the raw file's own sources: line; never retype one." \
+  turn "${repair}Use the wiki-ingest skill. Its vault is the local staging directory ${CVAULT}, which holds only the raw sources and .manifest.json: record every file you process in that manifest, including ones that yield no page. ${work} The pages do NOT go in ${CVAULT}. They live in the owner's wiki at ${WIKI} on the owner's Mac, and you read and write them only through latch, with /opt/plow/str/bin/plow_relay.py: '/opt/plow/str/bin/plow_relay.py read PATH' prints a page, and '/opt/plow/str/bin/plow_relay.py write PATH < FILE' replaces it with a local file you wrote, PATH a ~/Plow/wiki path in single quotes: property hubs under ${WIKI}/projects/str/properties/, operations pages under ${WIKI}/projects/str/operations/, standing roles in ${WIKI}/entities/people/key-people.md. Link pages as markdown from the wiki's root, [Lake House](/projects/str/properties/lake-house.md), never [[wikilinks]]; a page's property: is such a link. Read ${WIKI}/AGENTS.md and ${WIKI}/projects/str/AGENTS.md first and follow them, including str's worked examples and calibration note. Any of these files you have ingested before is a conversation whose guest has since replied — read the existing page and update it rather than creating a second one. Do not edit ${WIKI}/index.md or any page marked generated_by: wiki-index; wiki index rebuilds them. Copy every sources: URL character for character from the raw file's own sources: line; never retype one." \
     > "/tmp/ingest-round-$round.log" 2>&1
   rc=$?
   # A failed turn stops the run. Acknowledging it and looping meant a retry

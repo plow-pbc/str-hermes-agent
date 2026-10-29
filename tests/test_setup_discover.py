@@ -12,8 +12,6 @@ ENV = {"HOSTEX_TOKEN": "tok-abcdefgh", "SEAM_API_KEY": "seam-abcdefgh"}
 
 
 CASES = [
-    ("latch", [], {"PLOW_MCP_URL": " https://mcp.example "}, None, {"configured": True}),
-    ("latch", [], {"PLOW_MCP_URL": "  "}, None, {"configured": False}),
     ("hostex-properties", [], {}, {"data": {"properties": [
         {"id": 1, "title": "Example Cabin", "timezone": "America/Denver", "default_checkin_time": "16:00"},
         {"id": 2, "title": None}]}},
@@ -47,6 +45,27 @@ def run(tmp_path, argv, env, fake):
 def test_command_prints_choices(tmp_path, capsys, fake_http, name, args, env, payload, expected):
     assert run(tmp_path, [name, *args], env, fake_http(lambda url, headers: payload)) == 0
     assert json.loads(capsys.readouterr().out) == expected
+
+
+BOTH = {"hosts": [{"name": "cloud", "online": True}, {"name": "mba", "online": False}]}
+
+
+@pytest.mark.parametrize("status,env,configured", [
+    (BOTH, {}, True),
+    (BOTH, {"LATCH_HOST": "cloud"}, True),
+    (BOTH, {"LATCH_HOST": "mba"}, False),  # the Mac is the host latch reaches, and it is offline
+    ({"hosts": []}, {}, False),
+    (discover.plow_relay.RelayError("latch status: not_logged_in: no login here"), {}, False),
+])
+def test_latch_is_configured_when_its_host_is_online(tmp_path, capsys, monkeypatch, status, env, configured):
+    def latch(*args):
+        assert args == ("status",)
+        if isinstance(status, Exception):
+            raise status
+        return status
+    monkeypatch.setattr(discover.plow_relay, "latch", latch)
+    assert run(tmp_path, ["latch"], env, None) == 0
+    assert json.loads(capsys.readouterr().out) == {"configured": configured}
 
 
 @pytest.mark.parametrize("name,code,expected", [

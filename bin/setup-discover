@@ -18,6 +18,7 @@ import urllib.error, urllib.parse, urllib.request
 BIN = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 import hostex_api  # noqa: E402
+import plow_relay  # noqa: E402
 import str_env  # noqa: E402
 
 SEAM = "https://connect.getseam.com"
@@ -41,7 +42,14 @@ def _secret(env, key):
 
 
 def cmd_latch(env, fetch):
-    return {"configured": bool(env.get("PLOW_MCP_URL", "").strip())}
+    """Configured when latch is logged in and the host it reaches ($LATCH_HOST, else
+    any) is online."""
+    try:
+        hosts = plow_relay.latch("status").get("hosts") or []
+    except plow_relay.RelayError:
+        return {"configured": False}
+    host = env.get("LATCH_HOST")
+    return {"configured": any(h.get("online") for h in hosts if not host or h.get("name") == host)}
 
 
 def cmd_hostex_properties(env, fetch):

@@ -129,21 +129,23 @@ def test_a_refused_property_in_an_env_and_ops_patch_writes_neither_file(tmp_path
 
 
 class Mac:
-    """The owner's Mac behind plow_relay: read/write on a dict, or a dead relay."""
+    """The owner's Mac behind plow_relay: read/write on a dict, or latch unable to
+    reach it -- for both calls, or (`down="read"`) only the read."""
 
     def __init__(self, monkeypatch, files=None, down=False):
         self.files = dict(files or {})
+        offline = str_config.plow_relay.RelayError("latch file: host_offline: mba is not running", "host_offline")
 
         def read(path):
             if down:
-                raise OSError("connection refused")
+                raise offline
             if path not in self.files:
-                raise str_config.plow_relay.RelayError("plow_read_file: not found")
+                raise str_config.plow_relay.RelayError("latch file: not_found: no such file", "not_found")
             return self.files[path]
 
         def write(path, content):
-            if down:
-                raise OSError("connection refused")
+            if down is True:
+                raise offline
             self.files[path] = content
 
         monkeypatch.setattr(str_config.plow_relay, "read", read)
@@ -166,6 +168,13 @@ def test_latch_template(tmp_path, monkeypatch, before, after):
     mac = Mac(monkeypatch, {} if before is None else {KEYS: before})
     assert run(tmp_path, "--latch-template") == 0
     assert mac.files[KEYS] == after
+
+
+def test_latch_template_never_overwrites_keys_it_could_not_read(tmp_path, monkeypatch, capsys):
+    mac = Mac(monkeypatch, {KEYS: "HOSTEX_TOKEN=tok-abcdefgh\n"}, down="read")
+    assert run(tmp_path, "--latch-template") == 2
+    assert mac.files[KEYS] == "HOSTEX_TOKEN=tok-abcdefgh\n"
+    assert "couldn't reach your Mac" in capsys.readouterr().err
 
 
 def test_from_latch_saves_the_keys_empties_the_file_and_prints_only_masks(tmp_path, monkeypatch, capsys):

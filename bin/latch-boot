@@ -1,0 +1,103 @@
+#!/opt/hermes/.venv/bin/python3
+"""latch-boot -- ready latch for this boot, after plow-init and before the gateway.
+
+The agent reaches the owner's Mac through the latch CLI the image ships. Three
+things make that so, each never fatal: a failure is logged and the gateway
+starts on what there is.
+
+  - The old Latch relay is retired: its MCP server leaves config.yaml, and its
+    PLOW_MCP_URL leaves the dotenv and the container environment, which is what
+    switches off the chat plugin's instructions and recall for the relay's
+    plow_* tools. plow-init writes all three back at every boot from /me's
+    mcp_url, so this runs after it, every boot.
+  - LATCH_PLOW_CHAT defaults to the home chat. Latch asks an agent whose line has
+    several chats which one it acts for; scripts have none, and the model names
+    its own with --plow-chat.
+  - The agent is logged in, once, with its own Plow credential, into the state
+    folder on the home volume, so the login outlives the container.
+"""
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+import yaml
+
+HOME = pathlib.Path(os.environ.get("HERMES_HOME", "/var/lib/hermes"))
+CONTAINER_ENV = pathlib.Path(os.environ.get("STR_ENV_DIR", "/run/s6/container_environment"))
+RELAY_SERVER = "plow"
+
+
+def log(message):
+    print(f"latch-boot: {message}", file=sys.stderr)
+
+
+def replace(path, text):
+    """Rewrite PATH, keeping its owner and mode. Staged with mkstemp: this runs as
+    root in a home the agent can write, so a predictable staging name is one the
+    agent could point elsewhere first."""
+    mode = path.stat()
+    fd, staged = tempfile.mkstemp(dir=path.parent, prefix=".latch-boot.")
+    try:
+        os.fchown(fd, mode.st_uid, mode.st_gid)
+        os.fchmod(fd, mode.st_mode & 0o7777)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        os.replace(staged, path)
+    except BaseException:
+        os.unlink(staged)
+        raise
+
+
+def drop_relay_server():
+    config = HOME / "config.yaml"
+    data = yaml.safe_load(config.read_text()) or {}
+    if data.get("mcp_servers", {}).pop(RELAY_SERVER, None) is None:
+        return
+    replace(config, yaml.safe_dump(data, sort_keys=False))
+    log(f"removed the {RELAY_SERVER} MCP server; the Mac is reached through latch")
+
+
+def drop_relay_url():
+    (CONTAINER_ENV / "PLOW_MCP_URL").unlink(missing_ok=True)
+    dotenv = HOME / ".env"
+    if not dotenv.exists():
+        return
+    lines = dotenv.read_text().splitlines(keepends=True)
+    kept = [line for line in lines if not line.startswith("PLOW_MCP_URL=")]
+    if kept != lines:
+        replace(dotenv, "".join(kept))
+        log("removed PLOW_MCP_URL")
+
+
+def default_chat():
+    target = CONTAINER_ENV / "LATCH_PLOW_CHAT"
+    home = os.environ.get("PLOW_HOME_CHANNEL", "")
+    if home and not target.exists():
+        target.write_text(home)
+
+
+def log_in():
+    as_agent = ["/command/s6-setuidgid", "hermes", "env", f"HOME={HOME}"]
+    local = subprocess.run([*as_agent, "latch", "status", "--local"], capture_output=True, text=True, timeout=30)
+    if local.returncode == 0 and json.loads(local.stdout).get("login"):
+        return
+    done = subprocess.run([*as_agent, "latch", "login"], capture_output=True, text=True, timeout=60)
+    if done.returncode:
+        raise RuntimeError(done.stderr.strip() or f"latch login exited {done.returncode}")
+    log("logged in")
+
+
+def main():
+    for step in (drop_relay_server, drop_relay_url, default_chat, log_in):
+        try:
+            step()
+        except Exception as e:  # never fatal: the gateway starts on what there is
+            log(f"{step.__name__} failed: {e}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

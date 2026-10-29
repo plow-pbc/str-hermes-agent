@@ -278,8 +278,8 @@ under `wiki-nightly`, and after its next run confirm the scheduler line
 
 ## 4.7 Register the host-side promote, once
 
-Ingest staging — the raw conversations and the manifest — never crosses the
-relay, and `~/hermes-vault.git` is not mounted into the container. Promoting it is
+Ingest staging — the raw conversations and the manifest — never crosses to the
+Mac, and `~/hermes-vault.git` is not mounted into the container. Promoting it is
 a **host** cron entry, so nothing in steps 1–4 installs it, and a checkout that
 redeploys cleanly can still leave the manifest on one disk. That is how 22 days
 of compiled guest knowledge once went unpushed.
@@ -311,16 +311,16 @@ after is the confirmation and it prints the line rather than a verdict, because
 
 The nightly's `wiki snapshot --push` pushes the wiki from the owner's Mac and
 refuses every night while the history repo there has no origin. Read it through
-the relay, as root, because only root reads the container environment
-`plow_relay.py` needs:
+latch, under the container environment only root reads, as the agent whose
+latch login it is:
 
 ```sh
 docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-  /var/lib/hermes/scripts/plow_relay.py run -- /bin/sh -c 'git --git-dir "$HOME/Plow/wiki.git" remote get-url origin'
+  /command/s6-setuidgid hermes /var/lib/hermes/scripts/plow_relay.py run -- /bin/sh -c 'git --git-dir "$HOME/Plow/wiki.git" remote get-url origin'
 ```
 
-Through `sh -c` because Latch runs a command without a shell: a bare
-`~/Plow/wiki.git` reaches git unexpanded. It prints the remote. `exit 2` is the relay failing to reach the Mac; anything
+Through `sh -c` because latch runs a command without a shell: a bare
+`~/Plow/wiki.git` reaches git unexpanded. It prints the remote. `exit 2` is latch failing to reach the Mac; anything
 else non-zero is a history repo with no origin, so add one on the Mac.
 
 ## 5. Verify

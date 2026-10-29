@@ -81,6 +81,12 @@ auxiliary:
       timeout: 300
 
 group_sessions_per_user: false
+# The base's skills for the old Latch relay route the owner's Mac through its
+# plow_* tools, which are gone; the latch skill is the route (bin/latch-boot).
+skills:
+  disabled:
+  - owners-mac
+  - google-workspace
 # The base seed sets this, but this file replaces the seed's config.yaml on
 # every boot, so without it Hermes' default "ask" appends a build-a-profile
 # directive to the owner's first message and it wins over str-setup's opener
