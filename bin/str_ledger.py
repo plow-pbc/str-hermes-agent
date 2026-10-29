@@ -72,6 +72,15 @@ class Board:
         out = self._run(["create", title, "--idempotency-key", key, "--body", body, "--json"])
         return json.loads(out)["id"]
 
+    def open_tasks(self, prefix: str = "notify-when-house-is-ready ") -> dict[str, str]:
+        """{key: id} for tasks not done or archived whose title starts with `prefix`.
+
+        `list --json` does not expose the idempotency key, so titles carry it as
+        their second token: `<prefix><key> ...`.
+        """
+        return {t["title"].split()[1]: t["id"] for t in json.loads(self._run(["list", "--json"]))
+                if t["title"].startswith(prefix) and t["status"] not in ("done", "archived")}
+
     def ledger(self, task_id: str) -> tuple[str, Ledger]:
         shown = json.loads(self._run(["show", task_id, "--json"]))
         return shown["task"]["status"], parse(shown["comments"])
