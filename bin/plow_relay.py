@@ -52,9 +52,10 @@ def latch(*args: str) -> dict:
         return json.loads(done.stdout)
     try:
         error = json.loads(done.stderr.strip().splitlines()[-1])["error"]
-    except (IndexError, KeyError, ValueError):
+        code, message = error["code"], error["message"]
+    except (IndexError, KeyError, TypeError, ValueError):
         raise RelayError(f"latch {args[0]}: {done.stderr.strip() or f'exited {done.returncode}'}") from None
-    raise RelayError(f"latch {args[0]}: {error['code']}: {error['message']}", error["code"])
+    raise RelayError(f"latch {args[0]}: {code}: {message}", code)
 
 
 def read(path: str) -> str:
