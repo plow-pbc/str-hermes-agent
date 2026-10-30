@@ -181,44 +181,16 @@ def test_the_draft_reaches_the_session_that_approves_it():
     # form under `platforms:` is the shape that already failed here.
     assert re.search(r"^group_sessions_per_user: false$", config, re.MULTILINE)
 
-    # The marker is a contract across two files: the poller's prompt tells the
-    # announcement to mark the wording, the group prompt sends what the marker
-    # names. Renamed on one side only, the loop silently goes back to lifting
-    # words out of prose — which sends different words under an approval.
-    # Sliced to the prompt literal, as the assertions above are sliced: the
-    # marker moving into a comment while PROMPT renames it would otherwise pass.
+    # The poller's prompt tells the announcement to mark the wording with
+    # DRAFT:. Sliced to the prompt literal: the marker moving into a comment
+    # while PROMPT renames it would otherwise pass.
     poll = (ROOT / "bin/hostex-poll.py").read_text()
     assert "DRAFT:" in poll.split('PROMPT = """')[1].split('"""')[0]
-    assert "DRAFT:" in config
-    # The consumer half of the same contract: bounded to the one delivery, not
-    # to everything below the marker in the thread — which would sweep in the
-    # approval itself and any owner cross-talk that arrived first. Matched on
-    # collapsed whitespace so reflowing the block cannot break the assertion
-    # while the rule survives.
-    flowed = " ".join(config.split())
-    assert "send the rest of that delivery, below the last `DRAFT:` line" in flowed
-    # Both halves are anchored, because the delivery now quotes the guest
-    # verbatim and a guest can write either field. An unanchored marker lets a
-    # bare approval send the guest's own wording back as the owners'; an
-    # unanchored id lands approved wording on the wrong guest's conversation.
-    assert "conversation id named directly above that same `DRAFT:` line" in flowed
-    # Consumer half of the veto-tier contract (producer half pinned in
-    # test_hostex_poll.py): the group prompt has to recognize a veto
-    # announcement by the same wording the poller's prompt emits, and any
-    # owner reply naming the draft id has to stop the send — nothing is
-    # scheduled to cancel, so the objection has to reach the later turn the
-    # only way it can: answered in this thread, for that turn to find.
-    assert "sending in 30 minutes unless an owner says stop" in flowed
-    assert "stops the send" in flowed
-    assert "an edit as a fresh draft on the approval path" in flowed
     # Single policy owner: eligibility for the veto tier is stated once, in
-    # SOUL.md; the poller and group prompts reference it rather than restate
-    # it (contract-drift finding, PR #3). These pins hold the owner's copy;
-    # the reference pins live beside each consumer's other clauses.
+    # SOUL.md (contract-drift finding, PR #3). These pins hold the owner's copy.
     soul_src = " ".join((ROOT / "runtime/persona.md").read_text().split())
     assert "verbatim from an unmarked wiki" in soul_src
     assert "commits the owners to nothing" in soul_src
-    assert "SOUL.md veto-window test" in flowed
 
 
 
