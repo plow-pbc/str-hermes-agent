@@ -33,8 +33,7 @@ T0 = at("14:00")
 
 
 def stay(prev_checkout="2026-11-03T08:00", checkin="2026-11-03T16:00", same_day=True):
-    return turnover.Stay("k", "Guest", aware(checkin),
-                         aware(prev_checkout) if prev_checkout else None, same_day)
+    return turnover.Stay("k", "Guest", aware(checkin), aware(prev_checkout), same_day)
 
 
 def sig(now="2026-11-03T15:00", unlocks=(), last=None, online=True, code="live", hostex=False):

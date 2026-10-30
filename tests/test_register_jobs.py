@@ -102,6 +102,8 @@ RECONCILE = [
      [("replace", "wiki-nightly")]),
     ("turnover no longer desired", ENV_FIXTURE, _registered(turnover={"script": "turnover-poll.py"}),
      [("remove", "turnover")]),
+    ("retired job replaced by turnover", ENV_SEAM, _registered(checkin_watch=CHECKIN),
+     [("create", "turnover"), ("remove", "checkin-watch")]),
     ("a paused retired job is still removed", ENV_FIXTURE,
      _registered(checkin_watch=CHECKIN | {"paused_at": "2026-10-01T00:00:00Z"}), [("remove", "checkin-watch")]),
     ("paused is left alone", ENV_FIXTURE,
@@ -121,16 +123,6 @@ def test_reconcile(env, registered, expected, capsys):
     paused = any(not j["enabled"] or j["paused_at"] for j in registered.values()
                  if j["name"] in register_jobs.OWNED)
     assert ("paused" in capsys.readouterr().out) == paused
-
-
-def test_checkin_watch_is_removed_and_turnover_registered():
-    """An image that ran checkin-watch upgrades to turnover in one reconcile."""
-    env = {**ENV_FIXTURE, "SEAM_API_KEY": "s",
-           "PLOW_CHAT_GROUP_UIDS": "cht_owners_fixture=STR Owners,cht_c=Cleaners,cht_m=Maintenance"}
-    actions = register_jobs.reconcile(register_jobs.desired_jobs(env, OPS_PROP),
-                                      _registered(checkin_watch=CHECKIN))
-    assert [(kind, x if kind == "remove" else x["name"]) for kind, x in actions] == [
-        ("create", "turnover"), ("remove", "checkin-watch")]
 
 
 def test_registered_jobs_reads_the_live_shape(tmp_path):

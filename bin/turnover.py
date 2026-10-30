@@ -30,7 +30,7 @@ class Stay:
     key: str
     guest: str
     checkin_at: datetime
-    prev_checkout_at: datetime | None
+    prev_checkout_at: datetime
     same_day: bool
 
 
@@ -55,8 +55,7 @@ def is_clean(stay: Stay, sig: Signals, led: str_ledger.Ledger) -> str | None:
     """Which rule made the house clean: hostex, lock+12h, reply:<who>; else None."""
     if sig.hostex_task_completed:
         return "hostex"
-    since = [u for u in sig.cleaner_unlocks
-             if stay.prev_checkout_at is None or u > stay.prev_checkout_at]
+    since = [u for u in sig.cleaner_unlocks if u > stay.prev_checkout_at]
     if since and sig.now - max(since) > CLEAN_AFTER:
         return "lock+12h"
     if led.clean_by:
