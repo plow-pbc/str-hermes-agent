@@ -8,7 +8,7 @@
 # taking the INDEX digest (`docker buildx imagetools inspect <tag>`, the top
 # `Digest:` line) -- a per-platform manifest digest under it does not resolve
 # as a FROM.
-FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-504fb5b2e1118a33c5afdb3f6dd4000cf67e658f@sha256:8c8c5d9d80051e1b837c9c0d7d680395b553a9dc0508c9692f62db0e67b9f93f
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-00bc983360ec07ec92212eca98c86867c5b57df2@sha256:ff0a56d3ba8f61cd5c69bcc461aaa13956174893c2abad088e0b19c1daa1dae7
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't
