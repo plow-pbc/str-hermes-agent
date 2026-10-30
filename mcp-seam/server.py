@@ -212,9 +212,10 @@ _NOT_RETROACTIVE = "unlocks already recorded stay unattributed"
 
 def _local(stamp) -> str:
     """A Seam timestamp (UTC) in the property's time, zone named: passed raw,
-    "22:04Z" was read to the owners as 10:04 PM. TZ is the container's (compose.yml)."""
-    zone = ZoneInfo(os.environ.get("TZ") or "UTC")
-    return f"{datetime.fromisoformat(str(stamp)).astimezone(zone):%Y-%m-%d %H:%M %Z}"
+    "22:04Z" was read to the owners as 10:04 PM. TZ comes from this server's
+    env block in runtime/config.yaml; unset, this raises rather than guess."""
+    local = datetime.fromisoformat(str(stamp)).astimezone(ZoneInfo(os.environ["TZ"]))
+    return f"{local:%Y-%m-%d %H:%M %Z}"
 
 
 def _describe_event(event, names) -> str:
