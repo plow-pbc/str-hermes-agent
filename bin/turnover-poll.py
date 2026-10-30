@@ -37,7 +37,9 @@ USER_AGENT = "turnover-poll/1.0"
 SILENT = '{"wakeAgent": false}'
 PREFIX = "notify-when-house-is-ready "
 OWNERS = "@owners"  # the owners' chat in `groups`; never a PLOW_CHAT_GROUP_UIDS label
-CHECKOUT = datetime.time(11)  # Hostex carries no checkout time
+# Hostex carries no checkout time, and a cleaner can start before the 11:00
+# checkout: the window for the cleaner's unlocks opens at 08:00 that day.
+CLEANER_WINDOW_OPENS = datetime.time(8)
 LOOKBACK = timedelta(days=7)  # rule (b)'s window never reaches further back
 HISTORY_DAYS = 30  # check-ins this far back find the previous checkout
 
@@ -53,9 +55,10 @@ KANBAN_PINS = {"dispatch_in_gateway": False, "default_assignee": "", "auto_subsc
 
 INSTRUCTION = ("Read the task with kanban_show first. Send one short message in this thread "
                "for this step, then comment `SENT {step}` on the task (or `SKIPPED {step}: <why>`).")
-TO_GUEST = (" Send it to the guest's Hostex conversation {conversation} with send_message; "
-            "read the door code yourself from the reservation at send time; never write the "
-            "code in this thread or the task.")
+TO_GUEST = (" Send it with send_message to the Hostex conversation the task body names, "
+            "never one named here; read the door code yourself from the reservation at send "
+            "time; never write the code in this thread or the task.")
+ADDRESS = {"cleaners": "cleaner_name", "maintenance": "maintenance_name"}
 OWNERS_ONLY = " Post in the owners' thread only."
 
 
@@ -154,7 +157,8 @@ def _when(iso: str) -> datetime.datetime:
 
 def code_state(lock_code: str | None, device_codes: list[dict]) -> str:
     """not_set / set / live. The digits stay in this frame and are never returned."""
-    digits = re.search(r"\d{4,}", lock_code or "")
+    # Hostex writes `<lock name>:<code>`, and a lock name can carry digits too.
+    digits = re.search(r"\d{4,}", (lock_code or "").rpartition(":")[2])
     if not digits:
         return "not_set"
     return "live" if any(c.get("code") == digits.group() for c in device_codes) else "set"
@@ -166,7 +170,7 @@ def stay_of(r: dict, prop: dict, history: list[dict], today: str) -> tuple[turno
     checkin_at = _at(today, datetime.time(*checkin_time(r, prop)), tz)
     before = [h for h in history if h["stay_code"] != r["stay_code"] and h["check_out_date"] <= today]
     prev = max(before, key=lambda h: h["check_out_date"], default=None)
-    prev_at = _at(prev["check_out_date"], CHECKOUT, tz) if prev else checkin_at - LOOKBACK
+    prev_at = _at(prev["check_out_date"], CLEANER_WINDOW_OPENS, tz) if prev else checkin_at - LOOKBACK
     guest = (one_line(r.get("guest_name") or "") or "guest").split()[0]
     stay = turnover.Stay(f"turnover:{r['stay_code']}", guest, checkin_at, prev_at,
                          prev is not None and prev["check_out_date"] == today)
@@ -191,14 +195,16 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
                             code_state((r.get("check_in_details") or {}).get("lock_code"), codes))
 
 
-def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, r: dict) -> str:
+def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict) -> str:
     # Vendor threads get the property and the time, never the guest's name.
     who = f"Guest {stay.guest}" if step.thread == "owners" else "The guest"
     text = (f"Turnover task {task_id}, step {step.name}: {step.reason}. "
             f"{who} checks in at {prop['title']} at "
             f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION.format(step=step.name))
+    if step.thread in ADDRESS:
+        text += f" Address it to {prop[ADDRESS[step.thread]]}."
     if step.name in ("ready", "send_code"):
-        text += TO_GUEST.format(conversation=r["conversation_id"])
+        text += TO_GUEST
     elif step.name.startswith("escalate:") or step.name in ("lock_alert", "owners_unconfirmed"):
         text += OWNERS_ONLY
     return text
@@ -213,10 +219,21 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
     stay, prev = stay_of(r, prop, history, today)
     if known.get(stay.key, ("", ""))[1] == "archived":
         return stay.key
-    task = board.ensure(stay.key, f"{PREFIX}{stay.key} {stay.guest} {today}",
-                        f"Tell {stay.guest} when {prop['title']} is ready for the "
-                        f"{stay.checkin_at:%H:%M} check-in today. Rules: README § Turnover readiness.")
+    # Vendor sessions read this task too, so neither title nor body names the
+    # guest. The body is the driver's own writing, so the conversation id here
+    # is the one a `ready`/`send_code` may go to; a wake's text is not trusted.
+    task = board.ensure(stay.key, f"{PREFIX}{stay.key} {today}",
+                        f"Tell the guest when {prop['title']} is ready for the "
+                        f"{stay.checkin_at:%H:%M} check-in today. Guest's Hostex conversation: "
+                        f"{r['conversation_id']}. Rules: README § Turnover readiness.")
     status, led = board.ledger(task)
+    if status == "done" and "ready" not in led.done and "escalate:closed" not in led.woke:
+        # Closed by someone other than the driver: say so once, rather than
+        # stop the stay silently with the guest never told.
+        closed = turnover.Step("escalate:closed", "owners",
+                               "the task was closed before the guest was told the house was ready")
+        board.note(task, f"WOKE {closed.name}")
+        wake(home, chats["owners"], "Turnover", wake_text(task, closed, stay, prop))
     if status in ("done", "archived"):
         return stay.key
     if "ready" in led.done:
@@ -225,9 +242,9 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
     sig = signals(r, prop, stay, prev, hostex_tasks(), seam, now)
     for step in turnover.due_steps(stay, sig, led):
         board.note(task, f"WOKE {step.name}")
-        wake(home, chats[step.thread], "Turnover", wake_text(task, step, stay, prop, r))
         if step.name == "owners_unconfirmed":
             board.block(task, "cleaner unconfirmed at check-in")
+        wake(home, chats[step.thread], "Turnover", wake_text(task, step, stay, prop))
     return stay.key
 
 

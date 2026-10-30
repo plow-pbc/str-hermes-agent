@@ -32,7 +32,7 @@ def aware(s):
 T0 = at("14:00")
 
 
-def stay(prev_checkout="2026-11-03T11:00", checkin="2026-11-03T16:00", same_day=True):
+def stay(prev_checkout="2026-11-03T08:00", checkin="2026-11-03T16:00", same_day=True):
     return turnover.Stay("k", "Guest", aware(checkin),
                          aware(prev_checkout) if prev_checkout else None, same_day)
 
@@ -75,6 +75,7 @@ def due(s, g, led):
     (S, sig("2026-11-03T14:00"), EMPTY, ["cleaner_coming"]),
     (S, sig("2026-11-03T13:59"), EMPTY, []),
     (S, sig("2026-11-03T14:00", unlocks=["2026-11-03T13:00"]), EMPTY, []),
+    (S, sig("2026-11-03T16:00"), EMPTY, ["cleaner_done_ask"]),  # check-in ends cleaner_coming
     (S, sig("2026-11-03T14:00"), CLEAN_LEDGER, ["ready"]),
     (S, sig("2026-11-03T14:00", hostex=True), EMPTY, ["ready"]),
     (S, sig("2026-11-03T14:00", code="not_set", hostex=True), EMPTY,
@@ -111,14 +112,15 @@ def test_due_steps_table(stay_, sig_, led, expected):
 
 
 def test_rule_b_needs_twelve_hours():
-    s = stay(prev_checkout="2026-11-01T11:00", checkin="2026-11-03T16:00")
+    s = stay(prev_checkout="2026-11-01T08:00", checkin="2026-11-03T16:00")
     assert turnover.is_clean(s, sig(now="2026-11-02T00:59", unlocks=["2026-11-01T13:00"]), EMPTY) is None
     assert turnover.is_clean(s, sig(now="2026-11-02T01:01", unlocks=["2026-11-01T13:00"]), EMPTY) == "lock+12h"
 
 
 def test_rule_b_ignores_unlocks_before_checkout():
-    s = stay(prev_checkout="2026-11-01T11:00")
-    assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T10:00"]), EMPTY) is None
+    s = stay(prev_checkout="2026-11-01T08:00")
+    assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T07:59"]), EMPTY) is None
+    assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T09:30"]), EMPTY) == "lock+12h"
 
 
 def test_is_clean_reports_rule():

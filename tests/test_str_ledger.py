@@ -33,7 +33,7 @@ def test_parse_grammar():
 @pytest.mark.parametrize("bodies,done,clean_by,hold", [
     (["SKIPPED ready: guest cancelled"], {"ready"}, None, False),
     (["CLEAN Jane", "CLEAN Maria Lopez"], set(), "Maria Lopez", False),
-    (["HOLD Sam and Mary"], set(), None, True),
+    (["HOLD Pat and Lee"], set(), None, True),
     (["woke x", "SENT", "CLEAN", "free text"], set(), None, False),
 ])
 def test_parse_verbs(bodies, done, clean_by, hold):
@@ -59,10 +59,10 @@ def test_ledger_reads_show_json():
 
 
 def test_by_key_keys_every_task_by_the_titles_second_token_and_archived_wins():
-    rows = [{"id": "t_1", "title": "notify-when-house-is-ready turnover:S1 Pat 2026-11-03", "status": "ready"},
-            {"id": "t_2", "title": "notify-when-house-is-ready turnover:S2 Ann 2026-11-02", "status": "done"},
-            {"id": "t_3", "title": "notify-when-house-is-ready turnover:S3 Bo 2026-11-01", "status": "archived"},
-            {"id": "t_4", "title": "notify-when-house-is-ready turnover:S3 Bo 2026-11-01", "status": "ready"},
+    rows = [{"id": "t_1", "title": "notify-when-house-is-ready turnover:S1 2026-11-03", "status": "ready"},
+            {"id": "t_2", "title": "notify-when-house-is-ready turnover:S2 2026-11-02", "status": "done"},
+            {"id": "t_3", "title": "notify-when-house-is-ready turnover:S3 2026-11-01", "status": "archived"},
+            {"id": "t_4", "title": "notify-when-house-is-ready turnover:S3 2026-11-01", "status": "ready"},
             {"id": "t_5", "title": "buy towels", "status": "ready"}]
     calls = []
     board = str_ledger.Board(run=lambda argv: calls.append(argv) or json.dumps(rows))

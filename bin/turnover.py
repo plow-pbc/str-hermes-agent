@@ -82,7 +82,8 @@ def due_steps(stay: Stay, sig: Signals, led: str_ledger.Ledger) -> list[Step]:
             "the lock is offline or has no code: ask them to reset the breaker")),
         ("lock_alert" in led.woke and sig.code == "live" and sig.lock_online,
          Step("send_code", "owners", "the guest's code is now live on the lock")),
-        (now >= _local(stay, time(14)) and not sig.cleaner_unlocks and not clean,
+        (now >= _local(stay, time(14)) and now < stay.checkin_at
+         and not sig.cleaner_unlocks and not clean,
          Step("cleaner_coming", "cleaners", "14:00 and no cleaner entry since checkout")),
         (stay.same_day and bool(sig.cleaner_unlocks) and not clean
          and sig.last_lock_event_at is not None

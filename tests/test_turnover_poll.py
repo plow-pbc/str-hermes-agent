@@ -86,6 +86,7 @@ class Board:
         return {t["key"]: (t["id"], t["status"]) for t in rows if t["title"].startswith(prefix)}
 
     def block(self, task_id, reason):
+        self.log.append(("block", reason))
         self.tasks[task_id]["status"] = "blocked"
 
     def complete(self, task_id):
@@ -112,8 +113,9 @@ def hostex_fake(reservations=(DEPARTING, reservation()), cleaning="pending", fai
 def seam_fake(events=(), online=True, lock_codes=("4821",)):
     def post(path, payload):
         assert payload["device_id"] == "dev-1"
-        if path == "/events/list":
-            return {"events": list(events)}
+        if path == "/events/list":  # Seam honours `since`
+            since = datetime.fromisoformat(payload["since"])
+            return {"events": [e for e in events if poll._when(e["occurred_at"]) >= since]}
         if path == "/devices/get":
             return {"device": {"properties": {"online": online}}}
         assert path == "/access_codes/list"
@@ -154,14 +156,25 @@ def test_creates_one_task_per_stay_and_wakes_cleaners_at_1400(tick):
     (woken,) = wakes()
     assert (woken["chat"], woken["from"]) == ("cht_cleaners", "Turnover")
     assert "cleaner_coming" in woken["text"] and "Example Property" in woken["text"]
-    assert "16:00" in woken["text"]
-    assert "Pat" not in woken["text"]  # a vendor thread never learns the guest's name
+    assert "16:00" in woken["text"] and "Address it to Jane" in woken["text"]
     assert "kanban_show" in woken["text"] and "SENT cleaner_coming" in woken["text"]
     run("14:02")
     assert wakes() == []  # at most once
     (task,) = board.tasks.values()
     assert task["key"] == "turnover:S1"
-    assert task["title"] == f"notify-when-house-is-ready turnover:S1 Pat {TODAY}"
+    assert task["title"] == f"notify-when-house-is-ready turnover:S1 {TODAY}"
+    # A vendor thread never learns the guest's name: not from its wake, and not
+    # from the task it reads with kanban_show.
+    assert not [t for t in (woken["text"], task["title"], task["body"]) if "Pat" in t]
+
+
+def test_a_cleaner_who_starts_before_the_1100_checkout_still_counts(tick):
+    run, _, _, wakes = tick
+    early = seam_fake(events=[{"event_type": "lock.unlocked", "access_code_id": "code-1",
+                               "occurred_at": "2026-11-03T17:30:00Z"}])  # 09:30 local
+    run("14:00", seam=early)
+    steps = [w["text"].split("step ")[1].split(":")[0] for w in wakes()]
+    assert steps == ["cleaner_quiet_ask"]                 # seen entering, not "are you coming?"
 
 
 def test_note_precedes_wake(tick):
@@ -234,7 +247,9 @@ def test_no_code_digits_ever_in_wake_or_note(tick):
     texts = [w["text"] for w in wakes()]
     assert any("send_code" in t for t in texts) and any("step ready" in t for t in texts)
     ready = next(t for t in texts if "step ready" in t)
-    assert "conv-S1" in ready and "send_message" in ready
+    assert "send_message" in ready and "the task body names" in ready
+    (task,) = board.tasks.values()
+    assert "conv-S1" in task["body"]                     # the driver's word, not the wake's
     notes = [c["body"] for t in board.tasks.values() for c in t["comments"]] + [t["body"] for t in board.tasks.values()]
     assert not any("4821" in s for s in texts + notes + [str(e) for e in log])
 
@@ -251,18 +266,44 @@ def test_completes_after_sent_ready(tick):
     assert task["status"] == "done"
 
 
-def test_owners_unconfirmed_blocks_the_task(tick):
-    run, board, _, wakes = tick
+def test_owners_unconfirmed_blocks_the_task_before_waking(tick):
+    run, board, log, wakes = tick
     seam = seam_fake(events=[{"event_type": "lock.unlocked", "access_code_id": "code-1",
                               "occurred_at": "2026-11-03T20:00:00Z"}])  # 12:00 local
     run("16:00", seam=seam)                               # cleaner_done_ask
+    log.clear()
     run("16:30", seam=seam)
     (task,) = board.tasks.values()
     assert task["status"] == "blocked"
+    assert log[:3] == [("note", "WOKE owners_unconfirmed"),
+                   ("block", "cleaner unconfirmed at check-in"), ("wake", "cht_owners")]
     woken = wakes()
     owners = next(w["text"] for w in woken if "owners_unconfirmed" in w["text"])
     assert "Post in the owners' thread only" in owners and "Pat" in owners
     assert not any("Pat" in w["text"] for w in woken if w["chat"] == "cht_cleaners")
+
+
+def test_breaker_ask_is_addressed_to_the_maintenance_contact(tick):
+    run, _, _, wakes = tick
+    run("06:00", seam=seam_fake(online=False))
+    (breaker,) = [w["text"] for w in wakes() if w["chat"] == "cht_maint"]
+    assert "Address it to Max" in breaker and "Jane" not in breaker
+
+
+def test_a_task_closed_before_ready_tells_the_owners_once(tick):
+    """Anyone can complete the task; if the guest was never told, the worst
+    case must still be a human being told, not a stay that stops silently."""
+    run, board, log, wakes = tick
+    run("10:00")
+    (task,) = board.tasks.values()
+    board.complete(task["id"])                            # an owner closes it early
+    run("10:02", seam=lambda path, payload: pytest.fail("a closed stay reads no Seam"))
+    (woken,) = wakes()
+    assert woken["chat"] == "cht_owners" and "step escalate:closed" in woken["text"]
+    assert "closed before the guest was told the house was ready" in woken["text"]
+    assert [e for e in log if e[0] == "note"] == [("note", "WOKE escalate:closed")]
+    run("10:04")
+    assert wakes() == [] and task["status"] == "done"
 
 
 def test_an_undrained_inbox_stops_the_tick(tick, tmp_path):
@@ -299,6 +340,8 @@ def test_refuses_to_run_while_kanban_could_act_on_its_tasks(drift):
     ("Cabin:Code not set yet", ["4821"], "not_set"),
     ("Cabin:4821", ["1111"], "set"),
     ("Cabin:4821", ["1111", "4821"], "live"),
+    ("Unit 2024:4821", ["2024"], "set"),                  # digits in the lock name are not the code
+    ("Unit 2024:Code not set yet", ["2024"], "not_set"),
 ])
 def test_code_state(lock_code, codes, expected):
     assert poll.code_state(lock_code, [{"code": c} for c in codes]) == expected
@@ -306,7 +349,7 @@ def test_code_state(lock_code, codes, expected):
 
 def test_previous_checkout_bounds_the_stay():
     stay, prev = poll.stay_of(reservation(), prop(), [DEPARTING, reservation()], TODAY)
-    assert (prev["stay_code"], stay.prev_checkout_at, stay.same_day) == ("S0", local("11:00"), True)
+    assert (prev["stay_code"], stay.prev_checkout_at, stay.same_day) == ("S0", local("08:00"), True)
     stay, prev = poll.stay_of(reservation(), prop(), [reservation()], TODAY)
     assert prev is None and not stay.same_day
     assert stay.prev_checkout_at == local("16:00", "2026-10-27")  # check-in less 7 days
