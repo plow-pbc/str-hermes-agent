@@ -18,6 +18,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tomllib
 import urllib.request
@@ -43,6 +44,12 @@ HISTORY_DAYS = 30  # check-ins this far back find the previous checkout
 REQUIRED = ("hostex_property_id", "title", "timezone", "default_checkin_time",
             "seam_device_id", "cleaner_name", "cleaner_access_code_ids",
             "cleaners_thread", "maintenance_name", "maintenance_thread")
+
+# What keeps a turnover task a ledger rather than work for kanban itself: no
+# gateway dispatcher, no default assignee to hand an unassigned task to a
+# detached worker (kanban_db_dispatch.py:1820-1828), and no thread subscribed to
+# board wakes by a stray kanban_create. runtime/config.yaml pins the same three.
+KANBAN_PINS = {"dispatch_in_gateway": False, "default_assignee": "", "auto_subscribe_on_create": False}
 
 INSTRUCTION = ("Read the task with kanban_show first. Send one short message in this thread "
                "for this step, then comment `SENT {step}` on the task (or `SKIPPED {step}: <why>`).")
@@ -257,7 +264,24 @@ def run(ops: list[dict], hostex, seam, board, home: pathlib.Path, groups: dict,
     return SILENT
 
 
+def kanban_config() -> str:
+    return subprocess.run([str_ledger.HERMES, "config", "get", "--json", "kanban"],
+                          check=True, capture_output=True, text=True).stdout
+
+
+def require_kanban_pinned(read=kanban_config) -> None:
+    """Refuse to drive while kanban could act on these tasks: every tick creates
+    an unassigned task, and a drifted pin turns it into a worker's job or a
+    thread's wake. Read through Hermes, so image defaults count too."""
+    live = json.loads(read())
+    drift = {k: live.get(k) for k, v in KANBAN_PINS.items() if live.get(k) != v}
+    if drift:
+        raise RuntimeError(f"turnover-poll: kanban config is {drift}, needs {KANBAN_PINS} "
+                           "(runtime/config.yaml; redeploy it before this job runs)")
+
+
 def main() -> None:
+    require_kanban_pinned()
     env = setup_env()
     vault = pathlib.Path(env["VAULT"]) if "VAULT" in env else hermes_home() / "repo/vault"
     groups = {**str_env.groups(env), OWNERS: str_env.owners_chat(env)}

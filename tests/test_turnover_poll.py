@@ -270,6 +270,26 @@ def test_an_undrained_inbox_stops_the_tick(tick, tmp_path):
     assert board.tasks == {}
 
 
+PINNED = {"dispatch_in_gateway": False, "default_assignee": "", "auto_subscribe_on_create": False,
+          "max_in_progress": None}
+
+
+@pytest.mark.parametrize("drift", [
+    {"dispatch_in_gateway": True},
+    {"default_assignee": "worker"},
+    {"auto_subscribe_on_create": True},
+    {"dispatch_in_gateway": None},  # an image that stopped reporting the key
+])
+def test_refuses_to_run_while_kanban_could_act_on_its_tasks(drift):
+    """The ledger tasks are unassigned and the gateway would otherwise own them:
+    a drifted pin is a tick that hands the stay to a detached worker or
+    subscribes a thread to board wakes, so the driver refuses by name."""
+    poll.require_kanban_pinned(lambda: json.dumps(PINNED))
+    key = next(iter(drift))
+    with pytest.raises(RuntimeError, match=key):
+        poll.require_kanban_pinned(lambda: json.dumps({**PINNED, **drift}))
+
+
 @pytest.mark.parametrize("lock_code,codes,expected", [
     (None, ["4821"], "not_set"),
     ("Cabin:Code not set yet", ["4821"], "not_set"),
