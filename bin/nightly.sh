@@ -69,14 +69,16 @@ notify() {
 # go back to the last snapshot and the manifest to its pre-run bytes, so the
 # next run re-ingests tonight's conversations instead of the bad pages being
 # snapshotted and reported every night with nothing repairing them.
-# Exit 1 from a check is the corpus; 2 is latch failing to reach the Mac.
-# They mean opposite things and the digest is one line, so they are reported apart.
+# Exit 1 from a check is the corpus; 2 is latch failing to reach the Mac; 4 is
+# the Mac's gatekeeper refusing. Each has a different fix and the digest is one
+# line, so they are reported apart.
 checked() {
   local what="$1"; shift
   "$@"
   case $? in
     0) ;;
     2) note "$what could not run: the owner's Mac did not answer" ;;
+    4) note "$what was refused by the gatekeeper on the owner's Mac" ;;
     *) note "$what FAILED" ;;
   esac
 }
