@@ -119,8 +119,10 @@ def seam_fake(events=(), online=True, lock_codes=("4821",)):
             return {"events": [e for e in events if poll._when(e["occurred_at"]) >= since]}
         if path == "/devices/get":
             return {"device": {"properties": {"online": online}}}
-        assert path == "/access_codes/list"
-        return {"access_codes": [{"access_code_id": f"ac-{i}", "name": "x", "code": c}
+        if path == "/access_codes/list":  # managed: Hostex's guest PINs are never here
+            return {"access_codes": []}
+        assert path == "/access_codes/unmanaged/list"
+        return {"access_codes": [{"access_code_id": f"ac-{i}", "name": "x", "code": c, "status": "set"}
                                  for i, c in enumerate(lock_codes)]}
     return post
 
@@ -386,7 +388,11 @@ def test_refuses_to_run_while_kanban_could_act_on_its_tasks(drift):
     ("Unit 2024:Code not set yet", ["2024"], "not_set"),
 ])
 def test_code_state(lock_code, codes, expected):
-    assert poll.code_state(lock_code, [{"code": c} for c in codes]) == expected
+    assert poll.code_state(lock_code, [{"code": c, "status": "set"} for c in codes]) == expected
+
+
+def test_a_code_still_setting_is_not_live():
+    assert poll.code_state("Cabin:4821", [{"code": "4821", "status": "setting"}]) == "set"
 
 
 def test_previous_checkout_bounds_the_stay():

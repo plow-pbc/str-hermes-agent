@@ -176,7 +176,8 @@ def code_state(lock_code: str | None, device_codes: list[dict]) -> str:
     digits = re.search(r"\d{4,}", (lock_code or "").rpartition(":")[2])
     if not digits:
         return "not_set"
-    return "live" if any(c.get("code") == digits.group() for c in device_codes) else "set"
+    return "live" if any(c.get("code") == digits.group() and c.get("status") == "set"
+                         for c in device_codes) else "set"
 
 
 def stay_of(r: dict, prop: dict, history: list[dict], today: str) -> tuple[turnover.Stay, dict | None]:
@@ -198,7 +199,9 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
     since = max(stay.prev_checkout_at, stay.checkin_at - LOOKBACK)
     events = seam("/events/list", {**device, "since": since.isoformat()})["events"]
     online = seam("/devices/get", device)["device"]["properties"]["online"]
-    codes = seam("/access_codes/list", device)["access_codes"]
+    # Hostex's guest PINs are Seam-unmanaged, a collection /access_codes/list omits.
+    codes = [*seam("/access_codes/list", device)["access_codes"],
+             *seam("/access_codes/unmanaged/list", device)["access_codes"]]
     cleaner = set(prop["cleaner_access_code_ids"])
     unlocks = tuple(_when(e["occurred_at"]) for e in events
                     if e["event_type"] == "lock.unlocked" and e.get("access_code_id") in cleaner)
