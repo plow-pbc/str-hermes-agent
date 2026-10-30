@@ -192,8 +192,10 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
 
 
 def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, r: dict) -> str:
+    # Vendor threads get the property and the time, never the guest's name.
+    who = f"Guest {stay.guest}" if step.thread == "owners" else "The guest"
     text = (f"Turnover task {task_id}, step {step.name}: {step.reason}. "
-            f"Guest {stay.guest} checks in at {prop['title']} at "
+            f"{who} checks in at {prop['title']} at "
             f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION.format(step=step.name))
     if step.name in ("ready", "send_code"):
         text += TO_GUEST.format(conversation=r["conversation_id"])

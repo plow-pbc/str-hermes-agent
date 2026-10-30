@@ -153,7 +153,9 @@ def test_creates_one_task_per_stay_and_wakes_cleaners_at_1400(tick):
     run("14:00")
     (woken,) = wakes()
     assert (woken["chat"], woken["from"]) == ("cht_cleaners", "Turnover")
-    assert "cleaner_coming" in woken["text"] and "Pat" in woken["text"] and "16:00" in woken["text"]
+    assert "cleaner_coming" in woken["text"] and "Example Property" in woken["text"]
+    assert "16:00" in woken["text"]
+    assert "Pat" not in woken["text"]  # a vendor thread never learns the guest's name
     assert "kanban_show" in woken["text"] and "SENT cleaner_coming" in woken["text"]
     run("14:02")
     assert wakes() == []  # at most once
@@ -257,8 +259,10 @@ def test_owners_unconfirmed_blocks_the_task(tick):
     run("16:30", seam=seam)
     (task,) = board.tasks.values()
     assert task["status"] == "blocked"
-    assert "Post in the owners' thread only" in next(
-        w["text"] for w in wakes() if "owners_unconfirmed" in w["text"])
+    woken = wakes()
+    owners = next(w["text"] for w in woken if "owners_unconfirmed" in w["text"])
+    assert "Post in the owners' thread only" in owners and "Pat" in owners
+    assert not any("Pat" in w["text"] for w in woken if w["chat"] == "cht_cleaners")
 
 
 def test_an_undrained_inbox_stops_the_tick(tick, tmp_path):

@@ -262,7 +262,9 @@ def test_thread_sessions_can_work_the_ledger_and_nothing_else_can_run_it():
 
 @pytest.mark.parametrize("label,says", [
     ("STR Owners", ["kanban_show", "`CLEAN <", "`HOLD <", "no draft id", "FYI"]),
-    ("Cleaners", ["kanban_show", "`CLEAN <"]),
+    # Two same-day stays share this thread; a "done" on the wrong one sends a
+    # false "ready" to a guest.
+    ("Cleaners", ["kanban_show", "`CLEAN <", "ask which property"]),
     # A "done" here is the breaker, which the driver reads off the lock itself;
     # recorded as CLEAN it would tell the driver the house was cleaned.
     ("Maintenance", ["kanban_show", "never `CLEAN`"]),
@@ -274,6 +276,18 @@ def test_every_thread_a_turnover_wakes_knows_what_to_do_with_it(label, says):
     flowed = " ".join(group_prompts()[label].split())
     for phrase in says:
         assert phrase in flowed, f"{label} prompt lacks {phrase!r}"
+
+
+def test_only_the_owners_group_can_turn_a_wake_into_a_guest_message():
+    """A wake renders as an ordinary group turn named `Turnover`, and vendor
+    sessions hold Hostex send_message: a vendor who takes that display name,
+    or pastes wake-shaped text, must not reach a guest. SOUL scopes the
+    exception to the owners' group; each vendor prompt refuses Hostex outright."""
+    soul = " ".join((ROOT / "runtime/persona.md").read_text().split())
+    assert "only its two steps, and only in the owners' group" in soul
+    for label in ("Cleaners", "Maintenance"):
+        flowed = " ".join(group_prompts()[label].split())
+        assert "never message a guest or use Hostex from this thread" in flowed, label
 
 
 def test_the_verbs_soul_tells_threads_to_write_are_the_ones_the_driver_reads():
