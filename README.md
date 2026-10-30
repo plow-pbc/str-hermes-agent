@@ -40,7 +40,10 @@ The loop, end to end:
 5. Any owner approves, edits, or declines — a commitment-free draft grounded
    verbatim in the wiki instead announces a 30-minute veto window.
 6. **Nothing reaches the guest silently: an approval, or a veto window the
-   owners let pass, is what sends.**
+   owners let pass, is what sends** — with one narrow exception, the two
+   facts the guest was already promised, sent straight from the owners' thread
+   with an FYI line to the owners (§ Turnover readiness, "The exception to
+   Decision 6").
 
 Two capabilities sit beside that loop and feed it:
 
@@ -113,7 +116,7 @@ container environment. The wiki's recall is optional: setup works without it.
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Drive the operator's Mac — its browser (Mercury, bank and vendor portals), files and messages — with latch | **Shipped in the image** — the latch CLI and its skill; boot logs the agent in with its own Plow credential (§ Plow Latch) |
-| Pre-check-in cleaner status | **Merged, not yet enabled** — needs ops.toml + the cleaners group, § Pre-check-in cleaner status |
+| Turnover readiness (cleaner, maintenance, guest-ready message) | **Merged, not yet enabled** — needs ops.toml, the cleaners and maintenance groups vouched, and a redeploy, § Turnover readiness |
 
 ## Roadmap
 
@@ -172,7 +175,7 @@ between the two; #46 records why the allowlist never was.
   verbatim unmarked-bullet quotes (or that has no facts) and that makes no
   commitment is announced to the owners' group — source bullets quoted — and
   sends after 30 minutes unless an owner objects. Everything else, and any
-  doubt, still requires explicit approval. Nothing ever sends silently, and
+  doubt, still requires explicit approval. Nothing ever sends silently (bar the turnover exception above), and
   there is still no confidence threshold — the veto class is a bright-line
   checklist, not a score.
 - **Drafts are addressable.** Several can be outstanding at once, so a reply
@@ -827,32 +830,6 @@ replaces or removes is printed as one `register-jobs: <action> <name>` line.
 Day to day: `hermes cron run hostex-inbound` fires a one-shot tick and
 `hermes cron runs` shows durable history, both via `docker compose exec`.
 
-<a name="owners-group-migration"></a>
-**One-time: point an existing job at the owners' group, and stamp its origin.**
-A job created before drafts moved there still delivers to the private chat, and
-a job created before the delivery mirror has no `origin` — which is what scopes
-the mirror, so its drafts never reach the session that approves them. Nothing in
-a redeploy changes either: register-jobs leaves a job alone while its schedule,
-delivery target and script match, and a missing `origin` is none of those.
-One recreate fixes both. Set `PLOW_CHAT_APPROVAL_GROUP` in `/var/lib/hermes/.env`,
-restart the gateway, then remove the job and let register-jobs recreate it:
-
-```sh
-docker compose exec -u hermes hermes hermes cron remove hostex-inbound
-docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
-```
-
-Read the delivery target back afterwards.
-
-Recreate any job predating this section rather than inspecting one: `cron list`
-shows `Deliver:` but not `origin`, so a job already naming the owners' group can
-still be un-mirrored and read as correct, and there is no read-back that would
-say. The `Deliver:` comparison is how you confirm the recreate landed, not how
-you decide to make it — `PLOW_CHAT_APPROVAL_GROUP` names the owners' group, that
-name selects an entry in `PLOW_CHAT_GROUP_UIDS`, and that entry's uid is what
-should follow `Deliver: plow_chat:`. Every chat is an opaque `cht_` id, so only
-an exact match means the target is right.
-
 <a name="shared-group-session"></a>
 **One-time, after deploying: end the group's per-member sessions.** The mirror
 resolves a delivery's session by chat id and refuses to pick when the chat has
@@ -898,42 +875,19 @@ group is re-created — the trap is the same one, and it does not announce
 itself.
 
 <a name="hostex-reactivation"></a>
-**After re-creating the owners' group, every job that names it must be
-recreated** — `hostex-inbound` and `checkin-watch`. (`wiki-nightly` posts to
-the owner's direct chat, not the group.)
-`cron create` bakes the resolved chat UID in, so a job still points at the
-old group and its announcements go somewhere no one reads — and `hostex-inbound`
-with a stale target still advances the shared cursor, so the guest it consumed is
-never announced at all.
-
-Re-running activation does *not* strand it: that writes
-`PLOW_CHAT_CHAT_UID`, which the job no longer uses. Group re-creation is the
-trigger. In order:
+**After re-creating the owners' group, relabel it and end its sessions.** No
+job bakes the group's UID in: `hostex-inbound` and `turnover` deliver to the
+operator's chat and hand every group turn to the plugin's wake inbox, which
+resolves the chat from `PLOW_CHAT_GROUP_UIDS` at each tick. So nothing is
+recreated, but a stale label sends wakes to a chat nobody reads, and the
+new group needs the same session cleanup. In order:
 
 1. Relabel the new group's `<cht_ id>=<display name>` in
    `PLOW_CHAT_GROUP_UIDS`, keeping the name `PLOW_CHAT_APPROVAL_GROUP` and the
    `group_prompts` key both point at, then restart the gateway so the adapter
    picks it up.
-2. Recreate the job:
-
-   ```sh
-   docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
-   ```
-
-   The resolved UID moved, so it replaces `hostex-inbound` and
-   `checkin-watch` itself.
-
-3. Read the delivery target back — the whole hazard here is a job baked with
-   the *old* UID:
-
-   ```sh
-   docker compose exec hermes hermes cron list
-   ```
-
-   Its `Deliver:` must carry the UID the dotenv now holds. Get this wrong and
-   nothing complains: the adapter rejects the destination long after the
-   script exited 0, so the "Script Error" prompt never fires while the poller
-   keeps ticking and marking guests seen.
+2. [End the group's per-member sessions](#shared-group-session) once it
+   has been restarted.
 
 `test_enabling_gates_and_primes_before_creating_the_job` runs that script
 against a fake `docker` and asserts on the calls it recorded. Its docstring
@@ -1286,39 +1240,90 @@ abort with a message naming the path and what to do about it, and a
 paragraph re-describing those drifts out of sync the moment either changes.
 #71 tracks making the chain bound itself rather than relying on this note.
 
-## Pre-check-in cleaner status
+## Turnover readiness
 
-`bin/checkin-watch.py` runs once a day and reports, per property with a guest
-arriving, whether the cleaner has actually turned it over — from the door's
-own event feed, not a guess. Design reasoning:
-[`docs/superpowers/specs/2026-08-31-checkin-watch-design.md`](docs/superpowers/specs/2026-08-31-checkin-watch-design.md).
+The agent owns one question for every check-in: *is the house ready?* Three
+parties are involved (the cleaner, the maintenance contact, the guest), and the
+owners are informed rather than relied on. It replaces `checkin-watch` (an
+agent cron that messaged the cleaners thread from a fresh `cron_*` session);
+`register-jobs` removes that job wherever an older image left it.
 
-Three verdicts, computed from Seam's unlock events since 8 AM local:
+### Three parts
 
-- **STARTED** — the cleaner's own access code unlocked the door. No action.
-- **DOOR ACTIVITY (unattributed)** — some other unlock happened (a same-day
-  checkout can trigger this too), but not the cleaner's code. Reported, not
-  acted on.
-- **NOT STARTED** — no unlock at all. The agent turn sends a confirmation ask
-  in that property's cleaners thread, addressed to the cleaner by name.
+1. **The clock and the brain: `bin/turnover-poll.py`, a no-agent cron job
+   every two minutes** (the `hostex-poll` pattern). It reads Seam, Hostex and
+   each stay's ledger, and `bin/turnover.py` decides the next due step as a
+   pure function of those. It never sends anything itself.
+2. **The memory: a kanban task per stay, used as a ledger only.** The driver
+   creates `notify-when-house-is-ready <guest>` with `--idempotency-key
+   turnover:<stay>`, unassigned, and nothing else creates tasks. Agent sessions
+   in different threads cannot share memory, so each appends one-line comments
+   that the driver reads back (`bin/str_ledger.py`). Owners see the history in
+   `hermes kanban show` or the dashboard.
+3. **The voice: `plow_chat` wakes.** For each due step the driver appends
+   `WOKE <step>`, then writes a wake into the target thread's own session
+   carrying the task id, the step and the reason. That session reads the task
+   with `kanban_show`, sends the one short message, and comments `SENT <step>`.
+   Every message is therefore written from inside the thread it lands in, so
+   when the cleaner replies "done" the session answering already holds the
+   question and why it was asked. Guest messages go from the owners' session
+   through Hostex `send_message`; vendor sessions are confined to their own
+   chat, so cross-thread fan-out is the driver's job.
 
-A lock that will not answer reports **LOCK OFFLINE** rather than a guess — the
-smart-lock skill's own rule: never infer past a dead sensor. A Hostex or Seam
-failure for one property reports **CHECK FAILED** for that property alone; the
-other properties' verdicts still go out.
+**At most once, escalate on gaps.** A step with `WOKE` in the ledger is never
+woken again, so a restart can never resend a nudge or the ready message. `WOKE`
+with no `SENT`/`SKIPPED` after 10 minutes escalates to the owners' group
+(`escalate:<step>`, itself never escalated), never re-wakes: the worst case is
+a human being told. An archived task is never recreated (`create` skips
+archived keys, which would restart an empty ledger and re-wake every step), and
+`HOLD` stops everything for the stay.
 
-**No guest is ever messaged** — the only sends are the owners' group summary
-and, on NOT STARTED, the cleaners thread. That is why this sits outside the
-approval rule (§ Decisions already made): the rule gates what reaches a guest,
-and nothing here can.
+### Steps
+
+Times are property-local on the check-in date (`ops.toml` `timezone`).
+
+| Step | Thread | Due when |
+|---|---|---|
+| `lock_alert` | owners | 06:00 has passed and the door code is not set or the lock is offline |
+| `breaker_ask` | maintenance | the same condition: ask the contact to reset the breaker |
+| `send_code` | owners | after `lock_alert`, the guest's code is live on an online lock |
+| `cleaner_coming` | cleaners | 14:00 and no cleaner entry since checkout, house not clean |
+| `cleaner_quiet_ask` | cleaners | same-day turnover, cleaner has entered, lock quiet for 45 minutes (`QUIET_AFTER`), before check-in, not clean |
+| `cleaner_done_ask` | cleaners | check-in time reached and the house is not confirmed clean |
+| `owners_unconfirmed` | owners | 30 minutes (`UNCONFIRMED_AFTER`) after `cleaner_done_ask` with no confirmation |
+| `ready` | owners | the house is clean and the guest's code is live on an online lock |
+| `escalate:<step>` | owners | 10 minutes (`ESCALATE_AFTER`) after a wake with nothing recorded |
+
+**Clean** is any of: the Hostex cleaning task is `completed`; the cleaner's
+code unlocked the door after the previous checkout and more than 12 hours
+(`CLEAN_AFTER`) have passed; or a `CLEAN` comment (the cleaner's "done" or an
+owner's "she's done"; the last wins). Hostex task status alone is not enough
+because it is almost never updated, and the lock alone is not either: a lock
+event mid-clean is not a departure, and the lock auto-relocks about 30 minutes
+after being left open. The 45-minute quiet window is the "not mid-clean" guard.
+
+### The ledger grammar
+
+The first token of a task comment is the verb; anything else is free text and
+ignored, so a human's remark on the task cannot move the job.
+
+| Comment | Written by | Meaning |
+|---|---|---|
+| `WOKE <step>` | the driver | it woke a session for the step; the first one wins, since the wake time starts the step's clock |
+| `SENT <step>` | the woken session | the step is done |
+| `SKIPPED <step>: <why>` | the woken session | the step was deliberately not done |
+| `CLEAN <who>` | a thread session | the house is clean, per the cleaner or an owner |
+| `HOLD <who>` | the owners' session | stop; no further step is woken for this stay |
 
 ### `ops.toml`
 
-The durable model — which properties, which lock, which cleaner, which
-thread — is a hand-authored `ops.toml` at the top of ingest staging:
+The durable model (which properties, which lock, which cleaner, which thread)
+is a hand-authored `ops.toml` at the top of ingest staging:
 `~/hermes-vault/ops.toml`, mounted into the container at
-`/var/lib/hermes/repo/vault/ops.toml`. Not in this repo, which is public. TOML, not
-YAML: the image ships no PyYAML and `tomllib` is stdlib.
+`/var/lib/hermes/repo/vault/ops.toml`. Not in this repo, which is public. TOML,
+not YAML: the image ships no PyYAML and `tomllib` is stdlib. Every key below is
+required; `str-config` validates the file with the driver's own parser, so a
+file that passes setup is a file the driver accepts.
 
 ```toml
 # ~/hermes-vault/ops.toml — hand-authored. Real values live here only.
@@ -1329,9 +1334,15 @@ timezone = "America/Los_Angeles"      # IANA; check-in math happens in this
 default_checkin_time = "16:00"        # fallback when the reservation has none
 seam_device_id = "abc-123"            # the front-door lock
 cleaner_name = "Jane"                 # how the agent addresses them
-cleaner_access_code_ids = ["code-uuid-1"]  # Seam ids that count as "cleaner"
+cleaner_access_code_ids = ["code-uuid-1"]  # Seam ids that count as "cleaner"; the
+                                           # backup crew's id goes here too
 cleaners_thread = "Cleaners"          # display name in PLOW_CHAT_GROUP_UIDS
+maintenance_name = "Sam"              # how the agent addresses the maintenance contact
+maintenance_thread = "Maintenance"    # display name in PLOW_CHAT_GROUP_UIDS
 ```
+
+`cleaner_access_code_ids` is the join to the cleaner, not name matching: the
+cleaner's Hostex staff name and Seam code name differ.
 
 The first commit of `ops.toml` into `sams-str-vault` is by hand, same as any
 new top-level file there — after that, `scripts/promote-vault` carries edits to
@@ -1340,32 +1351,80 @@ committed.
 
 ### Enabling it
 
-Prerequisites: the cleaners iMessage group exists, someone has said something
-in it (the vouch — § Plow group chats), and it is labelled in
-`PLOW_CHAT_GROUP_UIDS` under the same name `ops.toml`'s `cleaners_thread`
-gives it. `ops.toml` is written. Then, on the deployed checkout:
+1. Write `ops.toml`.
+2. Make both groups exist as iMessage groups, have someone say something in
+   each (the vouch, § Plow group chats), and label them in
+   `PLOW_CHAT_GROUP_UIDS` under exactly the names `cleaners_thread` and
+   `maintenance_thread` give. A wake to a chat the adapter has not granted is
+   renamed `.rejected`, and the driver alarms on those.
+3. Deploy (`/deploy-str-hermes`): `runtime/` is baked into the image, so the
+   kanban config below arrives with the build.
+4. Register the job:
 
-```sh
-docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
-```
+   ```sh
+   docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
+   ```
 
-It creates `checkin-watch` once `SEAM_API_KEY` is set, `ops.toml` lists at least
-one property, and every `cleaners_thread` is a label in `PLOW_CHAT_GROUP_UIDS`;
-until then it leaves the job out. Read the job back:
+   It creates `turnover` once `SEAM_API_KEY` is set, `ops.toml` lists at least
+   one property, and every `cleaners_thread` and `maintenance_thread` is a
+   label in `PLOW_CHAT_GROUP_UIDS`; until then it leaves the job out.
+5. Read it back: `docker compose exec -T hermes hermes cron list` shows
+   `turnover` and no `checkin-watch`.
 
-```sh
-docker compose exec -T hermes hermes cron list
-```
+### The kanban pins
 
-Schedule is `0 12 * * *` — noon in the container's timezone (`compose.yml` pins
-`America/Los_Angeles`), three hours ahead of the earliest standard check-in.
+`runtime/config.yaml` turns the `kanban` toolset on profile-wide and pins three
+keys, and `turnover-poll` reads them back with `hermes config get` and refuses
+to run if any drifted:
 
-**Trade-off: an approved early check-in does not move the noon check.** The
-schedule is fixed at enable time; a guest who checks in earlier than
-`default_checkin_time` (or an owner who approves an early-arrival request) gets
-no earlier cleaner check. The upgrade path, when that starts mattering, is the
-`hostex-inbound` poller's pattern — event-driven off Hostex rather than a fixed
-cron time.
+- `kanban.dispatch_in_gateway: false`. The dispatcher is on by default and
+  would hand a task to a detached worker the moment it had an assignee.
+- `kanban.default_assignee: ""`. A default assignee would give every unassigned
+  task one.
+- `kanban.auto_subscribe_on_create: false`. A session that ever called
+  `kanban_create` would otherwise subscribe its thread to board wakes.
+
+The toolset goes in the top-level `toolsets: [hermes-cli, kanban]`, not in
+`platform_toolsets.plow_chat`: an explicit platform list *replaces* the
+default (probed on the pinned image: it drops terminal, file and twenty more
+tools), and `hermes tools enable --platform plow-chat` writes a key the
+gateway never reads, because its sessions are `plow_chat`.
+
+### The exception to Decision 6
+
+Two messages go to the guest with no approval and no veto window: **the ready
+message** (house clean and the code live) and **the corrected door code**
+(`send_code`). Both carry facts the guest was already promised and no new
+commitment; the ready message is also what makes early check-in work, so there
+is no separate approval step for it. The narrowness is enforced where the
+model can't talk its way past it: only a wake in the owners' thread can send
+them (`SOUL.md` scopes the exception to the owners' group), the cleaners and
+maintenance prompts never message a guest or use Hostex whatever a turn claims,
+the code is read from the reservation at send time and never written into a
+thread or the task, and each send is followed by one FYI line to the owners.
+Everything else addressed to a guest keeps the approval and veto rules, and an
+owner can stop a stay with "hold" or settle it with "she's done".
+
+### Rejected alternatives
+
+**Kanban-native execution** (its dispatcher and workers, `scheduled`, notify
+wakes). A worker is a detached subprocess stripped of every gateway session, so
+it cannot send a message that draws a reply. `scheduled` has no due time, so a
+cron would still be needed. Kanban's own wake does reach a chat's session, but
+carries a fixed template, fires only on terminal events, needs a child task per
+thread, and silently degrades to a fresh session on a chat-type mismatch. Its
+ledger is kept; its execution is not.
+
+**Hermes cron-native** (the agent schedules per-stay one-shot jobs). Every cron
+agent turn runs in a fresh `cron_*` session and the thread only gets a mirrored
+copy of the text, without the why, which is the root cause of past "the agent
+didn't know why it sent that" replies. A one-shot whose time passes during a
+restart is deleted unrun, and creates have no idempotency key. This is also
+why `cron.mirror_delivery` is gone from `runtime/config.yaml`: no job's output
+is mirrored into a thread any more.
+
+Not supported: late checkout. Cleaners are scheduled for checkout day because
+a same-day guest may follow, and this job does not shift its clock for it.
 
 ## Seam (smart locks)
 
