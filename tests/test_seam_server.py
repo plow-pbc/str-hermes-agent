@@ -14,6 +14,12 @@ from seam.resources.seam_event import SeamEvent
 
 _OMIT = object()
 
+
+@pytest.fixture(autouse=True)
+def pacific(monkeypatch):
+    """The container's TZ (compose.yml), so rendered times are deterministic."""
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+
 def lock(name, device_id, locked=True, online=True, battery_level=0.87, **fields):
     props = {}
     for key, value in (("locked", locked), ("online", online), ("battery_level", battery_level)):
@@ -303,7 +309,7 @@ def test_listing_codes_reports_the_pin_its_window_and_whether_it_reached_the_loc
     reported = server.list_access_codes("front")
     assert FakeSeam.instance.access_codes.listed_for == "dev_front"
     assert "Cleaner" in reported and "1234" in reported
-    assert "2026-08-07T15:00:00Z → 2026-08-10T18:00:00Z" in reported
+    assert "2026-08-07 08:00 PDT → 2026-08-10 11:00 PDT" in reported
     # Both states pinned: "not yet on the device" contains "on the device", so
     # only asserting the negative leaves the positive branch free to vanish.
     assert "status: set, on the device" in reported
@@ -377,7 +383,7 @@ def test_an_unambiguous_time_is_accepted_in_either_spelling(value):
     reported = server.create_access_code("front", "Guest", starts_at=value)
     assert FakeSeam.instance.access_codes.created["starts_at"] == value
     # A code dated at one end only has no expiry — not an expiry of "None".
-    assert f"{value} → no expiry" in reported
+    assert "2026-09-01 08:00 PDT → no expiry" in reported
 
 
 def test_creating_on_an_ambiguous_door_writes_nothing():
@@ -519,6 +525,9 @@ def test_a_failure_that_is_not_a_namespace_miss_surfaces_instead_of_falling_back
     ({"method": "manual"}, ("manual",), ("code",)),
     ({"access_code_id": "ac_long_gone"}, ("code ac_long_gone",), ("unknown code",)),
     ({"event_type": "lock.locked", "method": "manual"}, ("locked",), ()),
+    # Seam stamps in UTC; passed raw, "22:04Z" was read to the owners as 10:04 PM.
+    ({"occurred_at": "2026-10-29T22:04:07.000Z", "method": "manual"},
+     ("2026-10-29 15:04 PDT",), ("22:04",)),
 ])
 def test_lock_event_descriptions(fake_client, fields, present, absent):
     fake_client.events.events = [event(**fields)]
@@ -545,15 +554,15 @@ def test_events_are_reported_newest_first(fake_client):
     """
     fake_client.events.events = [event(occurred_at="2026-08-19T09:00:00.000Z", method="manual"),
                                  event(occurred_at="2026-08-19T18:00:00.000Z", method="manual")]
-    assert server.list_lock_events("front").index("2026-08-19T18:00:00.000Z") == 0
+    assert server.list_lock_events("front").index("2026-08-19 11:00 PDT") == 0
 
 
 def test_the_limit_keeps_the_newest_events_rather_than_the_oldest(fake_client):
     fake_client.events.events = [event(occurred_at="2026-08-01T09:00:00.000Z", method="manual"),
                                  event(occurred_at="2026-08-19T18:00:00.000Z", method="manual")]
     reported = server.list_lock_events("front", limit=1)
-    assert "2026-08-19T18:00:00.000Z" in reported
-    assert "2026-08-01T09:00:00.000Z" not in reported
+    assert "2026-08-19 11:00 PDT" in reported
+    assert "2026-08-01 02:00 PDT" not in reported
 
 
 def test_a_since_without_a_timezone_is_refused_rather_than_guessed(fake_client):

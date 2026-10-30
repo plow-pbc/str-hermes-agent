@@ -8,6 +8,7 @@ arrived — see README.
 
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastmcp import FastMCP
 from seam import Seam
@@ -209,6 +210,14 @@ _NAMES_ONLY_MANAGED = "on this lock only codes Seam manages have had their entri
 _NOT_RETROACTIVE = "unlocks already recorded stay unattributed"
 
 
+def _local(stamp) -> str:
+    """A Seam timestamp (UTC) in the property's time, zone named: passed raw,
+    "22:04Z" was read to the owners as 10:04 PM. TZ comes from this server's
+    env block in runtime/config.yaml; unset, this raises rather than guess."""
+    local = datetime.fromisoformat(str(stamp)).astimezone(ZoneInfo(os.environ["TZ"]))
+    return f"{local:%Y-%m-%d %H:%M %Z}"
+
+
 def _describe_event(event, names) -> str:
     """One line for a lock event, naming a person only where Seam did.
 
@@ -221,7 +230,7 @@ def _describe_event(event, names) -> str:
     """
     verb = "unlocked" if event.event_type == "lock.unlocked" else "locked"
     method = event.method or "unreported method"
-    line = f"{event.occurred_at}  {verb} — {method}"
+    line = f"{_local(event.occurred_at)}  {verb} — {method}"
     if method != "keycode":
         return line
     if event.access_code_id is None:
@@ -277,7 +286,8 @@ def list_lock_events(lock: str, since: str | None = None, limit: int = 20) -> st
 
 
 def _describe_code(code) -> str:
-    window = (f"{code.starts_at or 'now'} → {code.ends_at or 'no expiry'}"
+    window = (f"{_local(code.starts_at) if code.starts_at else 'now'} → "
+              f"{_local(code.ends_at) if code.ends_at else 'no expiry'}"
               if code.starts_at or code.ends_at else "always, no expiry")
     # Three states, not two. Seam leaves the field null on a code it is not
     # tracking to a device — including a live, working one — so a falsy test

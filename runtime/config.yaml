@@ -177,6 +177,9 @@ mcp_servers:
     - /opt/plow/str/mcp-seam/server.py
     env:
       SEAM_API_KEY: ${SEAM_API_KEY}
+      # The properties' time zone, for lock times. Hermes hands an MCP server
+      # only what is listed here, so the container's own TZ never reaches it.
+      TZ: America/Los_Angeles
     enabled: true
     timeout: 120
     tools:
