@@ -12,7 +12,8 @@ model calls latch itself; the nightly's deterministic steps call it through this
 
 Exit 2 means latch could not answer: the Mac unreachable, a refusal, or a
 command still running at the deadline. `wiki validate` exits 1 for invalid
-pages, so the two stay distinguishable.
+pages, so the two stay distinguishable. Exit 4, latch's own, means the Mac
+answered no: its gatekeeper refused, and the owner's rules are the fix.
 
 The host is $LATCH_HOST and the chat the gatekeeper reads is $LATCH_PLOW_CHAT,
 both latch's own settings, which boot publishes. Latch sandboxes every command: a
@@ -31,15 +32,19 @@ from pathlib import Path
 # latch exec's own ceiling, and every call's: a Mac gone quiet mid-call is exit 2,
 # never a nightly that hangs.
 TIMEOUT_S = 600
+# latch's exit for a refusal: the gatekeeper, a confirmation, a calendar conflict.
+REFUSED = 4
 
 
 class RelayError(RuntimeError):
     """latch answered, but not with what was asked for. `code` is latch's own
-    error code when it gave one (`not_found`, `host_offline`, ...)."""
+    error code when it gave one (`not_found`, `host_offline`, ...); `exit` is
+    what main exits with for it."""
 
-    def __init__(self, message: str, code: str | None = None):
+    def __init__(self, message: str, code: str | None = None, exit: int = 2):
         super().__init__(message)
         self.code = code
+        self.exit = exit
 
 
 def latch(*args: str) -> dict:
@@ -55,7 +60,8 @@ def latch(*args: str) -> dict:
         code, message = error["code"], error["message"]
     except (IndexError, KeyError, TypeError, ValueError):
         raise RelayError(f"latch {args[0]}: {done.stderr.strip() or f'exited {done.returncode}'}") from None
-    raise RelayError(f"latch {args[0]}: {code}: {message}", code)
+    raise RelayError(f"latch {args[0]}: {code}: {message}", code,
+                     REFUSED if done.returncode == REFUSED else 2)
 
 
 def read(path: str) -> str:
@@ -105,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         return code
     except (RelayError, OSError) as e:
         print(f"plow_relay: {e}", file=sys.stderr)
-        return 2
+        return getattr(e, "exit", 2)
 
 
 if __name__ == "__main__":

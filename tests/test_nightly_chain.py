@@ -81,6 +81,8 @@ NIGHTS = [
     ("a provenance defect", {"PROVENANCE_RC": 1}, "rolled back: provenance FAILED; see ", ROLLBACK),
     ("a Mac that did not answer validation", {"VALIDATE_RC": 2},
      "rolled back: wiki validation could not run: the owner's Mac did not answer; see ", ROLLBACK),
+    ("a gatekeeper that refused validation", {"VALIDATE_RC": 4},
+     "rolled back: wiki validation was refused by the gatekeeper on the owner's Mac; see ", ROLLBACK),
     ("a restore that failed", {"VALIDATE_RC": 1, "RESTORE_RC": 2},
      "rolled back: wiki validation FAILED; rollback incomplete: wiki restore could not run", ROLLBACK),
 ]

@@ -95,6 +95,8 @@ FAILURES = [
      {"stdout": json.dumps({"exit_code": None, "signal": 9, "stdout": "", "stderr": ""})},
      ["run", "--", "wiki", "index"], "ended by signal 9"),
 ]
+REFUSED = ('{"error":{"code":"gatekeeper_denied","message":"Neither the owner\'s rules nor their messages'
+           ' allow this.","exit":4}}\n')
 
 
 @pytest.mark.parametrize(("case", "reply", "argv", "message"), FAILURES, ids=[f[0] for f in FAILURES])
@@ -103,3 +105,12 @@ def test_latch_that_cannot_answer_exits_2_and_says_why(latch, capsys, case, repl
     answer(**reply)
     assert plow_relay.main(argv) == 2
     assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["read", "~/Plow/wiki/index.md"], ["run", "--", "wiki", "validate"]])
+def test_a_refusal_exits_4_not_as_a_mac_that_did_not_answer(latch, capsys, argv):
+    """The Mac answered no: the fix is the owner's rules, not waking the Mac."""
+    _, answer, _ = latch
+    answer(stderr=REFUSED, code=4)
+    assert plow_relay.main(argv) == 4
+    assert "gatekeeper_denied" in capsys.readouterr().err

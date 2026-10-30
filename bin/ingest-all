@@ -101,14 +101,15 @@ fi
 # once at the end: a page the model damaged is named to the very next turn,
 # which still has the source in hand, instead of being snapshotted into
 # history and reported every night with nothing ever repairing it.
-# Exit 1 from a check is the corpus. Anything else is the Mac not answering,
-# which returns 2: an unknown is not a clean wiki.
+# Exit 1 from a check is the corpus; 4 is the Mac's gatekeeper refusing; anything
+# else is the Mac not answering. Both return 2: an unknown is not a clean wiki.
 problem() {
   local out
   out=$("$@" 2>&1)
   case $? in
     0) ;;
     1) printf '%s\n' "$out" ;;
+    4) echo "ingest-all: the gatekeeper on the owner's Mac refused: $out" >&2; return 2 ;;
     *) echo "ingest-all: the owner's Mac did not answer: $out" >&2; return 2 ;;
   esac
 }
