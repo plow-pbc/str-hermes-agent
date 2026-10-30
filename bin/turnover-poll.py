@@ -284,7 +284,7 @@ def run(ops: list[dict], hostex, seam, board, home: pathlib.Path, groups: dict,
                              start_check_in_date=(today - timedelta(days=HISTORY_DAYS)).isoformat(),
                              end_check_in_date=today.isoformat(), limit=100)["data"]["reservations"]
             hostex_tasks = functools.cache(lambda: hostex(
-                "/tasks", start_date=(today - LOOKBACK).isoformat(), end_date=today.isoformat(),
+                "/tasks", start_date=(today - timedelta(days=HISTORY_DAYS)).isoformat(), end_date=today.isoformat(),
                 limit=100)["data"]["tasks"])
             for r in history:
                 if r["check_in_date"] == today.isoformat():
