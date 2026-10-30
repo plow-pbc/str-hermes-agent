@@ -313,7 +313,7 @@ def test_a_held_stay_closed_before_ready_wakes_nobody(tick):
     run, board, log, wakes = tick
     run("10:00")
     (task,) = board.tasks.values()
-    board.note(task["id"], "HOLD Sam")
+    board.note(task["id"], "HOLD Lee")
     board.complete(task["id"])
     log.clear()
     run("10:02", seam=lambda path, payload: pytest.fail("a closed stay reads no Seam"))
