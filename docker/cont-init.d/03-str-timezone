@@ -3,7 +3,7 @@
 # bare cron expression in the container's zone. Ported from life-assistant's
 # 10-life-timezone: never fatal, UTC until setup writes a zone, fixed at boot so
 # register-jobs can catch an ops.toml edited without the restart.
-# ops.toml is read where checkin-watch reads it: ${VAULT:-$HERMES_HOME/repo/vault}.
+# ops.toml is read where turnover-poll reads it: ${VAULT:-$HERMES_HOME/repo/vault}.
 # On a fresh VM it is absent at this point (UTC); a TZ the container already set
 # (compose `environment:`) is kept.
 set -eu

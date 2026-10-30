@@ -17,12 +17,13 @@ def _load(name, path):
 
 
 str_config = _load("str_config", ROOT / "bin" / "str-config")
-watch = _load("checkin_watch", ROOT / "bin" / "checkin-watch.py")
+poll = _load("turnover_poll", ROOT / "bin" / "turnover-poll.py")
 
 PROP = {"hostex_property_id": 12345, "title": "Example Property",
         "timezone": "America/Los_Angeles", "default_checkin_time": "16:00",
         "seam_device_id": "dev-1", "cleaner_name": "Jane",
-        "cleaner_access_code_ids": ["code-1"], "cleaners_thread": "Cleaners"}
+        "cleaner_access_code_ids": ["code-1"], "cleaners_thread": "Cleaners",
+        "maintenance_name": "Max", "maintenance_thread": "Maintenance"}
 
 
 def setup_env(home):
@@ -80,13 +81,13 @@ def test_allowed_values_roundtrip(tmp_path, key, value):
     ({}, "repo/vault/ops.toml"),
     ({"VAULT": "VAULTDIR"}, "VAULTDIR/ops.toml"),
 ])
-def test_ops_written_where_checkin_watch_reads_it(tmp_path, environ, rel):
+def test_ops_written_where_turnover_poll_reads_it(tmp_path, environ, rel):
     environ = {k: str(tmp_path / v) for k, v in environ.items()}
     str_config.apply({"ops": {"timezone": "America/Chicago", "properties": [PROP]}},
                      tmp_path, environ=environ)
     text = (tmp_path / rel).read_text()
     assert tomllib.loads(text) == {"timezone": "America/Chicago", "properties": [PROP]}
-    assert watch.load_ops_text(text) == [PROP]             # the real contract
+    assert poll.load_ops_text(text) == [PROP]             # the real contract
 
 
 def test_ops_merge_keeps_timezone_when_only_properties_sent(tmp_path):
@@ -110,7 +111,7 @@ def test_unknown_keys_refused(tmp_path, patch):
     {k: v for k, v in PROP.items() if k != "cleaners_thread"},
     {**PROP, "default_checkin_time": "4pm"},
 ], ids=["incomplete", "bad time"])
-def test_a_property_checkin_watch_would_refuse_is_never_written(tmp_path, prop):
+def test_a_property_turnover_poll_would_refuse_is_never_written(tmp_path, prop):
     (tmp_path / "repo/vault").mkdir(parents=True)
     (tmp_path / "repo/vault/ops.toml").write_text('timezone = "America/Chicago"\n')
     with pytest.raises(SystemExit, match="ops.toml not written"):

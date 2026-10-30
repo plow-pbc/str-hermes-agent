@@ -213,12 +213,13 @@ credential, so a redeploy cannot disturb it.
 
 Directly after step 4, and before anything else: the gateway is up and its
 scheduler is running, so every minute this waits is a `hostex-inbound` tick
-that can announce a draft the mirror still skips.
+that can land a wake in a session the owners are not in.
 
-The mirror resolves a session by chat id and returns nothing when the chat has
-several open sessions belonging to different people, so a group carrying one
-session per member is a group whose drafts arrive with nothing behind them —
-the delivery succeeds and the job reports ok either way (#84). Step 3 installs
+A group session's key appends the sender's id unless
+`group_sessions_per_user` is off, and a wake's sender is the synthetic
+`plow_wake`, so with per-member keys a wake lands in a session no person is in:
+the draft is written, the job reports ok, and the owners' replies reach a
+different session that never saw it (#84). Step 3 installs
 `group_sessions_per_user: false`, but that only governs sessions opened *after*
 the restart above; the ones already open stay open, and two of those are still
 two.
@@ -264,12 +265,6 @@ ingests into the wiki:
 
 ```sh
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
-```
-
-Edit `checkin-watch` in place rather than recreating it:
-
-```sh
-docker compose exec -T -u hermes hermes hermes cron edit checkin-watch --failure-deliver plow_chat
 ```
 
 Skip any job that `cron list` does not show. Then confirm `Deliver: plow_chat`

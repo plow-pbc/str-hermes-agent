@@ -37,3 +37,8 @@ def approval_group(env) -> str | None:
     if label not in groups(env):
         raise SystemExit(f"PLOW_CHAT_APPROVAL_GROUP {label!r} names no group in PLOW_CHAT_GROUP_UIDS")
     return groups(env)[label]
+
+
+def owners_chat(env) -> str:
+    """The owners' chat: their group, else the owner's own chat."""
+    return approval_group(env) or env["PLOW_HOME_CHANNEL"]

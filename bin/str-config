@@ -7,7 +7,7 @@ r"""str-config -- write setup's answers.
 
 The one writer for $HERMES_HOME/str/setup.env (the four keys setup owns; never
 .env, which plow-init owns) and ${VAULT:-$HERMES_HOME/repo/vault}/ops.toml
-(where checkin-watch reads it). Keys never pass through the model: the owner
+(where turnover-poll reads it). Keys never pass through the model: the owner
 pastes them into ~/Plow/str-keys.env on their Mac and this reads it over the
 Latch relay, so a stdin patch carrying one is refused. Values are written
 unquoted as KEY=value; one with `"` `'` `\` `$` `#` CR/LF or edge whitespace is
@@ -24,11 +24,11 @@ from dotenv import dotenv_values  # noqa: E402
 ENV_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY", "PLOW_CHAT_GROUP_UIDS", "PLOW_CHAT_APPROVAL_GROUP")
 SECRET_KEYS = ("HOSTEX_TOKEN", "SEAM_API_KEY")
 OPS_KEYS = ("timezone", "properties")
-# checkin-watch reads ops.toml: its own field list and parser are the schema.
-_loader = importlib.machinery.SourceFileLoader("checkin_watch", str(BIN / "checkin-watch.py"))
-watch = importlib.util.module_from_spec(importlib.util.spec_from_loader("checkin_watch", _loader))
-_loader.exec_module(watch)
-PROPERTY_KEYS = watch.REQUIRED
+# turnover-poll reads ops.toml: its own field list and parser are the schema.
+_loader = importlib.machinery.SourceFileLoader("turnover_poll", str(BIN / "turnover-poll.py"))
+poll = importlib.util.module_from_spec(importlib.util.spec_from_loader("turnover_poll", _loader))
+_loader.exec_module(poll)
+PROPERTY_KEYS = poll.REQUIRED
 KEY_FILE = "~/Plow/str-keys.env"  # the Mac's ~, resolved by Latch
 TEMPLATE = """\
 # Your keys for str. Paste each one after its = sign, save, then tell str "done".
@@ -94,11 +94,11 @@ def _toml_value(v):
 
 
 def _refuse_unreadable_ops(text):
-    """Checkin-watch's own parser: a property it would refuse is never written."""
+    """turnover-poll's own parser: a property it would refuse is never written."""
     try:
-        watch.load_ops_text(text)
+        poll.load_ops_text(text)
     except (Exception, SystemExit) as e:
-        raise SystemExit(f"str-config: ops.toml not written, checkin-watch would refuse it: {e}") from None
+        raise SystemExit(f"str-config: ops.toml not written, turnover-poll would refuse it: {e}") from None
 
 
 def _ops_text(ops):

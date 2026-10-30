@@ -20,28 +20,13 @@ agent:
   # restore reproduces the behaviour the operator has been running with.
   verify_on_stop: false
 cron:
-  # checkin-watch's report is written for a group that may answer it, and the
-  # answering turn cannot see it: a cron delivery runs in its own
-  # session, which ends before the owner replies, so the reply arrives in the
-  # group's session with no draft in it. Mirroring appends the delivered text
-  # there. (Guest drafts need no mirror: hostex-poll hands the group the turn
-  # that writes them.)
-  #
-  # Scoped by the image to the job's origin conversation, so it changes nothing
-  # for a job without one — every other job here is CLI-created with origin
-  # null. bin/register-jobs stamps the origin that opts this one in.
-  mirror_delivery: true
   # The agent's final response is the whole message; the default header and
   # "stop reminder" footer doubled every guest alert's length.
   wrap_response: false
-# The other half of that mirror: one session per group chat, not one per member.
-# The image resolves a delivery's session by chat id, and refuses to pick when
-# the chat has several open sessions belonging to different people rather than
-# guess whose to write into. Per-member sessions therefore make mirror_delivery
-# above a silent no-op in exactly the group it exists for — the delivery still
-# succeeds and the skip logs at debug, so the job reports ok while the draft
-# never lands (#84). Stamping a user id on the job would resolve one member's
-# session and stand the other owner in front of the same missing draft.
+# One session per group chat, not one per member. A poller's wake (hostex-poll's
+# guest drafts, turnover-poll's steps) is a turn in the group's session, and the
+# reply it asks for comes from whichever member answers: with per-member
+# sessions that reply lands in a session that never saw the question (#84).
 #
 # Gateway-level on purpose: this is the key the *persisted* session is written
 # under, and the image reads it only from the top level of this file or a
@@ -51,6 +36,7 @@ cron:
 #
 # The cost is that the owners share conversation context in a group thread,
 # which is what a group thread reads like anyway.
+group_sessions_per_user: false
 # On a full-budget timeout the aux client skips the same-provider retry for
 # compression and falls back -- but by default there is nowhere to land, so an
 # oversized session freezes and every turn re-stalls. A sibling agent lost ~30h
@@ -80,7 +66,28 @@ auxiliary:
       model: gpt-5.5
       timeout: 300
 
-group_sessions_per_user: false
+# Turnover tasks (bin/turnover-poll.py) are a ledger the thread sessions read
+# with kanban_show and append to with kanban_comment, and kanban is off by
+# default everywhere. This is the profile-wide opt-in, which adds the toolset to
+# each platform's default list; an explicit platform_toolsets.plow_chat list
+# would replace that default instead (probed on the pinned image: the
+# `[hermes-plow_chat, kanban]` form drops terminal, file and twenty more), and
+# `hermes tools enable --platform plow-chat` writes a key the gateway never
+# reads (its sessions are plow_chat). hermes-cli is the image's own value,
+# restated because the list is replaced whole.
+toolsets:
+- hermes-cli
+- kanban
+# The board is used as a ledger only, so nothing of kanban's own may act on it.
+# The dispatcher is on by default and would hand a task to a detached worker the
+# moment it had an assignee; a default assignee would give every unassigned
+# task one. auto_subscribe_on_create defaults on, so a session that ever called
+# kanban_create would subscribe its thread to board wakes. turnover-poll reads
+# these three back through `hermes config get` and refuses to run otherwise.
+kanban:
+  dispatch_in_gateway: false
+  default_assignee: ""
+  auto_subscribe_on_create: false
 # The base's skills for the old Latch relay route the owner's Mac through its
 # plow_* tools, which are gone; the latch skill is the route (bin/latch-boot).
 skills:
