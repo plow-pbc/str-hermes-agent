@@ -525,6 +525,9 @@ def test_a_failure_that_is_not_a_namespace_miss_surfaces_instead_of_falling_back
     ({"method": "manual"}, ("manual",), ("code",)),
     ({"access_code_id": "ac_long_gone"}, ("code ac_long_gone",), ("unknown code",)),
     ({"event_type": "lock.locked", "method": "manual"}, ("locked",), ()),
+    # Seam stamps in UTC; passed raw, "22:04Z" was read to the owners as 10:04 PM.
+    ({"occurred_at": "2026-10-29T22:04:07.000Z", "method": "manual"},
+     ("2026-10-29 15:04 PDT",), ("22:04",)),
 ])
 def test_lock_event_descriptions(fake_client, fields, present, absent):
     fake_client.events.events = [event(**fields)]
@@ -541,15 +544,6 @@ def test_events_are_scoped_to_the_named_door_and_to_lock_events(fake_client):
     assert set(query["event_types"]) == {"lock.locked", "lock.unlocked"}
     assert query["since"] == "2026-08-01T00:00:00Z"
     assert query["limit"] == 5
-
-
-def test_event_times_are_the_propertys_local_time_with_the_zone_named(fake_client):
-    """Seam stamps events in UTC. Passed through raw, "22:04Z" was read to the
-    owners as "10:04 PM" — hours in the future (2026-10-29)."""
-    fake_client.events.events = [event(occurred_at="2026-10-29T22:04:07.000Z", method="manual")]
-    reported = server.list_lock_events("front")
-    assert "2026-10-29 15:04 PDT" in reported
-    assert "22:04" not in reported
 
 
 def test_events_are_reported_newest_first(fake_client):
