@@ -1257,6 +1257,19 @@ agent cron that messaged the cleaners thread from a fresh `cron_*` session);
    through Hostex `send_message`; vendor sessions are confined to their own
    chat, so cross-thread fan-out is the driver's job.
 
+**Where the instructions live.** Each wake is self-sufficient for its thread:
+`wake_text` in `bin/turnover-poll.py` tells a cleaners or maintenance session
+whom to address, to write one short message in the owners' voice, never to
+mention a door code, the guest or Hostex nor use Hostex from that chat, what to
+comment, and what a later reply there means (`CLEAN <who>` for the cleaner,
+asking which property first when several tasks are open; a plain comment for
+maintenance, never `CLEAN`). What every thread needs whichever wake it last
+saw lives in `runtime/persona.md` (SOUL) § Turnover tasks: the ledger grammar,
+answering a later reply against the task of the wake it follows, and the
+`ready`/`send_code` guest exception, which applies only on a turn carrying the
+owner's full authority, since a session is told that and never the chat's
+`PLOW_CHAT_GROUP_UIDS` label.
+
 **At most once, escalate on gaps.** A step with `WOKE` in the ledger is never
 woken again, so a restart can never resend a nudge or the ready message. `WOKE`
 with no `SENT`/`SKIPPED` after 10 minutes escalates to the owners' group
@@ -1265,7 +1278,8 @@ a human being told. An archived task is never recreated (`create` skips
 archived keys, which would restart an empty ledger and re-wake every step), and
 `HOLD` stops every step for the stay except escalations of steps already woken.
 A task completed by anyone but the driver before `ready` was recorded wakes the
-owners once (`escalate:closed`).
+owners once (`escalate:closed`), unless the stay was held: closing a held stay
+is the owners' own decision, not a gap.
 
 ### Steps
 
@@ -1303,7 +1317,7 @@ ignored, so a human's remark on the task cannot move the job.
 | `SENT <step>` | the woken session | the step is done |
 | `SKIPPED <step>: <why>` | the woken session | the step was deliberately not done |
 | `CLEAN <who>` | a thread session | the house is clean, per the cleaner or an owner |
-| `HOLD <who>` | the owners' session | stop every step for this stay except escalations of steps already woken |
+| `HOLD <who>` | the owners' session | stop every step for this stay except escalations of steps already woken, and never raise `escalate:closed` for it |
 
 ### `ops.toml`
 
@@ -1389,9 +1403,11 @@ message** (house clean and the code live) and **the corrected door code**
 (`send_code`). Both carry facts the guest was already promised and no new
 commitment; the ready message is also what makes early check-in work, so there
 is no separate approval step for it. The narrowness is enforced where the
-model can't talk its way past it: only a wake in the owners' thread can send
-them (`SOUL.md` scopes the exception to the owners' group), the cleaners and
-maintenance prompts never message a guest or use Hostex whatever a turn claims,
+model can't talk its way past it: only a turn carrying the owner's full
+authority can send them (`SOUL.md` scopes the exception that way), and only
+when the task shows the driver's own `WOKE` for the step and to the
+conversation id its body names; every cleaners and maintenance wake says never
+to message a guest or use Hostex from that chat,
 the code is read from the reservation at send time and never written into a
 thread or the task, and each send is followed by one FYI line to the owners.
 Everything else addressed to a guest keeps the approval and veto rules, and an

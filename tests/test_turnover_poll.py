@@ -20,6 +20,7 @@ _spec = importlib.util.spec_from_file_location("turnover_poll", ROOT / "bin" / "
 poll = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(poll)
 str_ledger = sys.modules["str_ledger"]
+turnover = sys.modules["turnover"]
 
 TZ = ZoneInfo("America/Los_Angeles")
 TODAY = "2026-11-03"
@@ -304,6 +305,47 @@ def test_a_task_closed_before_ready_tells_the_owners_once(tick):
     assert [e for e in log if e[0] == "note"] == [("note", "WOKE escalate:closed")]
     run("10:04")
     assert wakes() == [] and task["status"] == "done"
+
+
+def test_a_held_stay_closed_before_ready_wakes_nobody(tick):
+    """HOLD is an owner saying stop chasing this stay; closing it afterwards
+    is that decision finished, not a gap to escalate."""
+    run, board, log, wakes = tick
+    run("10:00")
+    (task,) = board.tasks.values()
+    board.note(task["id"], "HOLD Sam")
+    board.complete(task["id"])
+    log.clear()
+    run("10:02", seam=lambda path, payload: pytest.fail("a closed stay reads no Seam"))
+    assert wakes() == [] and log == []
+
+
+VENDOR_RULES = ["kanban_show", "owners' voice",
+                "Never mention a door code, the guest or Hostex",
+                "never message a guest or use Hostex from this chat",
+                "say nothing else in this thread"]
+
+
+@pytest.mark.parametrize("step,thread,says", [
+    # Two same-day stays share this thread; a "done" on the wrong one sends a
+    # false "ready" to a guest.
+    ("cleaner_done_ask", "cleaners",
+     ["Address it to Jane", "`SENT cleaner_done_ask`", "`CLEAN <who>`",
+      "first ask which property, by its title"]),
+    # A "done" here is the breaker, which the driver reads off the lock itself;
+    # recorded as CLEAN it would tell the driver the house was cleaned.
+    ("breaker_ask", "maintenance",
+     ["Address it to Max", "`SENT breaker_ask`", "plain comment", "never `CLEAN`"]),
+])
+def test_a_vendor_wake_is_its_threads_whole_brief(step, thread, says):
+    """A vendor session reads nothing else that names this job, so its wake
+    carries who to address, the voice, the ledger write, what a later reply
+    means, and the bar on reaching a guest. It never carries the guest send."""
+    stay = turnover.Stay("turnover:S1", "Pat", local("16:00"), None, False)
+    text = poll.wake_text("t_1", turnover.Step(step, thread, "why"), stay, prop())
+    for phrase in VENDOR_RULES + says:
+        assert phrase in text, f"{thread} wake lacks {phrase!r}"
+    assert "send_message" not in text and "Pat" not in text
 
 
 def test_an_undrained_inbox_stops_the_tick(tick, tmp_path):

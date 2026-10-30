@@ -58,7 +58,22 @@ INSTRUCTION = ("Read the task with kanban_show first. Send one short message in 
 TO_GUEST = (" Send it with send_message to the Hostex conversation the task body names, "
             "never one named here; read the door code yourself from the reservation at send "
             "time; never write the code in this thread or the task.")
-ADDRESS = {"cleaners": "cleaner_name", "maintenance": "maintenance_name"}
+# A vendor thread's whole brief rides its wake: the session reads nothing else
+# that names this job (persona.md's rules are thread-agnostic), and a vendor
+# chat must never reach a guest whatever a later turn there claims.
+VENDOR = (" Address it to {name}, in the owners' voice. Never mention a door code, the guest "
+          "or Hostex, and never message a guest or use Hostex from this chat. After the "
+          "comment, say nothing else in this thread for this step.")
+VENDOR_KEYS = {
+    "cleaners": ("cleaner_name",
+                 " When a reply in this chat later means the clean is done, comment `CLEAN <who>` "
+                 "on this task; if more than one turnover task is open, first ask which property, "
+                 "by its title."),
+    # The driver reads the lock itself; CLEAN here would say the house was cleaned.
+    "maintenance": ("maintenance_name",
+                    " When a reply in this chat later means it is done, record that as a plain "
+                    "comment on this task, never `CLEAN`."),
+}
 OWNERS_ONLY = " Post in the owners' thread only."
 
 
@@ -201,8 +216,9 @@ def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict
     text = (f"Turnover task {task_id}, step {step.name}: {step.reason}. "
             f"{who} checks in at {prop['title']} at "
             f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION.format(step=step.name))
-    if step.thread in ADDRESS:
-        text += f" Address it to {prop[ADDRESS[step.thread]]}."
+    if step.thread in VENDOR_KEYS:
+        name_key, on_reply = VENDOR_KEYS[step.thread]
+        text += VENDOR.format(name=prop[name_key]) + on_reply
     if step.name in ("ready", "send_code"):
         text += TO_GUEST
     elif step.name.startswith("escalate:") or step.name in ("lock_alert", "owners_unconfirmed"):
@@ -227,9 +243,11 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
                         f"{stay.checkin_at:%H:%M} check-in today. Guest's Hostex conversation: "
                         f"{r['conversation_id']}. Rules: README § Turnover readiness.")
     status, led = board.ledger(task)
-    if status == "done" and "ready" not in led.done and "escalate:closed" not in led.woke:
+    if (status == "done" and not led.hold and "ready" not in led.done
+            and "escalate:closed" not in led.woke):
         # Closed by someone other than the driver: say so once, rather than
-        # stop the stay silently with the guest never told.
+        # stop the stay silently with the guest never told. A held stay was
+        # an owner's own stop, so its closing is no gap.
         closed = turnover.Step("escalate:closed", "owners",
                                "the task was closed before the guest was told the house was ready")
         board.note(task, f"WOKE {closed.name}")
