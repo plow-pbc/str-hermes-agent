@@ -175,7 +175,7 @@ between the two; #46 records why the allowlist never was.
   verbatim unmarked-bullet quotes (or that has no facts) and that makes no
   commitment is announced to the owners' group — source bullets quoted — and
   sends after 30 minutes unless an owner objects. Everything else, and any
-  doubt, still requires explicit approval. Nothing ever sends silently (bar the turnover exception above), and
+  doubt, still requires explicit approval. Nothing ever sends silently (bar the turnover exception, § Turnover readiness), and
   there is still no confidence threshold — the veto class is a bright-line
   checklist, not a score.
 - **Drafts are addressable.** Several can be outstanding at once, so a reply
@@ -1250,8 +1250,11 @@ agent cron that messaged the cleaners thread from a fresh `cron_*` session);
    each stay's ledger, and `bin/turnover.py` decides the next due step as a
    pure function of those. It never sends anything itself.
 2. **The memory: a kanban task per stay, used as a ledger only.** The driver
-   creates `notify-when-house-is-ready <guest>` with `--idempotency-key
-   turnover:<stay>`, unassigned, and nothing else creates tasks. Agent sessions
+   creates `notify-when-house-is-ready turnover:<stay_code> <YYYY-MM-DD>` with
+   `--idempotency-key turnover:<stay_code>`, unassigned, and nothing else
+   creates tasks. Vendor sessions read the task, so it never names the guest;
+   its body carries the guest's Hostex conversation id, the only one a guest
+   message may go to. Agent sessions
    in different threads cannot share memory, so each appends one-line comments
    that the driver reads back (`bin/str_ledger.py`). Owners see the history in
    `hermes kanban show` or the dashboard.
@@ -1271,7 +1274,9 @@ with no `SENT`/`SKIPPED` after 10 minutes escalates to the owners' group
 (`escalate:<step>`, itself never escalated), never re-wakes: the worst case is
 a human being told. An archived task is never recreated (`create` skips
 archived keys, which would restart an empty ledger and re-wake every step), and
-`HOLD` stops everything for the stay.
+`HOLD` stops every step for the stay except escalations of steps already woken.
+A task completed by anyone but the driver before `ready` was recorded wakes the
+owners once (`escalate:closed`).
 
 ### Steps
 
@@ -1282,16 +1287,17 @@ Times are property-local on the check-in date (`ops.toml` `timezone`).
 | `lock_alert` | owners | 06:00 has passed and the door code is not set or the lock is offline |
 | `breaker_ask` | maintenance | the same condition: ask the contact to reset the breaker |
 | `send_code` | owners | after `lock_alert`, the guest's code is live on an online lock |
-| `cleaner_coming` | cleaners | 14:00 and no cleaner entry since checkout, house not clean |
+| `cleaner_coming` | cleaners | 14:00, before check-in, no cleaner entry since the previous checkout, house not clean |
 | `cleaner_quiet_ask` | cleaners | same-day turnover, cleaner has entered, lock quiet for 45 minutes (`QUIET_AFTER`), before check-in, not clean |
 | `cleaner_done_ask` | cleaners | check-in time reached and the house is not confirmed clean |
 | `owners_unconfirmed` | owners | 30 minutes (`UNCONFIRMED_AFTER`) after `cleaner_done_ask` with no confirmation |
 | `ready` | owners | the house is clean and the guest's code is live on an online lock |
 | `escalate:<step>` | owners | 10 minutes (`ESCALATE_AFTER`) after a wake with nothing recorded |
 
-**Clean** is any of: the Hostex cleaning task is `completed`; the cleaner's
-code unlocked the door after the previous checkout and more than 12 hours
-(`CLEAN_AFTER`) have passed; or a `CLEAN` comment (the cleaner's "done" or an
+**Clean** is any of: the Hostex cleaning task is `completed`;
+it is more than 12 hours (`CLEAN_AFTER`) after the cleaner's last unlock since
+the previous checkout (Hostex has no checkout time, so that window opens at
+08:00 on the checkout date); or a `CLEAN` comment (the cleaner's "done" or an
 owner's "she's done"; the last wins). Hostex task status alone is not enough
 because it is almost never updated, and the lock alone is not either: a lock
 event mid-clean is not a departure, and the lock auto-relocks about 30 minutes
@@ -1308,7 +1314,7 @@ ignored, so a human's remark on the task cannot move the job.
 | `SENT <step>` | the woken session | the step is done |
 | `SKIPPED <step>: <why>` | the woken session | the step was deliberately not done |
 | `CLEAN <who>` | a thread session | the house is clean, per the cleaner or an owner |
-| `HOLD <who>` | the owners' session | stop; no further step is woken for this stay |
+| `HOLD <who>` | the owners' session | stop every step for this stay except escalations of steps already woken |
 
 ### `ops.toml`
 
@@ -1351,7 +1357,9 @@ committed.
    each (the vouch, § Plow group chats), and label them in
    `PLOW_CHAT_GROUP_UIDS` under exactly the names `cleaners_thread` and
    `maintenance_thread` give. A wake to a chat the adapter has not granted is
-   renamed `.rejected`, and the driver alarms on those.
+   renamed `.rejected`, and the driver alarms on those. The wake inbox is
+   shared, so a `.rejected` turnover wake also halts `hostex-inbound` until it
+   is cleared.
 3. Deploy (`/deploy-str-hermes`): `runtime/` is baked into the image, so the
    kanban config below arrives with the build.
 4. Register the job:
