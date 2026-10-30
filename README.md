@@ -112,7 +112,7 @@ container environment. The wiki's recall is optional: setup works without it.
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot-or-restore/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `~/Plow/wiki/index.md`, and a turn reads that over the relay to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (read from Hermes' run record), which it then sends unless an owner stopped it; an approval-path draft or a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [retargeting the job at the owners' group](#owners-group-migration) and [ending that group's per-member sessions](#shared-group-session), neither of which a redeploy does. |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (read from Hermes' run record), which it then sends unless an owner stopped it; an approval-path draft or a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [ending the owners' group's per-member sessions](#shared-group-session), which a redeploy does not do. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Drive the operator's Mac — its browser (Mercury, bank and vendor portals), files and messages — with latch | **Shipped in the image** — the latch CLI and its skill; boot logs the agent in with its own Plow credential (§ Plow Latch) |
@@ -815,13 +815,7 @@ it serving — hence the wait.
 **3** creates the job if it is missing, replaces it (remove, then create) when
 its delivery target or no-agent mode moved, and primes the cursor only if there isn't one. It
 also runs at every boot and at the end of str-setup. It never creates a second
-job, and that matters: the one path that could produce one is the one where the
-first is *already broken*, pointing at a retired chat UID. Both
-jobs share the cursor, and the poller advances it for whatever it walked
-whether or not the delivery landed — so a stale-UID job consumes the
-longest-waiting guest, the adapter drops its announcement, and the healthy
-job's next tick finds nothing pending. Two jobs are only harmless when both
-can deliver, and that is exactly the case reactivation does not produce.
+job: both would walk the one shared cursor.
 
 A create the gateway refuses exits non-zero, after priming if priming ran (a
 cold cursor is primed only on the way to a create). Each job it creates,
@@ -831,19 +825,21 @@ Day to day: `hermes cron run hostex-inbound` fires a one-shot tick and
 `hermes cron runs` shows durable history, both via `docker compose exec`.
 
 <a name="shared-group-session"></a>
-**One-time, after deploying: end the group's per-member sessions.** The mirror
-resolves a delivery's session by chat id and refuses to pick when the chat has
-several open sessions belonging to different people, so a group carrying one
-session per member is a group the mirror silently skips — the delivery still
-succeeds, the skip logs at debug, and the job reports ok while no draft ever
-lands (#84). `group_sessions_per_user: false` in `runtime/config.yaml` fixes
-that for sessions started *after* it deploys; the ones already open stay open,
-and two of those are still two.
+**One-time, after deploying: end the group's per-member sessions.** A group
+session's key appends the sender's id unless `group_sessions_per_user` is off
+(`gateway/session.py:669-681`). A wake carries the synthetic sender
+`plow_wake` (`_wake_event`, plow_chat `__init__.py`), so with per-member keys
+it lands in a session no person is in: the draft is written, the job reports
+ok, and the owners' replies reach a different session that never saw it (#84).
+`group_sessions_per_user: false` in `runtime/config.yaml` makes every sender,
+wakes included, share the key ending at the chat id — but only for sessions
+started *after* it deploys; the ones already open stay open, and two of those
+are still two.
 
 So end them, once, after the restart that picks up the config — before it, the
 next message just opens another per-member session. Nothing here deletes:
-`end_session` sets `ended_at`, which is the column the mirror's query filters
-on, and leaves the transcript readable. (`hermes sessions archive` is not a
+`end_session` sets `ended_at`, which is what marks a session closed, and
+leaves the transcript readable. (`hermes sessions archive` is not a
 substitute — it sets `archived`, which that query does not look at.)
 
 ```sh
@@ -866,8 +862,7 @@ the test rather than a `cp_` prefix because sessions written before the adapter
 indexed `sender["uid"]` are keyed `:member` — the fallback it used to carry when
 a frame arrived without a sender uid — and a key ending `:member` is as
 per-member as one ending `:cp_…`. Matching on the prefix would
-skip that row, print a non-zero count, and read as done over a group the mirror
-still skips, which is this bug's own shape.
+skip that row, print a non-zero count, and read as done over a group still split per member, which is this bug's own shape.
 
 Re-running is safe because `list_gateway_sessions` returns open sessions only,
 so a second run finds nothing to end and prints `0`. Do re-run it after any
@@ -1337,7 +1332,7 @@ cleaner_name = "Jane"                 # how the agent addresses them
 cleaner_access_code_ids = ["code-uuid-1"]  # Seam ids that count as "cleaner"; the
                                            # backup crew's id goes here too
 cleaners_thread = "Cleaners"          # display name in PLOW_CHAT_GROUP_UIDS
-maintenance_name = "Sam"              # how the agent addresses the maintenance contact
+maintenance_name = "Pat"              # how the agent addresses the maintenance contact
 maintenance_thread = "Maintenance"    # display name in PLOW_CHAT_GROUP_UIDS
 ```
 
