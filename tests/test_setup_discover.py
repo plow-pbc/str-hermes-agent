@@ -51,11 +51,10 @@ BOTH = {"hosts": [{"name": "cloud", "online": True}, {"name": "mba", "online": F
 
 
 @pytest.mark.parametrize("status,env,configured", [
-    (BOTH, {}, True),
-    (BOTH, {"LATCH_HOST": "cloud"}, True),
-    (BOTH, {"LATCH_HOST": "mba"}, False),  # the Mac is the host latch reaches, and it is offline
-    ({"hosts": []}, {}, False),
-    (discover.plow_relay.RelayError("latch status: not_logged_in: no login here"), {}, False),
+    (BOTH, {"PLOW_WIKI_HOST": "cloud"}, True),
+    (BOTH, {"PLOW_WIKI_HOST": "mba"}, False),  # another host is online, but not the one holding the wiki
+    ({"hosts": []}, {"PLOW_WIKI_HOST": "mba"}, False),
+    (discover.plow_relay.RelayError("latch status: not_logged_in: no login here"), {"PLOW_WIKI_HOST": "mba"}, False),
 ])
 def test_latch_is_configured_when_its_host_is_online(tmp_path, capsys, monkeypatch, status, env, configured):
     def latch(*args):

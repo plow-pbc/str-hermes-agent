@@ -35,12 +35,18 @@ sys.exit(answer.get("code", 0))
 """
 
 
+# Every call reaches the host holding the wiki and the key file, for the home chat.
+WIKI_HOST = ["--host", "mba", "--plow-chat", "cht_home"]
+
+
 @pytest.fixture
 def latch(tmp_path, monkeypatch):
     (tmp_path / "latch").write_text(FAKE)
     (tmp_path / "latch").chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_LATCH", str(tmp_path))
+    monkeypatch.setenv("PLOW_WIKI_HOST", "mba")
+    monkeypatch.setenv("PLOW_HOME_CHANNEL", "cht_home")
 
     def answer(stdout: dict | str = "{}", stderr: str = "", code: int = 0):
         stdout = stdout if isinstance(stdout, str) else json.dumps(stdout)
@@ -60,6 +66,7 @@ def test_read_prints_the_file(latch, capsys):
     assert plow_relay.main(["read", "~/Plow/wiki/index.md"]) == 0
     assert capsys.readouterr().out == "# Wiki Index\n"
     assert calls()[0][:3] == ["file", "get", "~/Plow/wiki/index.md"]
+    assert calls()[0][-4:] == WIKI_HOST
 
 
 def test_write_sends_stdin_to_the_path(latch, monkeypatch):
@@ -67,7 +74,7 @@ def test_write_sends_stdin_to_the_path(latch, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("hello\n"))
     assert plow_relay.main(["write", "~/Plow/wiki/x.md"]) == 0
     assert (tmp / "sent").read_text() == "hello\n"
-    assert calls()[0][:2] == ["file", "put"] and calls()[0][-1] == "~/Plow/wiki/x.md"
+    assert calls()[0][:2] == ["file", "put"] and calls()[0][3:] == ["~/Plow/wiki/x.md", *WIKI_HOST]
 
 
 def test_run_grants_what_it_names_and_exits_with_the_commands_code(latch, capsys):
@@ -78,7 +85,7 @@ def test_run_grants_what_it_names_and_exits_with_the_commands_code(latch, capsys
                             "--", "wiki", "snapshot", "--push"]) == 1
     out = capsys.readouterr()
     assert (out.out, out.err) == ("people/x.md: missing required field: tags\n", "1 invalid\n")
-    assert calls() == [["exec", "--write", "~/Plow/wiki", "--write", "~/Plow/wiki.git", "--network",
+    assert calls() == [["exec", *WIKI_HOST, "--write", "~/Plow/wiki", "--write", "~/Plow/wiki.git", "--network",
                         "--timeout", "600", "--", "wiki", "snapshot", "--push"]]
 
 
