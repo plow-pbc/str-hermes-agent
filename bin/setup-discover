@@ -42,14 +42,13 @@ def _secret(env, key):
 
 
 def cmd_latch(env, fetch):
-    """Configured when latch is logged in and the host it reaches ($LATCH_HOST, else
-    any) is online."""
+    """Configured when latch is logged in and the wiki host ($PLOW_WIKI_HOST) is
+    online."""
     try:
         hosts = plow_relay.latch("status").get("hosts") or []
     except plow_relay.RelayError:
         return {"configured": False}
-    host = env.get("LATCH_HOST")
-    return {"configured": any(h.get("online") for h in hosts if not host or h.get("name") == host)}
+    return {"configured": any(h.get("online") for h in hosts if h.get("name") == env["PLOW_WIKI_HOST"])}
 
 
 def cmd_hostex_properties(env, fetch):

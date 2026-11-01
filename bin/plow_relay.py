@@ -2,7 +2,7 @@
 """The owner's Mac, for scripts, through the latch CLI.
 
 str's wiki lives on the owner's Mac at ~/Plow/wiki, and the container reaches it
-only through latch, which the image ships and boot logs in (bin/latch-boot). The
+only through latch, which the base image ships; its first command logs in. The
 model calls latch itself; the nightly's deterministic steps call it through this.
 
   plow_relay.py read PATH                         the file's content on stdout
@@ -15,8 +15,9 @@ command still running at the deadline. `wiki validate` exits 1 for invalid
 pages, so the two stay distinguishable. Exit 4, latch's own, means the Mac
 answered no: its gatekeeper refused, and the owner's rules are the fix.
 
-The host is $LATCH_HOST and the chat the gatekeeper reads is $LATCH_PLOW_CHAT,
-both latch's own settings, which boot publishes. Latch sandboxes every command: a
+Every call goes to $PLOW_WIKI_HOST, the host that holds the wiki and the key
+file, and acts for the home chat ($PLOW_HOME_CHANNEL), the chat the gatekeeper
+reads the owner's request in. Latch sandboxes every command: a
 command that writes must name its write paths, and one that reaches the network
 must say so; `~` in a path is expanded on the Mac, never in ARGV.
 """
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -64,10 +66,14 @@ def latch(*args: str) -> dict:
                      REFUSED if done.returncode == REFUSED else 2)
 
 
+def _on_wiki_host() -> list[str]:
+    return ["--host", os.environ["PLOW_WIKI_HOST"], "--plow-chat", os.environ["PLOW_HOME_CHANNEL"]]
+
+
 def read(path: str) -> str:
     with tempfile.TemporaryDirectory() as work:
         local = Path(work) / "file"
-        latch("file", "get", path, str(local))
+        latch("file", "get", path, str(local), *_on_wiki_host())
         return local.read_text()
 
 
@@ -75,13 +81,13 @@ def write(path: str, content: str) -> None:
     with tempfile.TemporaryDirectory() as work:
         local = Path(work) / Path(path).name
         local.write_text(content)
-        latch("file", "put", str(local), path)
+        latch("file", "put", str(local), path, *_on_wiki_host())
 
 
 def run(argv: list[str], write_paths=(), network: bool = False) -> tuple[int, str, str]:
     """(exit code, stdout, stderr) of ARGV on the Mac."""
     grants = [arg for path in write_paths for arg in ("--write", path)]
-    result = latch("exec", *grants, *(["--network"] if network else []),
+    result = latch("exec", *_on_wiki_host(), *grants, *(["--network"] if network else []),
                    "--timeout", str(TIMEOUT_S), "--", *argv)
     if result.get("exit_code") is None:
         raise RelayError(f"{' '.join(argv[:2])} ended by signal {result.get('signal')}")

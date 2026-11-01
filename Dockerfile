@@ -8,7 +8,7 @@
 # taking the INDEX digest (`docker buildx imagetools inspect <tag>`, the top
 # `Digest:` line) -- a per-platform manifest digest under it does not resolve
 # as a FROM.
-FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-025fb0371d06995c0a14f9f36c34a8761a75c6ac@sha256:9425f8a326ba7b3596257000e1a17874d4682993f36e1837a76563d7cd1c23d1
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-f3aa45663580e19c7f5b736bd5bebaa6001c200d@sha256:ab8b502e3c3c644e46a6cd4971ba993cc7c2bc0c39d65e18c90b1b011aa6fe31
 
 # The obsidian-wiki skills shell out to an `obsidian-wiki` CLI (cache-check,
 # batch-plan, trust-check, ast-extract), which the skill directories don't
@@ -72,25 +72,10 @@ RUN set -eu; \
 # write, and that the obsidian-wiki skills above are the how. Fetched at the
 # plow-wiki commit whose `wiki` CLI runs on the owner's Mac, so the skill never
 # describes a CLI the Mac does not have. The CLI itself is not installed here:
-# the wiki is on the Mac, and the container reaches it only over the relay.
+# the wiki is on the Mac, and the container reaches it only through latch.
 ARG PLOW_WIKI_SHA=142d546f5a72961d0aea9cae1c303a4d9ac10aca
 ADD https://raw.githubusercontent.com/plow-pbc/plow-wiki/${PLOW_WIKI_SHA}/skill.md /opt/hermes/skills/plow-wiki/SKILL.md
 RUN chmod -R a=rX,u+w /opt/hermes/skills/plow-wiki
-
-# latch, the command-line tool the agent reaches the owner's Mac with: the
-# release out at build time, with latch's own installer, as a client only (it
-# asks hosts and is never one). Root-owned on PATH, so a turn cannot replace the
-# binary the nightly runs. Its skill is written from that binary, so the two
-# match. Its login is the agent's own, in the home volume, made at boot by
-# bin/latch-boot; the installer's state folder only marks it client-only.
-ENV LATCH_STATE_DIR=/var/lib/hermes/latch LATCH_NO_UPDATE_CHECK=1
-RUN set -eu; work="$(mktemp -d)"; cd "$work"; \
-    curl -fsSLO https://releases.plow.co/latch-cli/install.sh; \
-    sh install.sh --client-only --non-interactive --bin-dir /usr/local/bin --state-dir "$work/state"; \
-    mkdir -p /opt/hermes/skills/latch; \
-    latch skill > /opt/hermes/skills/latch/SKILL.md; \
-    chmod -R a=rX,u+w /opt/hermes/skills/latch; \
-    cd /; rm -rf "$work"; latch --version
 
 # Identity: only what is specific to this agent. plow-init writes the home's
 # SOUL.md on every boot as the base persona followed by this file, so nothing
@@ -178,11 +163,6 @@ COPY docker/cont-init.d/04-require-ingest-manifest.sh /etc/cont-init.d/04-requir
 COPY docker/cont-init.d/05-install-agent-payload.sh /etc/cont-init.d/05-install-agent-payload.sh
 # str's cron jobs, reconciled from config at every boot (bin/register-jobs).
 COPY docker/cont-init.d/06-register-jobs /etc/cont-init.d/06-register-jobs
-# latch for this boot (bin/latch-boot): after plow-init, which writes the old
-# relay's MCP server back at every boot, and before the gateway loads it.
-COPY docker/s6-rc.d/str-latch/ /etc/s6-overlay/s6-rc.d/str-latch/
-RUN touch /etc/s6-overlay/s6-rc.d/user/contents.d/str-latch \
-          /etc/s6-overlay/s6-rc.d/hermes-gateway/dependencies.d/str-latch
 RUN chmod 0755 /etc/cont-init.d/02-str-setup-env \
                /etc/cont-init.d/03-str-timezone \
                /etc/cont-init.d/04-require-ingest-manifest.sh \

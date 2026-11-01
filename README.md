@@ -1590,28 +1590,27 @@ itself, the agent reaches with the latch CLI (https://docs.plucas.dev/latch/):
 the Mac runs `latch serve`, and every call is judged against the owner's rules
 there and lands in its audit.
 
-The image ships the client, root-owned at `/usr/local/bin/latch`, and the
-`latch` skill written from that binary by `latch skill`. Its login is the
-agent's own: `bin/latch-boot`, an s6 oneshot after plow-init, runs `latch login`
-with the agent's `PLOW_AGENT_TOKEN` when the state folder
-(`LATCH_STATE_DIR=/var/lib/hermes/latch`, on the home volume) has none, so
-there is no code to text and the login outlives the container. Never copy
+The base image ships the client, root-owned at `/usr/local/bin/latch`, installs
+the newest release at every boot, and writes the `latch` skill from that binary.
+latch logs in on the agent's first command with its own Plow credential, into
+the state folder on the home volume (`LATCH_STATE_DIR=/var/lib/hermes/latch`),
+so there is no code to text and the login outlives the container. Never copy
 another machine's `~/.latch` in: the host would take the agent's calls for the
 owner's.
 
-Two settings name what a call reaches, both latch's own environment:
-`LATCH_HOST` is the Mac (compose's `environment:`, since the account also has
-a `cloud` host), and `LATCH_PLOW_CHAT` is the chat the gatekeeper reads the
-owner's request in — the home chat by default, which latch-boot publishes; the
-model names the chat it is answering with `--plow-chat`.
+The model picks a host per task, as the chat plugin's latch section says:
+Google from any host with `google` on, `cloud` included, so a guest question
+about the calendar still gets an answer with the Mac asleep; the owner's texts
+and contacts only from the Mac. Every call names the chat it answers with
+`--plow-chat`.
 
-The old Latch relay is retired: plow-init still writes its `plow` MCP server
-into `config.yaml` and its `PLOW_MCP_URL` into the dotenv and the container
-environment at every boot from `/me`'s `mcp_url`, and latch-boot removes all
-three before the gateway starts. Without the URL, the chat plugin stops
-injecting its `plow_*` routing and relay recall; `config.yaml` disables the
-base's `owners-mac` and `google-workspace` skills, which route through those
-tools too.
+str's own files are the exception, because they live in one place:
+`PLOW_WIKI_HOST` (compose's `environment:`, `mba` here) is the host holding
+the wiki at `~/Plow/wiki` and the key file `~/Plow/str-keys.env`.
+`bin/plow_relay.py` — the nightly's wiki steps and `str-config` — passes it as
+`--host` on every call and acts for the home chat, and the chat plugin's wiki
+recall reaches the same host. With that host asleep, wiki reads and writes fail
+`host_offline` rather than trying elsewhere.
 
 Verify from wakeup, as the agent:
 
