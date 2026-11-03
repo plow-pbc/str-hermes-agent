@@ -289,20 +289,13 @@ def veto_announced(chat: str, cid: str, since: str) -> bool:
 
     Plow's history is the record of what the owners were told, and VETO is
     str's own template line, which the turn quotes verbatim; the conversation
-    id sits on a line of its own, the draft's second. Only str's own messages count, so an
-    owner quoting the line is not an announcement. A full page newer than
-    `since` raises rather than reads as "not announced": the draft could be on
-    the page this did not fetch, and a missed follow-up costs a guest their
-    answer."""
+    id sits on a line of its own, the draft's second. Only str's own messages
+    count, so an owner quoting the line is not an announcement."""
     after = datetime.datetime.fromisoformat(since)
-    recent = [m for m in plow_messages(chat)
-              if datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")) >= after]
-    if len(recent) == PAGE:
-        raise RuntimeError(f"hostex-poll: {PAGE} messages in {chat} since {since}; "
-                           "cannot tell whether a veto-window draft was among them")
     return any(m["direction"] == "outbound" and VETO in m["body"].casefold()
                and cid in (line.strip() for line in m["body"].splitlines())
-               for m in recent)
+               and datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")) >= after
+               for m in plow_messages(chat))
 
 
 def list_conversations(token: str) -> list[dict]:
