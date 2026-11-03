@@ -1,4 +1,4 @@
-"""Shared HTTP transport for the bin/ scripts: one redirect policy, one GET.
+"""Shared HTTP transport for the bin/ scripts: one redirect policy, one retrying read.
 
 urllib replays a Request's headers onto the redirect target, so a redirect off
 the API origin would hand the bearer token to whatever it points at. Verified
@@ -38,16 +38,21 @@ OPENER = urllib.request.build_opener(_NoRedirect)
 def get(path: str, token: str, user_agent: str, **params: object) -> dict:
     """One Hostex GET. Raises rather than defaulting — a caller that cannot
     read must not report "nothing new". Hostex 403s the default Python-urllib
-    User-Agent, so every caller names itself. A transport stall is retried;
-    an HTTP status is not."""
+    User-Agent, so every caller names itself."""
     url = f"{BASE}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    request = urllib.request.Request(url, headers={
+    return open_json(urllib.request.Request(url, headers={
         "Hostex-Access-Token": token,
         "User-Agent": user_agent,
         "Accept": "application/json",
-    })
+    }))
+
+
+def open_json(request: urllib.request.Request) -> dict:
+    """One read through OPENER. A transport failure — a stall, or a connection
+    dropped before the status line — is retried; an HTTP status is not. Only
+    for reads: a retried write could land twice."""
     for attempt in range(1, ATTEMPTS + 1):
         try:
             with OPENER.open(request, timeout=TIMEOUT_S) as response:

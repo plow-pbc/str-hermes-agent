@@ -150,15 +150,14 @@ def hostex_client(token: str):
 
 
 def seam_client(key: str):
-    # hostex_api.OPENER refuses redirects, which this bearer token needs too.
+    # hostex_api's transport refuses redirects, which this bearer token needs
+    # too, and retries a dropped read. Every call here is a read, POST or not.
     # Seam's edge 403s a request without a User-Agent.
     def post(path: str, payload: dict) -> dict:
-        request = urllib.request.Request(
+        return hostex_api.open_json(urllib.request.Request(
             f"{SEAM}{path}", data=json.dumps(payload).encode(),
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                     "User-Agent": USER_AGENT})
-        with hostex_api.OPENER.open(request, timeout=30) as response:
-            return json.loads(response.read().decode())
+                     "User-Agent": USER_AGENT}))
     return post
 
 
