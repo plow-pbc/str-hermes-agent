@@ -278,6 +278,17 @@ while :; do
     break
   fi
 
+  # A caller with a hard timeout of its own sets INGEST_BUDGET: past it, no new
+  # round starts. Every finished round is recorded and checked, so stopping
+  # between rounds leaves a consistent wiki the next run continues from; being
+  # killed mid-round, which the nightly's 3600s timeout did on 2026-11-03,
+  # leaves neither a rollback nor a digest. Exit 3 is that partial-but-sound
+  # stop, distinct from a failure.
+  if [ -n "${INGEST_BUDGET:-}" ] && [ "$SECONDS" -ge "$INGEST_BUDGET" ]; then
+    echo "ingest-all: time budget of ${INGEST_BUDGET}s spent after $round round(s) with $before remaining; the next run continues" >&2
+    exit 3
+  fi
+
   round=$((round + 1))
   if [ "$round" -gt "$MAX_ROUNDS" ]; then
     echo "ingest-all: FATAL — $MAX_ROUNDS rounds for $TOTAL_SCOPE conversation(s) and $before still remain. The turn is recording far less per round than the batch size; stopping rather than running all night." >&2
