@@ -140,7 +140,16 @@ def render(conv: dict, messages: list[dict]) -> tuple[str, str]:
         f"{(m['content'] or '').strip()}"
         for m in messages
     )
-    digest = "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+    # The digest leaves the stamps out. Hostex re-renders every historical
+    # `created_at` an hour off when daylight saving ends, so a digest over them
+    # moved for the whole corpus overnight (2026-11-01): every file rewritten,
+    # every conversation re-queued, and the nightly killed by its timeout four
+    # rounds into a 26-round backlog. Who said what is the payload; when it is
+    # rendered is not.
+    unstamped = "\n\n".join(
+        f"**{m['sender_role'] or 'unknown'}**:\n{(m['content'] or '').strip()}" for m in messages
+    )
+    digest = "sha256:" + hashlib.sha256(unstamped.encode()).hexdigest()
     cid = conv["id"]
     front = (
         "---\n"

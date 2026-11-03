@@ -148,22 +148,25 @@ def test_unchanged_stamp_costs_no_detail_call(monkeypatch, tmp_path, where):
 # pages — and the update must land back in `_raw/hostex/`, since ingest only
 # picks up what is not archived.
 @pytest.mark.parametrize(
-    ("where", "body_changed"),
+    ("where", "change"),
     [
-        ("raw", True),
-        ("archived-sibling", True),
-        ("archived-nested", True),
-        ("raw", False),
+        ("raw", "reply"),
+        ("archived-sibling", "reply"),
+        ("archived-nested", "reply"),
+        ("raw", None),
+        ("raw", "restamped"),
     ],
     ids=[
         "new-reply",
         "new-reply-while-archived",
         "new-reply-while-nested-archived",
         "stamp-moved-alone",
+        # Hostex shifted every historical created_at an hour when DST ended.
+        "message-stamps-re-rendered",
     ],
 )
 def test_a_moved_stamp_is_recorded_and_the_hash_tracks_the_body(
-    monkeypatch, tmp_path, where, body_changed
+    monkeypatch, tmp_path, where, change
 ):
     """The stamp gates fetching, the hash gates ingesting, and they differ.
 
@@ -176,7 +179,11 @@ def test_a_moved_stamp_is_recorded_and_the_hash_tracks_the_body(
     if where != "raw":
         archive(tmp_path, "a", layout=where)
     reply = {"content": "Also the pantry light flickers.", "sender_role": "guest", "created_at": "t"}
-    messages = TEXT + [reply] if body_changed else TEXT
+    messages = {
+        "reply": TEXT + [reply],
+        None: TEXT,
+        "restamped": [{**m, "created_at": "t-1h"} for m in TEXT],
+    }[change]
 
     code, fetched, _ = run(
         monkeypatch, tmp_path, [conv("a", "2026-07-09T00:00:00+00:00")], {"a": messages}
@@ -184,7 +191,7 @@ def test_a_moved_stamp_is_recorded_and_the_hash_tracks_the_body(
 
     assert code == 0
     assert fetched == ["a"], "a moved stamp must cost a detail call either way"
-    if body_changed:
+    if change == "reply":
         assert "pantry light" in raw(tmp_path, "a")
         assert front(raw(tmp_path, "a"), "payload_hash") != before
         assert front(raw(tmp_path, "a"), "last_message_at") == "2026-07-09T00:00:00+00:00"
