@@ -290,9 +290,11 @@ def veto_announced(chat: str, cid: str, since: str) -> bool:
     Plow's history is the record of what the owners were told, and VETO is
     str's own template line, which the turn quotes verbatim; the conversation
     id sits on a line of its own, the draft's second. Only str's own messages
-    count, so an owner quoting the line is not an announcement."""
+    count, so an owner quoting the line is not an announcement, and a send
+    Plow rejected never reached the owners."""
     after = datetime.datetime.fromisoformat(since)
-    return any(m["direction"] == "outbound" and VETO in m["body"].casefold()
+    return any(m["direction"] == "outbound" and m["status"] != "failed"
+               and VETO in m["body"].casefold()
                and cid in (line.strip() for line in m["body"].splitlines())
                and datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")) >= after
                for m in plow_messages(chat))

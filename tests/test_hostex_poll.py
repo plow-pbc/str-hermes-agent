@@ -254,12 +254,10 @@ def announced_cursor(cursor_file):
     return cursor_file
 
 
-def run_at(monkeypatch, api, cursor_file, now=FOLLOWUP_NOW, announced=True):
-    """`announced` stands in for the owners' chat: whether str posted a
-    veto-window draft there for the conversation."""
+def run_at(monkeypatch, api, cursor_file, now=FOLLOWUP_NOW):
     monkeypatch.setattr(poll, "api_get", api)
-    monkeypatch.setattr(poll, "plow_messages", lambda chat: [] if not announced else [
-        {"direction": "outbound", "created_at": "2026-07-30T08:00:20Z",
+    monkeypatch.setattr(poll, "plow_messages", lambda chat: [
+        {"direction": "outbound", "status": "sent", "created_at": "2026-07-30T08:00:20Z",
          "body": f"Veto window.\nd-1\na\nDRAFT:\nSee you then!\n\n{poll.VETO}."}])
     return poll.run("tok", cursor_file, OWNERS, now=now)
 
@@ -315,8 +313,9 @@ def test_traffic_we_advanced_past_never_comes_due(monkeypatch, cursor_file, thre
     assert json.loads(cursor_file.read_text())["a"] == entry(ADVANCED)
 
 
-def owners_chat(*messages):
-    return [{"direction": d, "created_at": at, "body": body} for d, at, body in messages]
+def owners_chat(*messages, status="sent"):
+    return [{"direction": d, "status": status, "created_at": at, "body": body}
+            for d, at, body in messages]
 
 
 ANNOUNCED_AT = "2026-07-30T08:00:20Z"
@@ -335,6 +334,9 @@ ANNOUNCED_AT = "2026-07-30T08:00:20Z"
                  False, id="a-veto-draft-from-before-this-announcement"),
     pytest.param(owners_chat(("inbound", ANNOUNCED_AT, f"a: {poll.VETO}")),
                  False, id="an-owner-quoting-the-line"),
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\na\nDRAFT:\nHi!\n\n{poll.VETO}."),
+                             status="failed"),
+                 False, id="a-veto-draft-plow-failed-to-deliver"),
 ])
 def test_the_window_closing_follows_up_only_a_veto_window_draft(
         monkeypatch, announced_cursor, messages, follows_up):
