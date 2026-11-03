@@ -27,6 +27,7 @@ import os
 import pathlib
 import sys
 import time
+import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api
@@ -272,6 +273,38 @@ def api_get(path: str, token: str, **params: object) -> dict:
     return hostex_api.get(path, token, "hostex-poll/1.0", **params)
 
 
+def plow_messages(chat: str) -> list[dict]:
+    """The newest PAGE messages in a Plow chat, newest first, as the owners see them."""
+    env = {**os.environ, **str_env.read_setup_env(hermes_home())}
+    request = urllib.request.Request(
+        f"{env['PLOW_API_BASE']}/v1/chats/{chat}/messages?limit={PAGE}",
+        headers={"Authorization": f"Bearer {env['PLOW_AGENT_TOKEN']}",
+                 "User-Agent": "hostex-poll/1.0", "Accept": "application/json"})
+    with hostex_api.OPENER.open(request, timeout=hostex_api.TIMEOUT_S) as response:
+        return json.loads(response.read().decode())["data"]
+
+
+def veto_announced(chat: str, cid: str, since: str) -> bool:
+    """Whether str posted a veto-window draft for `cid` in `chat` since `since`.
+
+    Plow's history is the record of what the owners were told, and VETO is
+    str's own template line, which the turn quotes verbatim; the conversation
+    id sits on a line of its own, the draft's second. Only str's own messages count, so an
+    owner quoting the line is not an announcement. A full page newer than
+    `since` raises rather than reads as "not announced": the draft could be on
+    the page this did not fetch, and a missed follow-up costs a guest their
+    answer."""
+    after = datetime.datetime.fromisoformat(since)
+    recent = [m for m in plow_messages(chat)
+              if datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")) >= after]
+    if len(recent) == PAGE:
+        raise RuntimeError(f"hostex-poll: {PAGE} messages in {chat} since {since}; "
+                           "cannot tell whether a veto-window draft was among them")
+    return any(m["direction"] == "outbound" and VETO in m["body"].casefold()
+               and cid in (line.strip() for line in m["body"].splitlines())
+               for m in recent)
+
+
 def list_conversations(token: str) -> list[dict]:
     """Page through conversations, keeping the first sighting of each id.
 
@@ -425,8 +458,11 @@ def run(token: str, cursor_file: pathlib.Path, chat: str,
             # Discharged either way: an owner who answered in the Hostex app
             # closed this wait, and a reminder about it would re-raise a
             # conversation that is already handled.
-            cursor[cid]["owed"] = None
-            if speaker is not None and speaker["sender_role"] != "host":
+            owed, cursor[cid]["owed"] = cursor[cid]["owed"], None
+            # Every announcement owes a wait; only a veto-window draft has a
+            # send the silence approves, so nothing else comes back.
+            if (speaker is not None and speaker["sender_role"] != "host"
+                    and veto_announced(chat, cid, owed)):
                 output = render(FOLLOWUP, conversation, thread)
                 break
 

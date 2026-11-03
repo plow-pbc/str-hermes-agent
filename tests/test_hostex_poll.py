@@ -254,8 +254,13 @@ def announced_cursor(cursor_file):
     return cursor_file
 
 
-def run_at(monkeypatch, api, cursor_file, now=FOLLOWUP_NOW):
+def run_at(monkeypatch, api, cursor_file, now=FOLLOWUP_NOW, announced=True):
+    """`announced` stands in for the owners' chat: whether str posted a
+    veto-window draft there for the conversation."""
     monkeypatch.setattr(poll, "api_get", api)
+    monkeypatch.setattr(poll, "plow_messages", lambda chat: [] if not announced else [
+        {"direction": "outbound", "created_at": "2026-07-30T08:00:20Z",
+         "body": f"Veto window.\nd-1\na\nDRAFT:\nSee you then!\n\n{poll.VETO}."}])
     return poll.run("tok", cursor_file, OWNERS, now=now)
 
 
@@ -308,6 +313,41 @@ def test_traffic_we_advanced_past_never_comes_due(monkeypatch, cursor_file, thre
     api = FakeApi([conv("a", ADVANCED)], {"a": list(reversed(thread))})
     assert run_at(monkeypatch, api, cursor_file) == poll.SILENT
     assert json.loads(cursor_file.read_text())["a"] == entry(ADVANCED)
+
+
+def owners_chat(*messages):
+    return [{"direction": d, "created_at": at, "body": body} for d, at, body in messages]
+
+
+ANNOUNCED_AT = "2026-07-30T08:00:20Z"
+
+
+@pytest.mark.parametrize("messages, follows_up", [
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\na\nDRAFT:\nHi!\n\n{poll.VETO}.")),
+                 True, id="str-announced-a-veto-window-draft"),
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "Jane · Lake House\nThanks.\nNo reply needed.")),
+                 False, id="no-reply-needed"),
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "d-1\na\nDRAFT:\nHi! Approve?")),
+                 False, id="an-approval-path-draft"),
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\nb\nDRAFT:\nHi!\n\n{poll.VETO}.")),
+                 False, id="a-veto-draft-for-another-conversation"),
+    pytest.param(owners_chat(("outbound", "2026-07-30T07:50:00Z", f"d-0\na\nDRAFT:\nHi!\n\n{poll.VETO}.")),
+                 False, id="a-veto-draft-from-before-this-announcement"),
+    pytest.param(owners_chat(("inbound", ANNOUNCED_AT, f"a: {poll.VETO}")),
+                 False, id="an-owner-quoting-the-line"),
+])
+def test_the_window_closing_follows_up_only_a_veto_window_draft(
+        monkeypatch, announced_cursor, messages, follows_up):
+    """Every announcement owes a wait, but only a veto-window draft has a send
+    the silence approves. Anything else used to come back as "Still waiting.
+    You announced a veto-window draft", a full owners'-chat turn told
+    something false and trusted to notice. Either way the debt is discharged."""
+    api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE)]})
+    monkeypatch.setattr(poll, "api_get", api)
+    monkeypatch.setattr(poll, "plow_messages", lambda chat: messages if chat == OWNERS else [])
+    out = poll.run("tok", announced_cursor, OWNERS, now=FOLLOWUP_NOW)
+    assert ("Still waiting" in out) is follows_up
+    assert json.loads(announced_cursor.read_text())["a"]["owed"] is None
 
 
 def test_the_reminder_fires_once(monkeypatch, announced_cursor):
