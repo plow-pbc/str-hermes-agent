@@ -280,8 +280,7 @@ def plow_messages(chat: str) -> list[dict]:
         f"{env['PLOW_API_BASE']}/v1/chats/{chat}/messages?limit={PAGE}",
         headers={"Authorization": f"Bearer {env['PLOW_AGENT_TOKEN']}",
                  "User-Agent": "hostex-poll/1.0", "Accept": "application/json"})
-    with hostex_api.OPENER.open(request, timeout=hostex_api.TIMEOUT_S) as response:
-        return json.loads(response.read().decode())["data"]
+    return hostex_api.open_json(request)["data"]
 
 
 def veto_announced(chat: str, cid: str, since: str) -> bool:
