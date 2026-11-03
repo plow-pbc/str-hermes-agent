@@ -135,21 +135,14 @@ def render(conv: dict, messages: list[dict]) -> tuple[str, str]:
     # not hypothetical, and rendering one as `**None**` would settle just the
     # same. A corpus-wide null would still settle as `**unknown** ()` and exit 0;
     # that is the residual hole here, unchanged by indexing.
-    def joined(stamp):
-        return "\n\n".join(
-            f"**{m['sender_role'] or 'unknown'}**{stamp(m)}:\n{(m['content'] or '').strip()}"
-            for m in messages
-        )
-
-    body = joined(lambda m: f" ({m['created_at'] or ''})")
-    # The digest leaves the stamps out. Hostex re-renders every historical
-    # `created_at` an hour off when daylight saving ends, so a digest over them
-    # moved for the whole corpus overnight (2026-11-01): every file rewritten,
-    # every conversation re-queued, and the nightly killed by its timeout four
-    # rounds into a 26-round backlog. Who said what is the payload; when it is
-    # rendered is not.
-    digest = "sha256:" + hashlib.sha256(joined(lambda m: "").encode()).hexdigest()
+    body = "\n\n".join(
+        f"**{m['sender_role'] or 'unknown'}** ({m['created_at'] or ''}):\n"
+        f"{(m['content'] or '').strip()}"
+        for m in messages
+    )
     cid = conv["id"]
+    below = f"# Conversation {cid} — {conv['property_title']}\n\n" + body + "\n"
+    digest = payload_digest(below)
     front = (
         "---\n"
         "capture_source: hostex\n"
@@ -159,9 +152,28 @@ def render(conv: dict, messages: list[dict]) -> tuple[str, str]:
         f"payload_hash: {digest}\n"
         f"sources: [https://hostex.io/app/conversations/{cid}]\n"
         "---\n\n"
-        f"# Conversation {cid} — {conv['property_title']}\n\n"
     )
-    return front + body + "\n", digest
+    return front + below, digest
+
+
+# A message header: `**role** (created_at):`.
+STAMP = re.compile(r"^(\*\*[^*\n]*\*\*) \([^)\n]*\):$", re.M)
+
+
+def payload_digest(below_front: str) -> str:
+    """Digest of a staged file below its frontmatter, with the message stamps left out.
+
+    Hostex re-renders every historical `created_at` an hour off when daylight
+    saving ends, so a digest over them moved for the whole corpus overnight
+    (2026-11-01): every file rewritten, every conversation re-queued, and the
+    nightly killed by its timeout four rounds into a 26-round backlog. Who said
+    what is the payload; when it is rendered is not.
+
+    A cached file is compared by recomputing this from its text, never by its
+    stored `payload_hash`, so a file written under an older digest is judged by
+    what it says rather than by how its hash was once computed.
+    """
+    return "sha256:" + hashlib.sha256(STAMP.sub(r"\1:", below_front).encode()).hexdigest()
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -295,7 +307,7 @@ def main() -> None:
             continue
 
         text, digest = render(conv, messages)
-        if field(cached, "payload_hash") == digest:
+        if field(cached, "payload_hash") and payload_digest(cached.split("\n---\n\n", 1)[1]) == digest:
             # The stamp moved, the payload did not, so do not rewrite the file.
             # ingest-all's already-processed check reads a whole-file digest —
             # which it must, because the manifest has two writers and one of them
