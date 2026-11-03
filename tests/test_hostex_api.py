@@ -14,6 +14,7 @@ not 200 — a followed redirect must both record the header and raise, so
 from __future__ import annotations
 
 import http.server
+import importlib.util
 import json
 import pathlib
 import sys
@@ -22,7 +23,8 @@ import urllib.error
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "bin"))
+BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
+sys.path.insert(0, str(BIN))
 import hostex_api
 
 
@@ -62,16 +64,35 @@ def test_a_redirect_is_refused_and_the_token_is_not_replayed(monkeypatch):
             server.server_close()
 
 
+def _seam_post(monkeypatch, base):
+    """turnover-poll's Seam client, which shares this transport."""
+    spec = importlib.util.spec_from_file_location("turnover_poll", BIN / "turnover-poll.py")
+    poll = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(poll)
+    monkeypatch.setattr(poll, "SEAM", base)
+    return lambda: poll.seam_client("SECRET")("/devices/get", {"device_id": "dev-1"})
+
+
+CLIENTS = {
+    "hostex": lambda monkeypatch, base: (
+        monkeypatch.setattr(hostex_api, "BASE", base + "/v3")
+        or (lambda: hostex_api.get("/conversations", "SECRET", "test/1.0"))),
+    "seam": _seam_post,
+}
+
+
+@pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("responses, outcome", [
     (["stall", "stall", "ok"], {"data": {"conversations": []}}),
+    (["drop", "ok"], {"data": {"conversations": []}}),
     (["stall", "stall", "stall"], TimeoutError),
     (["500"], urllib.error.HTTPError),
 ])
-def test_a_stall_is_retried_and_a_status_is_not(monkeypatch, responses, outcome):
-    """If a stall were not retried, one slow afternoon read would fail the
-    2-minute poll and the scheduler would text the owners a failure report;
-    if a status were retried, a real refusal would only surface three times
-    slower."""
+def test_a_stall_is_retried_and_a_status_is_not(monkeypatch, client, responses, outcome):
+    """If a stall or a dropped connection were not retried, one bad read
+    would fail the 2-minute poll and the scheduler would text the owners a
+    failure report; if a status were retried, a real refusal would only
+    surface three times slower."""
     requests = []
     released = threading.Event()
 
@@ -79,6 +100,9 @@ def test_a_stall_is_retried_and_a_status_is_not(monkeypatch, responses, outcome)
         def do_GET(self):
             requests.append(self.path)
             response = responses[len(requests) - 1]
+            if response == "drop":    # closed with no status line: RemoteDisconnected
+                self.close_connection = True
+                return
             if response == "500":
                 self.send_response(500)
                 self.end_headers()
@@ -90,21 +114,22 @@ def test_a_stall_is_retried_and_a_status_is_not(monkeypatch, responses, outcome)
                 return
             self.wfile.write(json.dumps(outcome).encode())
 
+        do_POST = do_GET
+
         def log_message(self, *args):
             pass
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        monkeypatch.setattr(
-            hostex_api, "BASE", f"http://127.0.0.1:{server.server_address[1]}/v3")
+        call = CLIENTS[client](monkeypatch, f"http://127.0.0.1:{server.server_address[1]}")
         monkeypatch.setattr(hostex_api, "TIMEOUT_S", 0.2)
         monkeypatch.setattr(hostex_api, "BACKOFF_S", 0)
         if isinstance(outcome, dict):
-            assert hostex_api.get("/conversations", "SECRET", "test/1.0") == outcome
+            assert call() == outcome
         else:
             with pytest.raises(outcome):
-                hostex_api.get("/conversations", "SECRET", "test/1.0")
+                call()
         assert len(requests) == len(responses)
     finally:
         released.set()
