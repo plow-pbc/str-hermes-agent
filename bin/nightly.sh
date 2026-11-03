@@ -129,7 +129,18 @@ fi
 # doing it inline here meant the nightly run silently ingested a fraction of
 # what arrived and nothing noticed. ingest-all loops, asserts coverage from the
 # manifest between rounds, and hands each round's check failures to the next.
-"$BIN/ingest-all" "$VAULT" "$WIKI" || note "ingest FAILED"
+#
+# The scheduler kills this script at 3600s. Budgeted so the round that starts
+# last (about 15 minutes at the batch size), the checks and the 600s digest
+# still finish inside it; a backlog past the budget continues the next night.
+# Set but empty lifts it, for a run nothing is timing (README § Compiling the wiki nightly).
+DEFERRED=""
+INGEST_BUDGET="${INGEST_BUDGET-1500}" "$BIN/ingest-all" "$VAULT" "$WIKI"
+case $? in
+  0) ;;
+  3) DEFERRED="ingest stopped at its time budget, the rest continues tomorrow; " ;;
+  *) note "ingest FAILED" ;;
+esac
 
 # The skill's own vault is $VAULT, so a turn that writes a page where the skill
 # says rather than where the prompt says leaves it here — on disk, recorded in
@@ -170,7 +181,7 @@ fi
 # wiki CLI's --writer filter has no read-side command to hand the turn. The
 # skill also appends a DIGEST line to log.md; this turn writes nothing.
 STATUS="${STATUS:+${STATUS}see $LOG}"
-if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill on str's pages in the owner's wiki at ${WIKI} for the last day: the pages under ${WIKI}/projects/str/properties/ and ${WIKI}/projects/str/operations/, and the log.md entries that name one of them. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. The wiki is on the owner's Mac: read its log.md and str's pages only through latch, with '/opt/plow/str/bin/plow_relay.py read PATH', PATH a ~/Plow/wiki path in single quotes. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
+if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill on str's pages in the owner's wiki at ${WIKI} for the last day: the pages under ${WIKI}/projects/str/properties/ and ${WIKI}/projects/str/operations/, and the log.md entries that name one of them. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. The wiki is on the owner's Mac: read its log.md and str's pages only through latch, with '/opt/plow/str/bin/plow_relay.py read PATH', PATH a ~/Plow/wiki path in single quotes. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${DEFERRED}${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
   echo "nightly: the digest did not send within 600s" >&2
   exit 1
 fi

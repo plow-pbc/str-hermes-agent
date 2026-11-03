@@ -1174,19 +1174,18 @@ operator-driven — do not deploy at 03:00. The alternative is a gate inside the
 deploy hook, which cannot ask the container without the hook calling back into
 agent-mgr, and that is the ownership inversion this migration removed.
 
-**Do not run that one on the scheduler.** A whole-corpus pass needs roughly
-three times the 3600s Hermes allows a job, and the kill lands mid-chain, leaving
-the wiki holding pages the manifest never recorded. Nothing blocks the next
-night — the dirty-tree fence that used to is gone, along with the commit step it
-guarded — so the damage is quieter than an abort: re-running feeds those
-conversations again and appends their facts a second time. Run it directly
-instead, where nothing is watching the clock:
+**On the scheduler it drains over several nights.** A whole-corpus pass needs
+roughly three times the 3600s Hermes allows a job, so the nightly gives ingest a
+1500s budget: past it no new round starts, the rounds already finished are
+checked and snapshotted, and the digest says the rest continues tomorrow. To
+drain it in one go, run it directly with the budget lifted, where nothing is
+watching the clock:
 
 ```sh
 docker compose exec -u hermes hermes hermes cron remove wiki-nightly
 AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
   && docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-       /command/s6-setuidgid hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
+       /command/s6-setuidgid hermes sh -c 'INGEST_BUDGET= exec "$HERMES_HOME/scripts/nightly.sh"'
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
@@ -1215,14 +1214,13 @@ command line — without it the check reports a run every time. #71 tracks makin
 this a mechanism rather than three lines an operator has to remember.
 
 The same script the scheduler runs — the 3600s ceiling is a `hermes cron`
-property, not the script's, so running it directly is the identical chain with
-nothing watching the clock. It snapshots and pushes the wiki at its end like
+property, and `INGEST_BUDGET=` lifts the nightly's own, so running it directly
+is the identical chain with nothing watching the clock. It snapshots and pushes the wiki at its end like
 any scheduled night, and the next `scripts/promote-vault` promotes staging.
 
 Its preconditions are not restated here. `nightly.sh` and `ingest-all` both
 abort with a message naming the path and what to do about it, and a
 paragraph re-describing those drifts out of sync the moment either changes.
-#71 tracks making the chain bound itself rather than relying on this note.
 
 ## Turnover readiness
 

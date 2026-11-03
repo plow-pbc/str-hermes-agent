@@ -75,6 +75,10 @@ NIGHTS = [
      "rolled back: wiki snapshot could not run: the owner's Mac did not answer; see ",
      [COMMIT] + ROLLBACK),
     ("a failed ingest", {"INGEST_RC": 1}, "rolled back: ingest FAILED; see ", ROLLBACK),
+    # Every finished round is recorded and checked, so a budget stop is
+    # snapshotted and the backlog resumes tomorrow rather than being undone.
+    ("an ingest that spent its time budget", {"INGEST_RC": 3},
+     "'ingest stopped at its time budget, the rest continues tomorrow; ok'", SNAPSHOT),
     ("invalid pages", {"VALIDATE_RC": 1}, "rolled back: wiki validation FAILED; see ", ROLLBACK),
     ("an index that refused, here and again after restore", {"INDEX_RC": 1},
      "rolled back: wiki index FAILED; rollback incomplete: wiki index FAILED; see ", ROLLBACK),
