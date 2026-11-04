@@ -1248,7 +1248,8 @@ agent cron that messaged the cleaners thread from a fresh `cron_*` session);
 3. **The voice: `plow_chat` wakes.** For each due step the driver appends
    `WOKE <step>`, then writes a wake into the target thread's own session
    carrying the task id, the step and the reason. That session reads the task
-   with `kanban_show`, sends the one short message, and comments `SENT <step>`.
+   with `kanban_show`, sends the one short message with `plow_send_message`, and
+   comments `SENT <step> <message_id>`.
    Every message is therefore written from inside the thread it lands in, so
    when the cleaner replies "done" the session answering already holds the
    question and why it was asked. Guest messages go from the owners' session
@@ -1312,7 +1313,7 @@ ignored, so a human's remark on the task cannot move the job.
 | Comment | Written by | Meaning |
 |---|---|---|
 | `WOKE <step>` | the driver | it woke a session for the step; the first one wins, since the wake time starts the step's clock |
-| `SENT <step>` | the woken session | the step is done |
+| `SENT <step> <message_id>` | the woken session | the step is done; without the id it is not, except a guest step (`ready`, `send_code`), which goes through Hostex |
 | `SKIPPED <step>: <why>` | the woken session | the step was deliberately not done |
 | `CLEAN <who>` | a thread session | the house is clean, per the cleaner or an owner |
 | `HOLD <who>` | the owners' session | stop every step for this stay except escalations of steps already woken, and never raise `escalate:closed` for it |
