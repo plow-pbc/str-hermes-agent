@@ -1028,7 +1028,7 @@ the next run re-ingests into a page that already holds its facts. `wiki snapshot
 the Mac, refusing anything shaped like an API credential. Door codes, lockbox
 codes and wifi passwords are the corpus and pass; a `ghp_…` or `sk-…` does not,
 because the pages are LLM-authored from raw guest threads. A snapshot with no
-origin refuses loudly, and the refusal is in every digest: a compiled corpus on
+origin refuses loudly, and fails every night until it has one: a compiled corpus on
 one disk is how 22 days of guest knowledge once sat unpushed.
 
 `ingest-all` runs index, provenance and validation after every round and puts
@@ -1037,8 +1037,9 @@ damaged is repaired while its source is still in hand; damage that survives
 the round cap fails ingest. A night is all or nothing: if ingest or any check
 fails, `wiki restore --writer str` puts str's roots back to the last snapshot,
 the manifest goes back to its pre-run bytes (so tonight's conversations are
-re-ingested tomorrow), nothing is snapshotted, and the digest leads with
-`rolled back: …`. A latch that could not reach the Mac is noted apart from a
+re-ingested tomorrow), nothing is snapshotted, and the run exits non-zero:
+the scheduler records it failed and sends its alert, `Wiki nightly FAILED:
+rolled back: …`, instead of a digest. A latch that could not reach the Mac is noted apart from a
 check that failed. So the last snapshot is always a night that passed. To check
 by hand — the CLI is on the Mac, so both go through the container, under the
 environment boot publishes, which only root reads, as the agent whose latch
@@ -1094,10 +1095,11 @@ The script does not deliver — the scheduler does, from that stdout, which is w
 the job also needs `--deliver` (#49). The target is a bare `plow_chat`, the home
 channel: the owner's direct chat, not the owners' group, because the digest
 covers the whole shared wiki and its check failures are the operator's to fix.
-So only the digest and an abort are printed; every step in between writes to
-`$HERMES_HOME/logs/wiki-nightly.log` instead, which the digest names when a
-check failed. The scheduler keeps a job's stderr only on a non-zero exit, so
-that file is the only record of what a check found. A **direct** manual run
+So only the digest and a failure are printed; every step in between writes to
+`$HERMES_HOME/logs/wiki-nightly.log` instead, which the failure line names.
+Any noted check fails the night: it exits non-zero, and the scheduler delivers a
+one-line alert carrying that line in place of the digest, so that file is the
+only record of what a check found. A **direct** manual run
 prints to your terminal and delivers nowhere, which is the point of running it
 directly, but it means a manual recovery does not tell the owners anything.
 

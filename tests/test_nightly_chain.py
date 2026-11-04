@@ -95,15 +95,21 @@ NIGHTS = [
 @pytest.mark.parametrize(("case", "rcs", "status", "tail"), NIGHTS, ids=[n[0] for n in NIGHTS])
 def test_only_a_night_that_passes_every_check_reaches_history(night, case, rcs, status, tail):
     """Any failure from ingest onward restores str's pages and the manifest
-    instead of snapshotting them, and the digest -- the liveness signal --
-    still goes out saying which."""
+    instead of snapshotting them. A failed night exits non-zero, so the
+    scheduler records it failed and alerts with the line saying which, in
+    place of a digest; a night that passed sends the digest."""
     run, vault = night
     manifest = (vault / ".manifest.json").read_bytes()
     result, calls = run(**rcs)
-    assert result.returncode == 0, result.stderr
+    failed = not status.endswith("ok'")
+    assert result.returncode == int(failed), result.stderr
     assert status in result.stdout, result.stdout
-    assert calls[-1].startswith("hermes chat -Q -q Use the wiki-digest skill")
-    assert calls[:-1] == [c.format(vault=vault) for c in FRONT] + tail
+    if failed:
+        assert result.stdout.startswith("nightly: Wiki nightly FAILED: "), result.stdout
+        assert not result.stderr, result.stderr  # nothing ahead of the failure in the alert
+    else:
+        assert calls.pop().startswith("hermes chat -Q -q Use the wiki-digest skill")
+    assert calls == [c.format(vault=vault) for c in FRONT] + tail
     # Only once the pages are back: a manifest that forgot pages still on the
     # wiki re-ingests them into those pages.
     rolled_back = (vault / ".manifest.json").read_bytes() == manifest
@@ -111,13 +117,12 @@ def test_only_a_night_that_passes_every_check_reaches_history(night, case, rcs, 
 
 
 def test_what_a_check_found_is_in_the_log_the_message_names_not_the_message(night, tmp_path):
-    """The scheduler keeps a job's stderr only when it exits non-zero, and a
-    night that notes a failed check exits 0 -- so the log is the only place
+    """The scheduler's failure alert is one line, so the log is the only place
     the finding survives, and the message is what has to say where it is."""
     run, _ = night
     log = tmp_path / "home" / "logs" / "wiki-nightly.log"
     result, _ = run(PROVENANCE_RC=1, PROVENANCE_SAYS="page-a: cites 20-abc, which the manifest never recorded")
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1
     assert f"provenance FAILED; see {log}" in result.stdout
     assert "cites 20-abc" not in result.stdout
     assert "cites 20-abc" in log.read_text()

@@ -43,12 +43,13 @@ LOG="$HERMES_HOME/logs/wiki-nightly.log"
 # Stderr is the default, and fd 3 is the delivered channel. Everything this
 # script runs is diagnostics for $LOG; only `notify()` and the digest write to
 # fd 3, so a step added later is quiet by default rather than quiet only if
-# whoever added it remembered a redirect. The tee is what makes $LOG exist: the
-# scheduler keeps a job's stderr only when it exits non-zero, and a night that
-# notes a failed check still exits 0.
-exec 3>&1 2> >(tee "$LOG" >&2) 1>&2
+# whoever added it remembered a redirect. Stderr goes to $LOG alone, not on to
+# the scheduler: a failed night exits non-zero, and the scheduler delivers a
+# failure as one line cut from stderr-then-stdout, so any stderr would push the
+# failure out of the message.
+exec 3>&1 2>"$LOG" 1>&2
 
-# Also to $LOG. $STATUS reaches one place — the digest prompt — so a note was
+# Also to $LOG. $STATUS reaches one place — the failure line — so a note was
 # readable only by whoever read that message on the night it went out; nothing
 # outside the container could see that the run had noted anything at all.
 note() { STATUS+="$1; "; echo "nightly: $1" >&2; }
@@ -70,7 +71,7 @@ notify() {
 # next run re-ingests tonight's conversations instead of the bad pages being
 # snapshotted and reported every night with nothing repairing them.
 # Exit 1 from a check is the corpus; 2 is latch failing to reach the Mac; 4 is
-# the Mac's gatekeeper refusing. Each has a different fix and the digest is one
+# the Mac's gatekeeper refusing. Each has a different fix and the alert is one
 # line, so they are reported apart.
 checked() {
   local what="$1"; shift
@@ -165,9 +166,19 @@ else
   # History lives beside the wiki on the Mac and is pushed off it: a compiled
   # corpus on one disk with no other copy is the exposure promote-vault was
   # written to close. `--push` scans what leaves for credentials, and refuses
-  # loudly when the history repo has no origin, so a missing remote is in every
-  # digest, not a silent single copy.
+  # loudly when the history repo has no origin, so a missing remote fails every
+  # night, not a silent single copy.
   checked "wiki push" "$RELAY" run --write "$WIKI" --write "$WIKI.git" --network -- wiki snapshot --push --author str
+fi
+
+# Any note means the night failed, and it reports failed: on a non-zero exit
+# the scheduler records the run as an error and delivers its own one-line
+# alert, carrying this line, in place of stdout. So a failed night sends no
+# digest -- after a rollback it would only describe the last snapshot, and lead
+# with "nothing changed" over a failure.
+if [ -n "$STATUS" ]; then
+  notify "Wiki nightly FAILED: ${STATUS}see $LOG"
+  exit 1
 fi
 
 # Bounded for the same reason the aborts are, with room for the real work it
@@ -180,8 +191,7 @@ fi
 # at, and this one is shared: other writers' roots sit beside str's, and the
 # wiki CLI's --writer filter has no read-side command to hand the turn. The
 # skill also appends a DIGEST line to log.md; this turn writes nothing.
-STATUS="${STATUS:+${STATUS}see $LOG}"
-if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill on str's pages in the owner's wiki at ${WIKI} for the last day: the pages under ${WIKI}/projects/str/properties/ and ${WIKI}/projects/str/operations/, and the log.md entries that name one of them. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. The wiki is on the owner's Mac: read its log.md and str's pages only through latch, with '/opt/plow/str/bin/plow_relay.py read PATH', PATH a ~/Plow/wiki path in single quotes. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${DEFERRED}${STATUS:-ok}'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
-  echo "nightly: the digest did not send within 600s" >&2
+if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill on str's pages in the owner's wiki at ${WIKI} for the last day: the pages under ${WIKI}/projects/str/properties/ and ${WIKI}/projects/str/operations/, and the log.md entries that name one of them. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. The wiki is on the owner's Mac: read its log.md and str's pages only through latch, with '/opt/plow/str/bin/plow_relay.py read PATH', PATH a ~/Plow/wiki path in single quotes. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${DEFERRED}ok'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
+  notify "Wiki nightly: the digest did not send within 600s"
   exit 1
 fi
