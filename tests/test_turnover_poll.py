@@ -332,22 +332,24 @@ VENDOR_RULES = ["kanban_show", "owners' voice",
     # Two same-day stays share this thread; a "done" on the wrong one sends a
     # false "ready" to a guest.
     ("cleaner_done_ask", "cleaners",
-     ["Address it to Jane", "`SENT cleaner_done_ask`", "`CLEAN <who>`",
+     ["Address it to Jane", "plow_send_message to cht_vendor",
+      "`SENT cleaner_done_ask <the message_id it returned>`", "`CLEAN <who>`",
       "first ask which property, by its title"]),
     # A "done" here is the breaker, which the driver reads off the lock itself;
     # recorded as CLEAN it would tell the driver the house was cleaned.
     ("breaker_ask", "maintenance",
-     ["Address it to Max", "`SENT breaker_ask`", "plain comment", "never `CLEAN`"]),
+     ["Address it to Max", "plow_send_message to cht_vendor",
+      "`SENT breaker_ask <the message_id it returned>`", "plain comment", "never `CLEAN`"]),
 ])
 def test_a_vendor_wake_is_its_threads_whole_brief(step, thread, says):
     """A vendor session reads nothing else that names this job, so its wake
     carries who to address, the voice, the ledger write, what a later reply
     means, and the bar on reaching a guest. It never carries the guest send."""
     stay = turnover.Stay("turnover:S1", "Pat", local("16:00"), None, False)
-    text = poll.wake_text("t_1", turnover.Step(step, thread, "why"), stay, prop())
+    text = poll.wake_text("t_1", turnover.Step(step, thread, "why"), stay, prop(), "cht_vendor")
     for phrase in VENDOR_RULES + says:
         assert phrase in text, f"{thread} wake lacks {phrase!r}"
-    assert "send_message" not in text and "Pat" not in text
+    assert poll.TO_GUEST not in text and "Pat" not in text
 
 
 def test_an_undrained_inbox_stops_the_tick(tick, tmp_path):

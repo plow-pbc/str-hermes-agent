@@ -23,7 +23,7 @@ def comments(bodies):
 
 
 def test_parse_grammar():
-    led = str_ledger.parse(comments(["WOKE cleaner_coming", "SENT cleaner_coming",
+    led = str_ledger.parse(comments(["WOKE cleaner_coming", "SENT cleaner_coming msg_1",
                                      "WOKE ready", "CLEAN Jane", "hello there"]))
     assert set(led.woke) == {"cleaner_coming", "ready"}
     assert led.done == {"cleaner_coming"} and led.clean_by == "Jane" and not led.hold
@@ -35,6 +35,10 @@ def test_parse_grammar():
     (["CLEAN Jane", "CLEAN Maria Lopez"], set(), "Maria Lopez", False),
     (["HOLD Pat and Lee"], set(), None, True),
     (["woke x", "SENT", "CLEAN", "free text"], set(), None, False),
+    # The id is plow_send_message's proof the message landed; prose withheld as
+    # working-out leaves a bare SENT, which must still escalate.
+    (["SENT cleaner_quiet_ask"], set(), None, False),
+    (["SENT ready", "SENT send_code"], {"ready", "send_code"}, None, False),
 ])
 def test_parse_verbs(bodies, done, clean_by, hold):
     led = str_ledger.parse(comments(bodies))

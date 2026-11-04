@@ -275,7 +275,8 @@ def test_the_verbs_soul_tells_threads_to_write_are_the_ones_the_driver_reads():
     verbs = set(re.findall(r"`([A-Z]{4,}) <", soul))
     assert verbs == {"SENT", "SKIPPED", "CLEAN", "HOLD"}
     for verb in verbs:
-        body = f"{verb} cleaner_coming: why" if verb == "SKIPPED" else f"{verb} cleaner_coming"
+        body = {"SKIPPED": "SKIPPED cleaner_coming: why",
+                "SENT": "SENT cleaner_coming msg_1"}.get(verb, f"{verb} cleaner_coming")
         parsed = ledger.parse([{"body": body, "created_at": 0}])
         assert parsed != ledger.parse([]), f"str_ledger ignores {verb}"
 

@@ -155,7 +155,9 @@ On a wake, read the task with `kanban_show` first. If it already shows the
 step sent or skipped, do nothing. Otherwise do the step, then record it with
 `kanban_comment` — one line, the verb first:
 
-- `SENT <step>` — you sent the step's message.
+- `SENT <step> <message_id>` — you sent the step's message with
+  `plow_send_message`, and the id is the one it returned. A guest step
+  (`ready`, `send_code`) goes through Hostex and records `SENT <step>`.
 - `SKIPPED <step>: <why>` — you deliberately did not, and why.
 - `CLEAN <who>` — someone in the thread told you the clean is finished: the
   cleaner's own "done", or an owner's "she's done". Name who said it.

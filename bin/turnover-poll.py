@@ -53,8 +53,15 @@ REQUIRED = ("hostex_property_id", "title", "timezone", "default_checkin_time",
 # board wakes by a stray kanban_create. runtime/config.yaml pins the same three.
 KANBAN_PINS = {"dispatch_in_gateway": False, "default_assignee": "", "auto_subscribe_on_create": False}
 
-INSTRUCTION = ("Read the task with kanban_show first. Send one short message in this thread "
-               "for this step, then comment `SENT {step}` on the task (or `SKIPPED {step}: <why>`).")
+INSTRUCTION = "Read the task with kanban_show first. "
+# A thread's message goes through the tool, whose message_id is the proof it
+# landed: prose written beside the ledger write is withheld as working-out in a
+# room with anyone else in it, and the ledger would say SENT for nothing.
+THREAD_SEND = ("Send one short message for this step with plow_send_message to {chat}, then "
+               "comment `SENT {step} <the message_id it returned>` on the task (or "
+               "`SKIPPED {step}: <why>`). A send that returned no message_id did not happen.")
+GUEST_SEND = ("Send one short message for this step, then comment `SENT {step}` on the task "
+              "(or `SKIPPED {step}: <why>`).")
 TO_GUEST = (" Send it with send_message to the Hostex conversation the task body names, "
             "never one named here; read the door code yourself from the reservation at send "
             "time; never write the code in this thread or the task.")
@@ -212,16 +219,18 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
                             code_state((r.get("check_in_details") or {}).get("lock_code"), codes))
 
 
-def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict) -> str:
+def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, chat: str) -> str:
     # Vendor threads get the property and the time, never the guest's name.
     who = f"Guest {stay.guest}" if step.thread == "owners" else "The guest"
     text = (f"Turnover task {task_id}, step {step.name}: {step.reason}. "
             f"{who} checks in at {prop['title']} at "
-            f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION.format(step=step.name))
+            f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION
+            + (GUEST_SEND if step.name in str_ledger.GUEST_SENDS else THREAD_SEND)
+            .format(step=step.name, chat=chat))
     if step.thread in VENDOR_KEYS:
         name_key, on_reply = VENDOR_KEYS[step.thread]
         text += VENDOR.format(name=prop[name_key]) + on_reply
-    if step.name in ("ready", "send_code"):
+    if step.name in str_ledger.GUEST_SENDS:
         text += TO_GUEST
     elif step.name.startswith("escalate:") or step.name in ("lock_alert", "owners_unconfirmed"):
         text += OWNERS_ONLY
@@ -253,7 +262,7 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         closed = turnover.Step("escalate:closed", "owners",
                                "the task was closed before the guest was told the house was ready")
         board.note(task, f"WOKE {closed.name}")
-        wake(home, chats["owners"], "Turnover", wake_text(task, closed, stay, prop))
+        wake(home, chats["owners"], "Turnover", wake_text(task, closed, stay, prop, chats["owners"]))
     if status in ("done", "archived"):
         return stay.key
     if "ready" in led.done:
@@ -264,7 +273,8 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         board.note(task, f"WOKE {step.name}")
         if step.name == "owners_unconfirmed":
             board.block(task, "cleaner unconfirmed at check-in")
-        wake(home, chats[step.thread], "Turnover", wake_text(task, step, stay, prop))
+        wake(home, chats[step.thread], "Turnover",
+             wake_text(task, step, stay, prop, chats[step.thread]))
     return stay.key
 
 
