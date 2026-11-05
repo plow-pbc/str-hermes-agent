@@ -181,17 +181,28 @@ if [ -n "$STATUS" ]; then
   exit 1
 fi
 
+# The digest reads str's pages from a local copy taken in one call. Every latch
+# call from the container waits on the Mac's gatekeeper, about 12s, so a turn
+# reading page by page through the relay spent its whole 600s on reads.
+# Base64 because the relay carries stdout as text.
+PAGES="$(mktemp -d)"
+trap 'rm -rf "$PAGES"' EXIT
+if ! "$RELAY" run -- /bin/sh -c 'cd ~/Plow/wiki && tar -czf - projects/str/properties projects/str/operations log.md | base64' \
+    | base64 -d | tar -xzf - -C "$PAGES"; then
+  notify "Wiki nightly: could not copy str's pages for the digest"
+  exit 1
+fi
+
 # Bounded for the same reason the aborts are, with room for the real work it
 # does: it reads the wiki and writes a summary. The turn only has to PRINT it --
 # the scheduler delivers this script's stdout. `-Q` keeps that stdout to the
 # reply: without it the whole CLI transcript -- the prompt echoed back, tool
 # traces, reasoning -- was the message, with the digest at the bottom.
 #
-# Scoped in the prompt because the skill digests whatever wiki it is pointed
-# at, and this one is shared: other writers' roots sit beside str's, and the
-# wiki CLI's --writer filter has no read-side command to hand the turn. The
+# The copy is the turn's whole vault: the wiki is shared, other writers' roots
+# sit beside str's, and the skill digests whatever vault it is pointed at. The
 # skill also appends a DIGEST line to log.md; this turn writes nothing.
-if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill on str's pages in the owner's wiki at ${WIKI} for the last day: the pages under ${WIKI}/projects/str/properties/ and ${WIKI}/projects/str/operations/, and the log.md entries that name one of them. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. The wiki is on the owner's Mac: read its log.md and str's pages only through latch, with '/opt/plow/str/bin/plow_relay.py read PATH', PATH a ~/Plow/wiki path in single quotes. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${DEFERRED}ok'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
+if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill for the last day on str's pages, copied from the owner's wiki to the vault ${PAGES}: the pages under ${PAGES}/projects/str/properties/ and ${PAGES}/projects/str/operations/, and the entries in ${PAGES}/log.md that name one of them. Read them there with your file tools; do not use latch or reach the owner's Mac. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. Name a page by its path in the wiki, projects/str/..., never by the copy's path. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${DEFERRED}ok'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
   notify "Wiki nightly: the digest did not send within 600s"
   exit 1
 fi

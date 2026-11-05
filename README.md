@@ -1005,9 +1005,11 @@ runs inside the gateway container on Hermes' own scheduler.
 hubs) and `projects/str/operations`, with the standing cast in the shared
 `entities/people/key-people.md`.
 Other agents share the same wiki. The container reaches it only through latch,
-and always by `bin/plow_relay.py`: the ingest and digest turns read and write
-pages with it, and the `wiki` CLI steps run the CLI on the Mac with it, inside
-latch's sandbox (writes need declared paths; a push declares network).
+and always by `bin/plow_relay.py`: the ingest turn reads and writes pages with
+it, and the `wiki` CLI steps run the CLI on the Mac with it, inside latch's
+sandbox (writes need declared paths; a push declares network). The digest turn
+reads a local copy of str's pages instead, taken in one call: every latch call
+waits about 12s on the Mac's gatekeeper, too slow to read page by page.
 What the Mac needs, once:
 
 - the `wiki` CLI at the commit the Dockerfile pins as `PLOW_WIKI_SHA`:
