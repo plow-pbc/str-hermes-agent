@@ -71,7 +71,7 @@ FRONT = [
     "plow_relay.py run -- wiki validate --writer str",
 ]
 COMMIT = "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki snapshot --author str"
-COPY = ("plow_relay.py run -- /bin/sh -c cd ~/Plow/wiki && tar -czf - projects/str/properties"
+COPY = ("plow_relay.py run -- /bin/sh -c set -o pipefail; cd ~/Plow/wiki && tar -czf - projects/str/properties"
         " projects/str/operations log.md | base64")
 SNAPSHOT = [COMMIT, "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
             " wiki snapshot --push --author str"]

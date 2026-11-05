@@ -184,10 +184,11 @@ fi
 # The digest reads str's pages from a local copy taken in one call. Every latch
 # call from the container waits on the Mac's gatekeeper, about 12s, so a turn
 # reading page by page through the relay spent its whole 600s on reads.
-# Base64 because the relay carries stdout as text.
+# Base64 because the relay carries stdout as text, and pipefail so a partial
+# tar on the Mac is a failed copy rather than a short one.
 PAGES="$(mktemp -d)"
 trap 'rm -rf "$PAGES"' EXIT
-if ! "$RELAY" run -- /bin/sh -c 'cd ~/Plow/wiki && tar -czf - projects/str/properties projects/str/operations log.md | base64' \
+if ! "$RELAY" run -- /bin/sh -c 'set -o pipefail; cd ~/Plow/wiki && tar -czf - projects/str/properties projects/str/operations log.md | base64' \
     | base64 -d | tar -xzf - -C "$PAGES"; then
   notify "Wiki nightly: could not copy str's pages for the digest"
   exit 1
