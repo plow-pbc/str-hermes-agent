@@ -54,9 +54,11 @@ def night(tmp_path):
 
     def run(**rcs):
         env = {**os.environ, "HERMES_HOME": str(tmp_path / "home"), "CALLS": str(calls),
-               "WIKI_ON_MAC": str(wiki), "TMPDIR": str(tmp_path / "tmp"),
+               "WIKI_ON_MAC": str(wiki), "TMPDIR": str(tmp_path / "tmp"), "PLOW_HOME_CHANNEL": "cht_home",
                "PATH": f"{path_dir}:{os.environ['PATH']}", **{k: str(v) for k, v in rcs.items()}}
         env.pop("VAULT", None)
+        for unset in [k for k, v in rcs.items() if v is None]:
+            env.pop(unset)
         result = subprocess.run([str(bin_dir / "nightly.sh")], capture_output=True, text=True,
                                 env=env, timeout=30)
         return result, calls.read_text().splitlines() if calls.exists() else []
@@ -157,6 +159,16 @@ def test_a_failed_fetch_says_so_and_stops(night, rcs, ran):
     assert result.returncode == 1
     assert "Wiki nightly FAILED at fetch" in result.stdout
     assert [c.split()[0] for c in calls] == ran
+
+
+def test_a_run_outside_the_boot_environment_says_so_and_touches_nothing(night):
+    """A bare `docker compose exec` lacks what plow-init publishes, so every relay
+    step and turn would fail and the rollback with them. Refuse before any step."""
+    run, _, _ = night
+    result, calls = run(PLOW_HOME_CHANNEL=None)
+    assert result.returncode == 1
+    assert "outside the gateway's environment" in result.stdout
+    assert calls == []
 
 
 def test_a_rollback_always_lands_on_the_manifest_of_the_last_snapshot(night):

@@ -98,6 +98,14 @@ reconcile() {
 # whose restore failed would otherwise leave the next night backing up a
 # manifest ahead of the pages, and a later restore would pair them wrong. Seeded
 # from the live manifest once, on the first run that has none.
+# Every relay step acts for the home chat, and every turn needs the model
+# credential; both live only in the environment plow-init publishes at boot,
+# which the scheduler inherits and a bare `docker compose exec` does not. Run
+# there, every step fails, the rollback with them, and the alert reads as a
+# broken wiki (2026-11-05 04:15). README § Compiling the wiki nightly has the
+# command that carries it.
+[ -n "${PLOW_HOME_CHANNEL:-}" ] || { notify "Wiki nightly FAILED: run outside the gateway's environment (no PLOW_HOME_CHANNEL). The wiki is unchanged."; exit 1; }
+
 MANIFEST="$VAULT/.manifest.json"
 SNAPSHOTTED="$HERMES_HOME/wiki-manifest.snapshotted.json"
 if [ ! -e "$SNAPSHOTTED" ]; then
