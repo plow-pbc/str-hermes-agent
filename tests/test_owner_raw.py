@@ -1,7 +1,7 @@
 """What `bin/owner-raw` stages: the owners' own messages, one file per chat-day.
 
 Run against a stubbed Plow message API served newest-first through real
-starting_after paging, so the cursor is exercised rather than mocked away.
+starting_after paging, so paging is exercised rather than mocked away.
 """
 from __future__ import annotations
 
@@ -95,13 +95,18 @@ def test_one_file_per_day_holding_an_owner_message_each_beside_what_it_answers(o
             "**abby** (18:06): Agreed.\n") in text
 
 
-def test_a_reply_after_midnight_keeps_the_draft_it_answers(owner_raw):
+def test_a_reply_after_midnight_keeps_the_draft_it_answers_on_every_run(owner_raw):
+    """Plow's own notices sit between them and pair with nothing."""
     run, chats, _ = owner_raw
     chats[GROUP] += [msg("d", "2026-11-02T23:50:00Z", "outbound", "DRAFT: late checkout at noon?"),
+                     msg("p", "2026-11-02T23:55:00Z", "inbound", "Payment approved"),
                      msg("r", "2026-11-03T00:10:00Z", "inbound", "No, the cleaners come at 11.")]
+    chats[GROUP][1]["sender"] = {"type": "system", "name": "Plow"}
     files, _ = run()
     assert list(files) == ["owners-2026-11-03.md"]
     assert "**str** (context): DRAFT: late checkout at noon?" in files["owners-2026-11-03.md"]
+    assert "Payment approved" not in files["owners-2026-11-03.md"]
+    assert run()[0] == files
 
 
 def test_phone_numbers_codes_and_credentials_are_never_staged(owner_raw):
@@ -116,19 +121,16 @@ def test_phone_numbers_codes_and_credentials_are_never_staged(owner_raw):
     assert "[phone]" in text and "code is [number]" in text and "card [number]" in text
 
 
-def test_a_later_run_fetches_back_only_to_the_newest_staged_day_and_rewrites_only_what_changed(owner_raw):
+def test_a_later_run_rewrites_only_the_day_that_changed(owner_raw):
     run, chats, _ = owner_raw
-    chats[DIRECT] += [msg("o", "2026-09-01T10:00:00Z", "inbound", "Hello?"),
-                      msg("a", "2026-10-01T10:00:00Z", "inbound", "10th Ave is long-term."),
+    chats[DIRECT] += [msg("a", "2026-10-01T10:00:00Z", "inbound", "10th Ave is long-term."),
                       msg("b", "2026-10-02T10:00:00Z", "inbound", "Use the rental card."),
                       msg("c", "2026-10-03T10:00:00Z", "inbound", "Gianna comes at 11.")]
     first, _ = run()
-    assert list(first) == ["direct-2026-09-01.md", "direct-2026-10-01.md", "direct-2026-10-02.md",
-                           "direct-2026-10-03.md"]
+    assert list(first) == ["direct-2026-10-01.md", "direct-2026-10-02.md", "direct-2026-10-03.md"]
 
     chats[DIRECT].append(msg("d", "2026-10-03T12:00:00Z", "inbound", "Correction: at 11 on a same-day turn."))
-    second, served = run()
-    assert "o" not in served
+    second, _ = run()
     assert second["direct-2026-10-01.md"] == first["direct-2026-10-01.md"]
     assert "Correction" in second["direct-2026-10-03.md"]
 

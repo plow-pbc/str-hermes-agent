@@ -6,10 +6,9 @@ nightly's ingest turns these into owner rules on str's pages. One file per chat
 per local day that holds an owner message, each message beside the str message
 it answers.
 
-The cache is the cursor, as in hostex-raw: a run pages each chat newest-first
-back only to the newest day already staged, re-renders that day and any after
-it, and writes a file only when its bytes change -- so ingest's manifest check
-re-queues exactly the days that gained a message.
+A run re-renders each chat's whole history -- a reply's context can sit any
+number of days before it -- and writes a file only when its bytes change, so
+ingest's manifest check re-queues exactly the days that gained a message.
 """
 from __future__ import annotations
 
@@ -28,7 +27,7 @@ import str_env
 
 PAGE = 100
 CONTEXT = 280
-NAME = re.compile(r"^(?P<label>[a-z]+)-(?P<day>\d{4}-\d{2}-\d{2})\.md$")
+NAME = re.compile(r"^[a-z]+-\d{4}-\d{2}-\d{2}\.md$")
 
 # Never staged. The wiki must not hold a phone number or an access code, and
 # promote-vault refuses to push anything shaped like a credential -- an owner
@@ -55,8 +54,8 @@ def local_day(message: dict) -> str:
     return stamp.astimezone().date().isoformat()
 
 
-def messages_since(env: dict, chat: str, since: str | None) -> list[dict]:
-    """The chat's messages from local day `since` on (all of them when None), oldest first."""
+def history(env: dict, chat: str) -> list[dict]:
+    """The chat's messages, oldest first."""
     found: list[dict] = []
     after = None
     while True:
@@ -65,10 +64,7 @@ def messages_since(env: dict, chat: str, since: str | None) -> list[dict]:
             f"{env['PLOW_API_BASE']}/v1/chats/{chat}/messages?{urllib.parse.urlencode(query)}",
             headers={"Authorization": f"Bearer {env['PLOW_AGENT_TOKEN']}",
                      "User-Agent": "owner-raw/1.0", "Accept": "application/json"}))
-        for message in page["data"]:
-            if since and local_day(message) < since:
-                return found[::-1]
-            found.append(message)
+        found += page["data"]
         if not page["has_more"]:
             return found[::-1]
         after = page["data"][-1]["uid"]
@@ -81,6 +77,8 @@ def owner_lines(messages: list[dict]) -> dict[str, list[str]]:
     days: dict[str, list[str]] = {}
     previous = None
     for m in messages:
+        if m["sender"].get("type") == "system":  # Plow's own notices, e.g. a payment approval
+            continue
         if m["direction"] == "outbound":
             previous = m
             continue
@@ -119,8 +117,7 @@ def main() -> None:
               if NAME.match(f.name)}
     written = 0
     for label, chat in chats.items():
-        days = [NAME.match(name)["day"] for name in staged if NAME.match(name)["label"] == label]
-        for day, lines in sorted(owner_lines(messages_since(env, chat, max(days, default=None))).items()):
+        for day, lines in sorted(owner_lines(history(env, chat)).items()):
             text = render(env, chat, label, day, lines)
             name = f"{label}-{day}.md"
             if name in staged and staged[name].read_text() == text:

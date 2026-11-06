@@ -35,6 +35,8 @@ def night(tmp_path):
     wiki = tmp_path / "wiki"
     (wiki / "projects" / "str" / "properties").mkdir(parents=True)
     (wiki / "projects" / "str" / "properties" / "a-house.md").write_text("---\ntitle: A house\n---\n")
+    (wiki / "entities" / "people").mkdir(parents=True)
+    (wiki / "entities" / "people" / "key-people.md").write_text("---\ntitle: Key people\n---\n")
     (wiki / "log.md").write_text("")
     _stub(bin_dir / "plow_relay.py",
           'case "$*" in *"tar -czf"*) [ "${COPY_RC:-0}" = 0 ] && tar -czf - -C "$WIKI_ON_MAC" . | base64;'
@@ -76,7 +78,7 @@ FRONT = [
 ]
 COMMIT = "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki snapshot --author str"
 COPY = ("plow_relay.py run -- /bin/sh -c set -o pipefail; cd ~/Plow/wiki && tar -czf - projects/str/properties"
-        " projects/str/operations log.md | base64")
+        " projects/str/operations entities/people/key-people.md log.md | base64")
 SNAPSHOT = [COMMIT, "plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git --network --"
             " wiki snapshot --push --author str"]
 ROLLBACK = ["plow_relay.py run --write ~/Plow/wiki --write ~/Plow/wiki.git -- wiki restore --writer str",
@@ -202,7 +204,7 @@ def test_the_digest_reads_a_local_copy_of_only_strs_pages_and_writes_nothing(nig
     copy = next(line for line in result.stdout.splitlines() if line.endswith("/projects/str/properties/a-house.md"))
     vault = copy.removesuffix("/projects/str/properties/a-house.md")
     assert vault.startswith(str(tmp)), vault
-    for root in ("/projects/str/properties/", "/projects/str/operations/"):
+    for root in ("/projects/str/properties/", "/projects/str/operations/", "/entities/people/key-people.md"):
         assert f"{vault}{root}" in result.stdout, result.stdout
     assert "~/Plow/wiki" not in result.stdout and "plow_relay" not in result.stdout, result.stdout
     assert "Do not read, list or mention any other page" in result.stdout, result.stdout
