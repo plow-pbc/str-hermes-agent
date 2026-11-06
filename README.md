@@ -112,7 +112,7 @@ container environment. The wiki's recall is optional: setup works without it.
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot-or-restore/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `~/Plow/wiki/index.md`, and a turn reads that over the relay to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (str's own veto line and the conversation id in a message it posted to the owners' chat since, read from Plow), which it then sends unless an owner stopped it; an approval-path draft or a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [ending the owners' group's per-member sessions](#shared-group-session), which a redeploy does not do. |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (str's own veto line and the conversation id in a message it posted to the owners' chat since, read from Plow), which it then sends unless an owner stopped it; an approval-path draft (conversation id and `DRAFT:` lines) wakes it once to nudge the owners, sending the guest nothing; a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [ending the owners' group's per-member sessions](#shared-group-session), which a redeploy does not do. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Drive the operator's Mac — its browser (Mercury, bank and vendor portals), files and messages — with latch | **Shipped in the image** — the latch CLI and its skill; boot logs the agent in with its own Plow credential (§ Plow Latch) |
@@ -729,7 +729,7 @@ a revision the owners had asked for, because it never saw it (#111).
 The script itself sends nothing — it composes no reply and has no messaging
 tool. The turn it hands over is *instructed* not to send before an owner
 approves, which is not the same as being unable to. Its prompt is
-`PROMPT`/`FOLLOWUP` in the script, so a deploy picks up any edit to it.
+`PROMPT`/`FOLLOWUP`/`NUDGE` in the script, so a deploy picks up any edit to it.
 
 - One conversation per tick, so each guest gets a turn to themselves. The rest
   wait for later ticks, oldest first.
@@ -753,7 +753,7 @@ State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id
 it announced a wait on that conversation that it still owes the owners a
 follow-up on — null when it owes none. The veto window is measured from
 `owed`, so a draft announced late off a backlog still gets its full thirty
-minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text. An announced wait comes back when its window closes only if str's own message in the owners' chat since the announcement carries the veto line and that conversation id; anything else is discharged silently. A first run adopts what exists and
+minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text. An announced wait comes back when its window closes only if str's own message in the owners' chat since the announcement carries the veto line and that conversation id, or once as an owner nudge when that message is an approval-path draft; anything else is discharged silently. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
 history all reads as new. **Adopting is silent about anyone waiting** — a
 guest whose message is outstanding when the next tick runs is marked seen and
