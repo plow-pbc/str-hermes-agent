@@ -1000,6 +1000,15 @@ is unobserved, not harmless.
 `wiki index`, provenance, `wiki validate --writer str`, `wiki snapshot --push`, digest — and it
 runs inside the gateway container on Hermes' own scheduler.
 
+**Two sources, one ingest.** The fetch stages the guests' Hostex threads
+(`bin/hostex-raw`, `_raw/hostex/`) and what the owners told str in its direct
+chat and the owners' group (`bin/owner-raw`, `_raw/owner/`, one file per chat
+per day). The ingest prompt ranks them: an owner's policy, fact or correction
+lands as a dated `Owner rule, <date>:` line, rewrites any line it contradicts,
+and is listed in the digest's "Owner rules learned or changed" section. The
+owners' history before 2026-10-02 lives in chats the API no longer serves; it
+was staged once by hand in the same format.
+
 **The wiki is the owner's common plow-wiki on their Mac.** str's pages live in
 `~/Plow/wiki` on mba under two roots it writes, `projects/str/properties` (the
 hubs) and `projects/str/operations`, with the standing cast in the shared
