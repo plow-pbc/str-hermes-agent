@@ -321,34 +321,35 @@ def owners_chat(*messages, status="sent"):
 ANNOUNCED_AT = "2026-07-30T08:00:20Z"
 
 
-@pytest.mark.parametrize("messages, follows_up", [
+@pytest.mark.parametrize("messages, reminder", [
     pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\na\nDRAFT:\nHi!\n\n{poll.VETO}.")),
-                 True, id="str-announced-a-veto-window-draft"),
-    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "Jane · Lake House\nThanks.\nNo reply needed.")),
-                 False, id="no-reply-needed"),
+                 "Still waiting", id="str-announced-a-veto-window-draft"),
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "Jane · Lake House\na\nThanks.\nNo reply needed.")),
+                 None, id="no-reply-needed"),
+    # The early check-in that sat five hours: nothing used to re-raise it.
     pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "d-1\na\nDRAFT:\nHi! Approve?")),
-                 False, id="an-approval-path-draft"),
+                 "Still unanswered", id="an-approval-path-draft"),
     pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\nb\nDRAFT:\nHi!\n\n{poll.VETO}.")),
-                 False, id="a-veto-draft-for-another-conversation"),
+                 None, id="a-veto-draft-for-another-conversation"),
     pytest.param(owners_chat(("outbound", "2026-07-30T07:50:00Z", f"d-0\na\nDRAFT:\nHi!\n\n{poll.VETO}.")),
-                 False, id="a-veto-draft-from-before-this-announcement"),
+                 None, id="a-veto-draft-from-before-this-announcement"),
     pytest.param(owners_chat(("inbound", ANNOUNCED_AT, f"a: {poll.VETO}")),
-                 False, id="an-owner-quoting-the-line"),
+                 None, id="an-owner-quoting-the-line"),
     pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\na\nDRAFT:\nHi!\n\n{poll.VETO}."),
                              status="failed"),
-                 False, id="a-veto-draft-plow-failed-to-deliver"),
+                 None, id="a-veto-draft-plow-failed-to-deliver"),
 ])
-def test_the_window_closing_follows_up_only_a_veto_window_draft(
-        monkeypatch, announced_cursor, messages, follows_up):
-    """Every announcement owes a wait, but only a veto-window draft has a send
-    the silence approves. Anything else used to come back as "Still waiting.
-    You announced a veto-window draft", a full owners'-chat turn told
-    something false and trusted to notice. Either way the debt is discharged."""
+def test_the_window_closing_raises_each_draft_its_own_way(
+        monkeypatch, announced_cursor, messages, reminder):
+    """Every announcement owes a wait. A veto-window draft comes back to be
+    sent; an approval-path one comes back once as a nudge that sends the guest
+    nothing; a turn with no draft does not come back. Either way the debt is
+    discharged."""
     api = FakeApi([conv("a", OVERDUE)], {"a": [msg("guest", OVERDUE)]})
     monkeypatch.setattr(poll, "api_get", api)
     monkeypatch.setattr(poll, "plow_messages", lambda chat: messages if chat == OWNERS else [])
     out = poll.run("tok", announced_cursor, OWNERS, now=FOLLOWUP_NOW)
-    assert ("Still waiting" in out) is follows_up
+    assert (out == poll.SILENT) if reminder is None else out.startswith(reminder)
     assert json.loads(announced_cursor.read_text())["a"]["owed"] is None
 
 
