@@ -1073,8 +1073,13 @@ returning.
 docker compose exec hermes date                      # must print PDT/PST, not UTC
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 docker compose exec hermes hermes cron list          # confirm it is registered
-docker compose exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
+docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+  /command/s6-setuidgid hermes hermes cron run wiki-nightly   # one-shot, to prove it
 ```
+
+The one-shot carries the boot environment the same way the drain below does, and
+for the same reason: a bare `exec` runs the chain without the home chat or the
+model credential, and `nightly.sh` refuses it rather than fail every step.
 
 The `date` line comes first because everything below it is written in wall-clock
 time. `TZ` comes from `compose.yml`, but a timezone only resolves if the image
