@@ -123,6 +123,21 @@ def test_a_spent_budget_stops_between_rounds_not_inside_one(vault, run_ingest):
     assert fed == "", "no round may start once the budget is spent"
 
 
+def test_an_owner_file_is_fed_to_the_same_turn_with_the_rules_that_rank_it(vault, run_ingest):
+    """What the owners told str is a second source in the same ingest, not a
+    second loop: owner-raw stages it beside the Hostex cache, and the turn is
+    told it outranks what a guest thread taught."""
+    owner = vault / "_raw" / "owner"
+    owner.mkdir()
+    (owner / "owners-2026-10-29.md").write_text("---\ncapture_source: owner\n---\n\nNo late checkouts.\n")
+
+    result, fed = run_ingest(vault)
+
+    assert "1 conversation(s) not yet in the manifest" in result.stdout
+    assert "_raw/owner/owners-2026-10-29.md" in fed
+    assert "An owner rule outranks every line on str's pages it contradicts" in fed
+
+
 @pytest.mark.parametrize("extra", [0, 1, 3], ids=["one-remaining", "two", "four"])
 def test_every_remaining_conversation_reaches_the_agent(vault, run_ingest, extra):
     """`read` discards a final line with no newline after it.

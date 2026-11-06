@@ -28,6 +28,7 @@ def night(tmp_path):
     bin_dir.mkdir()
     shutil.copy(REPO / "bin" / "nightly.sh", bin_dir / "nightly.sh")
     _stub(bin_dir / "hostex-raw", 'exit "${FETCH_RC:-0}"')
+    _stub(bin_dir / "owner-raw", 'exit "${OWNER_FETCH_RC:-0}"')
     # A night's ingest rewrites the manifest; rollback must undo exactly that.
     _stub(bin_dir / "ingest-all", 'echo tonight >> "$1/.manifest.json"; exit "${INGEST_RC:-0}"')
     _stub(bin_dir / "wiki-provenance", 'echo "${PROVENANCE_SAYS:-}"; exit "${PROVENANCE_RC:-0}"')
@@ -65,6 +66,7 @@ def night(tmp_path):
 
 FRONT = [
     "hostex-raw --vault {vault}",
+    "owner-raw --vault {vault}",
     "ingest-all {vault} ~/Plow/wiki",
     "plow_relay.py run --write ~/Plow/wiki -- wiki index",
     "wiki-provenance {vault} ~/Plow/wiki",
@@ -147,12 +149,14 @@ def test_a_page_written_into_staging_is_reported(night):
     assert "ingest wrote pages into local staging instead of the wiki" in result.stdout
 
 
-def test_a_failed_fetch_says_so_and_stops(night):
+@pytest.mark.parametrize("rcs, ran", [({"FETCH_RC": 1}, ["hostex-raw"]),
+                                      ({"OWNER_FETCH_RC": 1}, ["hostex-raw", "owner-raw"])])
+def test_a_failed_fetch_says_so_and_stops(night, rcs, ran):
     run, _, _ = night
-    result, calls = run(FETCH_RC=1)
+    result, calls = run(**rcs)
     assert result.returncode == 1
     assert "Wiki nightly FAILED at fetch" in result.stdout
-    assert [c.split()[0] for c in calls] == ["hostex-raw"]
+    assert [c.split()[0] for c in calls] == ran
 
 
 def test_a_rollback_always_lands_on_the_manifest_of_the_last_snapshot(night):
@@ -191,6 +195,7 @@ def test_the_digest_reads_a_local_copy_of_only_strs_pages_and_writes_nothing(nig
     assert "~/Plow/wiki" not in result.stdout and "plow_relay" not in result.stdout, result.stdout
     assert "Do not read, list or mention any other page" in result.stdout, result.stdout
     assert "skip the skill's log.md append" in result.stdout, result.stdout
+    assert "a section headed 'Owner rules learned or changed'" in result.stdout, result.stdout
 
 
 def test_a_copy_that_failed_says_so_instead_of_a_digest(night):
