@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Stage the owners' own messages to str into a vault's _raw/owner/ directory.
+
+Pure fetch, no LLM: hostex-raw's twin for the other thing str learns from. The
+nightly's ingest turns these into owner rules on str's pages. One file per chat
+per local day that holds an owner message, each message beside the str message
+it answers.
+
+A run re-renders each chat's whole history -- a reply's context can sit any
+number of days before it -- and writes a file only when its bytes change, so
+ingest's manifest check re-queues exactly the days that gained a message.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import os
+import re
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hostex_api
+import str_env
+
+PAGE = 100
+CONTEXT = 280
+NAME = re.compile(r"^[a-z]+-\d{4}-\d{2}-\d{2}\.md$")
+
+# Never staged. The wiki must not hold a phone number or an access code, and
+# promote-vault refuses to push anything shaped like a credential -- an owner
+# once pasted a bearer token into the direct chat.
+REDACT = [
+    (re.compile(r"Bearer\s+\S+"), "Bearer [credential]"),
+    (re.compile(r"\b(?:plow|sk|gh[pousr])[_-][A-Za-z0-9_-]{16,}"), "[credential]"),
+    (re.compile(r"\b(?:\d[ -]?){12,18}\d\b"), "[number]"),
+    (re.compile(r"\+?\b1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b"), "[phone]"),
+    (re.compile(r"(?i)\b(password|passcode)(\W{1,3})\S+"), r"\1\2[credential]"),
+    (re.compile(r"(?i)\b(code|card|pin|passcode|password)\b(\D{0,20}?)\d{3,8}\b"), r"\1\2[number]"),
+]
+
+
+def redact(text: str) -> str:
+    for pattern, replacement in REDACT:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def local_day(message: dict) -> str:
+    # The container's TZ (compose.yml) is the owners'; a day is theirs.
+    stamp = datetime.datetime.fromisoformat(message["created_at"].replace("Z", "+00:00"))
+    return stamp.astimezone().date().isoformat()
+
+
+def history(env: dict, chat: str) -> list[dict]:
+    """The chat's messages, oldest first."""
+    found: list[dict] = []
+    after = None
+    while True:
+        query = {"limit": PAGE, **({"starting_after": after} if after else {})}
+        page = hostex_api.open_json(urllib.request.Request(
+            f"{env['PLOW_API_BASE']}/v1/chats/{chat}/messages?{urllib.parse.urlencode(query)}",
+            headers={"Authorization": f"Bearer {env['PLOW_AGENT_TOKEN']}",
+                     "User-Agent": "owner-raw/1.0", "Accept": "application/json"}))
+        found += page["data"]
+        if not page["has_more"]:
+            return found[::-1]
+        after = page["data"][-1]["uid"]
+
+
+def owner_lines(messages: list[dict]) -> dict[str, list[str]]:
+    """{local day: lines}: each owner message after the str message it answers.
+    Paired over the whole chronology first, so a reply after midnight keeps
+    the draft from the evening before."""
+    days: dict[str, list[str]] = {}
+    previous = None
+    for m in messages:
+        if m["sender"].get("type") == "system":  # Plow's own notices, e.g. a payment approval
+            continue
+        if m["direction"] == "outbound":
+            previous = m
+            continue
+        lines = days.setdefault(local_day(m), [])
+        if previous:
+            lines.append(f"**str** (context): {redact(' '.join((previous['body'] or '').split())[:CONTEXT])}")
+        when = datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")).astimezone()
+        lines.append(f"**{m['sender']['relationship'] or 'owner'}** ({when:%H:%M}): {redact(m['body'] or '[no text]')}")
+        previous = None
+    return days
+
+
+def render(env: dict, chat: str, label: str, day: str, lines: list[str]) -> str:
+    return ("---\n"
+            "capture_source: owner\n"
+            f"chat: {label}\n"
+            f"date: {day}\n"
+            f"sources: [{env['PLOW_API_BASE']}/v1/chats/{chat}/messages#{day}]\n"
+            "---\n\n"
+            f"# Owners to str, {label} chat, {day}\n\n" + "\n\n".join(lines) + "\n")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--vault", required=True, type=Path)
+    args = ap.parse_args()
+    env = {**os.environ, **str_env.read_setup_env(os.environ["HERMES_HOME"])}
+    chats = {"direct": env["PLOW_HOME_CHANNEL"]}
+    if str_env.approval_group(env):
+        chats["owners"] = str_env.approval_group(env)
+
+    out = args.vault / "_raw" / "owner"
+    out.mkdir(parents=True, exist_ok=True)
+    # Wherever wiki-ingest archived a file, it still marks its day as staged.
+    staged = {f.name: f for f in sorted((args.vault / "_raw").rglob("*.md"), key=lambda f: f.stat().st_mtime)
+              if NAME.match(f.name)}
+    written = 0
+    for label, chat in chats.items():
+        for day, lines in sorted(owner_lines(history(env, chat)).items()):
+            text = render(env, chat, label, day, lines)
+            name = f"{label}-{day}.md"
+            if name in staged and staged[name].read_text() == text:
+                continue
+            (out / name).write_text(text)
+            written += 1
+    print(f"owner-raw: {len(chats)} chat(s), {written} day file(s) written", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

@@ -126,7 +126,8 @@ roll_back() {
   STATUS="rolled back: ${why}${STATUS:+rollback incomplete: $STATUS}"
 }
 
-if ! "$BIN/hostex-raw" --vault "$VAULT"; then
+# Two sources, one ingest: the guests' threads, and what the owners told str.
+if ! "$BIN/hostex-raw" --vault "$VAULT" || ! "$BIN/owner-raw" --vault "$VAULT"; then
   # Fetch failure leaves staging untouched and consistent — still report,
   # or the silence reads as death.
   notify "Wiki nightly FAILED at fetch. The wiki is unchanged."
@@ -196,7 +197,7 @@ fi
 # tar on the Mac is a failed copy rather than a short one.
 PAGES="$(mktemp -d)"
 trap 'rm -rf "$PAGES"' EXIT
-if ! "$RELAY" run -- /bin/sh -c 'set -o pipefail; cd ~/Plow/wiki && tar -czf - projects/str/properties projects/str/operations log.md | base64' \
+if ! "$RELAY" run -- /bin/sh -c 'set -o pipefail; cd ~/Plow/wiki && tar -czf - projects/str/properties projects/str/operations entities/people/key-people.md log.md | base64' \
     | base64 -d | tar -xzf - -C "$PAGES"; then
   notify "Wiki nightly: could not copy str's pages for the digest"
   exit 1
@@ -211,7 +212,7 @@ fi
 # The copy is the turn's whole vault: the wiki is shared, other writers' roots
 # sit beside str's, and the skill digests whatever vault it is pointed at. The
 # skill also appends a DIGEST line to log.md; this turn writes nothing.
-if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill for the last day on str's pages, copied from the owner's wiki to the vault ${PAGES}: the pages under ${PAGES}/projects/str/properties/ and ${PAGES}/projects/str/operations/, and the entries in ${PAGES}/log.md that name one of them. Read them there with your file tools; do not use latch or reach the owner's Mac. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. Name a page by its path in the wiki, projects/str/..., never by the copy's path. This run only reads: skip the skill's log.md append and its journal page, and write no file. Prefix the digest with this run status, verbatim: '${DEFERRED}ok'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
+if ! timeout 600 hermes chat -Q -q "Use the wiki-digest skill for the last day on str's pages, copied from the owner's wiki to the vault ${PAGES}: the pages under ${PAGES}/projects/str/properties/ and ${PAGES}/projects/str/operations/, ${PAGES}/entities/people/key-people.md, and the entries in ${PAGES}/log.md that name one of them. Read them there with your file tools; do not use latch or reach the owner's Mac. The rest of the wiki belongs to other writers. Do not read, list or mention any other page, including in themes, connections or pages worth revisiting. Name a page by its path in the wiki, projects/str/... or entities/people/key-people.md, never by the copy's path. This run only reads: skip the skill's log.md append and its journal page, and write no file. End the digest with a section headed 'Owner rules learned or changed': each line on those pages written or rewritten in the last day from the owners' own messages (an 'Owner rule, <date>:' line), quoted, with the page it is on; write 'None' under it when there are none. Prefix the digest with this run status, verbatim: '${DEFERRED}ok'. Print the digest as your reply and nothing else — do not try to send it anywhere. Print it even if nothing changed: this reply is delivered as the message that tells me the job is alive, and an empty reply is delivered as nothing at all." >&3; then
   notify "Wiki nightly: the digest did not send within 600s"
   exit 1
 fi
