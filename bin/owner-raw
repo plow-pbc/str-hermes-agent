@@ -36,7 +36,9 @@ NAME = re.compile(r"^(?P<label>[a-z]+)-(?P<day>\d{4}-\d{2}-\d{2})\.md$")
 REDACT = [
     (re.compile(r"Bearer\s+\S+"), "Bearer [credential]"),
     (re.compile(r"\b(?:plow|sk|gh[pousr])[_-][A-Za-z0-9_-]{16,}"), "[credential]"),
+    (re.compile(r"\b(?:\d[ -]?){12,18}\d\b"), "[number]"),
     (re.compile(r"\+?\b1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b"), "[phone]"),
+    (re.compile(r"(?i)\b(password|passcode)(\W{1,3})\S+"), r"\1\2[credential]"),
     (re.compile(r"(?i)\b(code|card|pin|passcode|password)\b(\D{0,20}?)\d{3,8}\b"), r"\1\2[number]"),
 ]
 
@@ -72,20 +74,26 @@ def messages_since(env: dict, chat: str, since: str | None) -> list[dict]:
         after = page["data"][-1]["uid"]
 
 
-def render(env: dict, chat: str, label: str, day: str, messages: list[dict]) -> str | None:
-    """The day's owner messages, each after the str message it answers; None when there are none."""
-    lines, previous = [], None
+def owner_lines(messages: list[dict]) -> dict[str, list[str]]:
+    """{local day: lines}: each owner message after the str message it answers.
+    Paired over the whole chronology first, so a reply after midnight keeps
+    the draft from the evening before."""
+    days: dict[str, list[str]] = {}
+    previous = None
     for m in messages:
         if m["direction"] == "outbound":
             previous = m
             continue
+        lines = days.setdefault(local_day(m), [])
         if previous:
             lines.append(f"**str** (context): {redact(' '.join((previous['body'] or '').split())[:CONTEXT])}")
         when = datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")).astimezone()
         lines.append(f"**{m['sender']['relationship'] or 'owner'}** ({when:%H:%M}): {redact(m['body'] or '[no text]')}")
         previous = None
-    if not lines:
-        return None
+    return days
+
+
+def render(env: dict, chat: str, label: str, day: str, lines: list[str]) -> str:
     return ("---\n"
             "capture_source: owner\n"
             f"chat: {label}\n"
@@ -112,13 +120,10 @@ def main() -> None:
     written = 0
     for label, chat in chats.items():
         days = [NAME.match(name)["day"] for name in staged if NAME.match(name)["label"] == label]
-        by_day: dict[str, list[dict]] = {}
-        for message in messages_since(env, chat, max(days, default=None)):
-            by_day.setdefault(local_day(message), []).append(message)
-        for day, messages in sorted(by_day.items()):
-            text = render(env, chat, label, day, messages)
+        for day, lines in sorted(owner_lines(messages_since(env, chat, max(days, default=None))).items()):
+            text = render(env, chat, label, day, lines)
             name = f"{label}-{day}.md"
-            if text is None or (name in staged and staged[name].read_text() == text):
+            if name in staged and staged[name].read_text() == text:
                 continue
             (out / name).write_text(text)
             written += 1

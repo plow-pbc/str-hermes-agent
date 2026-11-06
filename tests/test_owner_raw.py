@@ -95,13 +95,23 @@ def test_one_file_per_day_holding_an_owner_message_each_beside_what_it_answers(o
             "**abby** (18:06): Agreed.\n") in text
 
 
+def test_a_reply_after_midnight_keeps_the_draft_it_answers(owner_raw):
+    run, chats, _ = owner_raw
+    chats[GROUP] += [msg("d", "2026-11-02T23:50:00Z", "outbound", "DRAFT: late checkout at noon?"),
+                     msg("r", "2026-11-03T00:10:00Z", "inbound", "No, the cleaners come at 11.")]
+    files, _ = run()
+    assert list(files) == ["owners-2026-11-03.md"]
+    assert "**str** (context): DRAFT: late checkout at noon?" in files["owners-2026-11-03.md"]
+
+
 def test_phone_numbers_codes_and_credentials_are_never_staged(owner_raw):
     run, chats, _ = owner_raw
     chats[DIRECT].append(msg("m1", "2026-08-12T18:00:00Z", "inbound",
-                             "Call Eddie at +1 425-555-0142. The garage code is 7717, use card 0878. "
+                             "Call Eddie at +1 425-555-0142. The garage code is 7717, use card 0878 or 4111 1111 1111 1111. "
+                             "password=hunter2. "
                              "Token: Bearer plow_TiqCd2beAv8N9TswfCW1bpSqNkn9 and plow_abcdefghijklmnopqrstu"))
     text = run()[0]["direct-2026-08-12.md"]
-    for value in ("555-0142", "7717", "0878", "plow_Tiq", "plow_abc"):
+    for value in ("555-0142", "7717", "0878", "4111", "hunter2", "plow_Tiq", "plow_abc"):
         assert value not in text
     assert "[phone]" in text and "code is [number]" in text and "card [number]" in text
 
