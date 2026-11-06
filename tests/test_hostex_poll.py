@@ -324,7 +324,7 @@ ANNOUNCED_AT = "2026-07-30T08:00:20Z"
 @pytest.mark.parametrize("messages, reminder", [
     pytest.param(owners_chat(("outbound", ANNOUNCED_AT, f"d-1\na\nDRAFT:\nHi!\n\n{poll.VETO}.")),
                  "Still waiting", id="str-announced-a-veto-window-draft"),
-    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "Jane · Lake House\nThanks.\nNo reply needed.")),
+    pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "Jane · Lake House\na\nThanks.\nNo reply needed.")),
                  None, id="no-reply-needed"),
     # The early check-in that sat five hours: nothing used to re-raise it.
     pytest.param(owners_chat(("outbound", ANNOUNCED_AT, "d-1\na\nDRAFT:\nHi! Approve?")),

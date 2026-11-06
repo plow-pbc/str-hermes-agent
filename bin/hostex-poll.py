@@ -313,13 +313,13 @@ def announced(chat: str, cid: str, since: str) -> str | None:
 
     Plow's history is the record of what the owners were told, and VETO is
     str's own template line, which the turn quotes verbatim; the conversation
-    id sits on a line of its own, the draft's second. Only str's own messages
-    count, so an owner quoting the line is not an announcement, and a send
-    Plow rejected never reached the owners."""
+    id and `DRAFT:` sit on lines of their own, the draft's second and third.
+    Only str's own messages count, so an owner quoting the line is not an
+    announcement, and a send Plow rejected never reached the owners."""
     after = datetime.datetime.fromisoformat(since)
     drafts = [m["body"] for m in plow_messages(chat)
               if m["direction"] == "outbound" and m["status"] != "failed"
-              and cid in (line.strip() for line in m["body"].splitlines())
+              and {cid, "DRAFT:"} <= {line.strip() for line in m["body"].splitlines()}
               and datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")) >= after]
     if any(VETO in body.casefold() for body in drafts):
         return FOLLOWUP
