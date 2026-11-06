@@ -25,6 +25,9 @@ d = os.environ["FAKE_LATCH"]
 with open(os.path.join(d, "calls"), "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\\n")
 answer = json.load(open(os.path.join(d, "answer")))
+if isinstance(answer, list):  # one answer per call, the last repeating
+    json.dump(answer[1:] or answer, open(os.path.join(d, "answer"), "w"))
+    answer = answer[0]
 if sys.argv[1:3] == ["file", "get"] and not answer["code"]:
     shutil.copy(os.path.join(d, "remote"), sys.argv[4])
 if sys.argv[1:3] == ["file", "put"]:
@@ -47,6 +50,8 @@ def latch(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_LATCH", str(tmp_path))
     monkeypatch.setenv("PLOW_WIKI_HOST", "mba")
     monkeypatch.setenv("PLOW_HOME_CHANNEL", "cht_home")
+
+    monkeypatch.setattr(plow_relay, "BACKOFF_S", 0)
 
     def answer(stdout: dict | str = "{}", stderr: str = "", code: int = 0):
         stdout = stdout if isinstance(stdout, str) else json.dumps(stdout)
@@ -121,3 +126,19 @@ def test_a_refusal_exits_4_not_as_a_mac_that_did_not_answer(latch, capsys, argv)
     answer(stderr=REFUSED, code=4)
     assert plow_relay.main(argv) == 4
     assert "gatekeeper_denied" in capsys.readouterr().err
+
+
+UNREACHABLE = {"stderr": '{"error":{"code":"plow_unreachable","message":"could not reach Plow","exit":2}}\n',
+               "code": 2}
+
+
+@pytest.mark.parametrize(("replies", "rc", "sent"), [
+    ([UNREACHABLE, {"stdout": "{}"}], 0, 2),
+    ([UNREACHABLE], 2, 3),
+], ids=["a dropped connection is sent again", "Plow unreachable throughout still exits 2"])
+def test_a_request_that_never_reached_plow_is_retried(latch, capsys, replies, rc, sent):
+    tmp, _, calls = latch
+    (tmp / "remote").write_text("# Wiki Index\n")
+    (tmp / "answer").write_text(json.dumps([{"stdout": "{}", "stderr": "", "code": 0, **r} for r in replies]))
+    assert plow_relay.main(["read", "~/Plow/wiki/index.md"]) == rc
+    assert len(calls()) == sent
