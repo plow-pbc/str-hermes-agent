@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # latch exec's own ceiling, and every call's: a Mac gone quiet mid-call is exit 2,
@@ -36,6 +37,11 @@ from pathlib import Path
 TIMEOUT_S = 600
 # latch's exit for a refusal: the gatekeeper, a confirmation, a calendar conflict.
 REFUSED = 4
+# A request that never got through to Plow is sent again: one dropped connection
+# rolled back a whole night's ingest on 2026-11-06.
+UNREACHABLE = "plow_unreachable"
+ATTEMPTS = 3
+BACKOFF_S = 5
 
 
 class RelayError(RuntimeError):
@@ -51,6 +57,16 @@ class RelayError(RuntimeError):
 
 def latch(*args: str) -> dict:
     """One latch call's JSON, or RelayError carrying latch's own error code."""
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            return _latch_once(*args)
+        except RelayError as e:
+            if e.code != UNREACHABLE or attempt == ATTEMPTS:
+                raise
+            time.sleep(BACKOFF_S * attempt)
+
+
+def _latch_once(*args: str) -> dict:
     try:
         done = subprocess.run(["latch", *args], capture_output=True, text=True, timeout=TIMEOUT_S + 30)
     except subprocess.TimeoutExpired:
