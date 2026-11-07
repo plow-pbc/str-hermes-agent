@@ -187,6 +187,19 @@ def test_note_precedes_wake(tick):
     assert log == [("note", "WOKE cleaner_coming"), ("wake", "cht_cleaners")]
 
 
+def test_a_failed_thread_read_leaves_the_step_to_wake_next_tick(tick, monkeypatch):
+    run, _, log, wakes = tick
+    def down(chat):
+        raise OSError("plow unreachable")
+    monkeypatch.setattr(poll, "newest", down)
+    with pytest.raises(RuntimeError, match="plow unreachable"):
+        run("14:00")
+    assert log == [] and wakes() == []
+    monkeypatch.setattr(poll, "newest", lambda chat: "msg_1")
+    run("14:02")
+    assert log == [("note", "WOKE cleaner_coming"), ("wake", "cht_cleaners")]
+
+
 def test_cancelled_stay_archives_task(tick):
     run, board, _, wakes = tick
     run("10:00")

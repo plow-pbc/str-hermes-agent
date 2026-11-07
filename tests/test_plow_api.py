@@ -32,12 +32,15 @@ def msg(uid, body="", direction="inbound"):
             "created_at": "2026-11-06T22:00:00Z", "status": "received"}
 
 
-def test_sends_when_the_thread_has_not_moved(thread):
+@pytest.mark.parametrize("history, after, body", [
+    ([msg("msg_2"), msg("msg_1")], "msg_2", "Is the cabin wrapped up?"),
+    ([], "", "Hi"),
+], ids=["populated-thread", "empty-thread"])
+def test_sends_when_the_thread_has_not_moved(thread, history, after, body):
     messages, sent = thread
-    messages[:] = [msg("msg_2"), msg("msg_1")]
-    assert plow_api.send_after(ENV, "cht_x", "Is the cabin wrapped up?", "msg_2") == {
-        "sent": True, "message_id": "msg_new"}
-    assert sent == ["Is the cabin wrapped up?"]
+    messages[:] = history
+    assert plow_api.send_after(ENV, "cht_x", body, after) == {"sent": True, "message_id": "msg_new"}
+    assert sent == [body]
 
 
 def test_refuses_and_returns_what_arrived_since(thread):
@@ -49,7 +52,13 @@ def test_refuses_and_returns_what_arrived_since(thread):
     assert [m["body"] for m in result["newer"]] == ["Almost", "All done, locked up"]
 
 
-def test_an_empty_thread_the_job_saw_empty_still_sends(thread):
-    _, sent = thread
-    assert plow_api.send_after(ENV, "cht_x", "Hi", "")["sent"] is True
-    assert sent == ["Hi"]
+def test_a_repeat_hold_is_not_a_send(thread, monkeypatch):
+    """Plow answers a held repeat with 200 and the earlier uid; a SENT on that
+    would record a message nobody received."""
+    messages, _ = thread
+    messages[:] = [msg("msg_2")]
+    held = {"uid": "msg_1", "held": True, "reason": "repeated_agent_message"}
+    monkeypatch.setattr(plow_api.hostex_api.OPENER, "open",
+                        lambda request, timeout: io.BytesIO(json.dumps(held).encode()))
+    assert plow_api.send_after(ENV, "cht_x", "Hi", "msg_2") == {
+        "sent": False, "held": "repeated_agent_message"}

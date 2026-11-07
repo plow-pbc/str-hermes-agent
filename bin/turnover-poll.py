@@ -274,9 +274,11 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         # an owner's own stop, so its closing is no gap.
         closed = turnover.Step("escalate:closed", "owners",
                                "the task was closed before the guest was told the house was ready")
+        # Read before WOKE: a failed read must leave the step to wake next tick.
+        after = newest(chats["owners"])
         board.note(task, f"WOKE {closed.name}")
         wake(home, chats["owners"], "Turnover",
-             wake_text(task, closed, stay, prop, chats["owners"], newest(chats["owners"])))
+             wake_text(task, closed, stay, prop, chats["owners"], after))
     if status in ("done", "archived"):
         return stay.key
     if "ready" in led.done:
@@ -284,11 +286,12 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         return stay.key
     sig = signals(r, prop, stay, prev, hostex_tasks(), seam, now)
     for step in turnover.due_steps(stay, sig, led):
+        after = newest(chats[step.thread])
         board.note(task, f"WOKE {step.name}")
         if step.name == "owners_unconfirmed":
             board.block(task, "cleaner unconfirmed at check-in")
         wake(home, chats[step.thread], "Turnover",
-             wake_text(task, step, stay, prop, chats[step.thread], newest(chats[step.thread])))
+             wake_text(task, step, stay, prop, chats[step.thread], after))
     return stay.key
 
 

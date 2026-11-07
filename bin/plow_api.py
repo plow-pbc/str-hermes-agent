@@ -49,4 +49,8 @@ def send_after(env, chat: str, body: str, after: str) -> dict:
     # A write, so OPENER directly: open_json retries, and a retried send could land twice.
     with hostex_api.OPENER.open(_request(env, f"/v1/chats/{chat}/messages", {"body": body}),
                                 timeout=hostex_api.TIMEOUT_S) as response:
-        return {"sent": True, "message_id": json.loads(response.read().decode())["uid"]}
+        sent = json.loads(response.read().decode())
+    # A repeat hold answers 200 with the earlier message's uid; nothing went out.
+    if sent.get("held"):
+        return {"sent": False, "held": sent["reason"]}
+    return {"sent": True, "message_id": sent["uid"]}
