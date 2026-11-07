@@ -40,11 +40,12 @@ def send_after(env, chat: str, body: str, after: str) -> dict:
     caller reads it and decides again. Not atomic: the API takes no
     precondition, so a message landing between the read and the send still
     races it."""
-    newer = list(itertools.takewhile(lambda m: m["uid"] != after, messages(env, chat, LOOKBACK)))
-    if newer:
+    page = messages(env, chat, LOOKBACK)
+    if (page[0]["uid"] if page else "") != after:
+        newer = itertools.takewhile(lambda m: m["uid"] != after, page)
         return {"sent": False, "newer": [
             {k: m.get(k) for k in ("uid", "direction", "sender", "body", "created_at")}
-            for m in reversed(newer)]}
+            for m in reversed(list(newer))]}
     # A write, so OPENER directly: open_json retries, and a retried send could land twice.
     with hostex_api.OPENER.open(_request(env, f"/v1/chats/{chat}/messages", {"body": body}),
                                 timeout=hostex_api.TIMEOUT_S) as response:
