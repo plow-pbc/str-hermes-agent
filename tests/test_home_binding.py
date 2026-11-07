@@ -64,5 +64,5 @@ def test_unset_does_not_prescribe_sethome(tmp_path):
     replaced -- a remedy that reads as actionable and changes nothing.
     """
     line = verdict(tmp_path, published=False)
-    assert "plow-agents" in line
+    assert "latch agents new" in line
     assert "Not /sethome" in line

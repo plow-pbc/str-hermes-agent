@@ -309,12 +309,13 @@ git clone --bare git@github.com:srosro/sams-str-vault.git ~/hermes-vault.git
 mkdir -p ~/hermes-vault
 git --git-dir="$HOME/hermes-vault.git" --work-tree="$HOME/hermes-vault" checkout -f main
 # The wiki is on the owner's Mac, not here: § Compiling the wiki nightly.
-# The Plow credential. `login` is once per host and texts a code back; `mint`
-# is per agent and writes the KEY=VALUE file compose loads as `env_file`, so
+# The Plow credential, with latch (https://github.com/plow-pbc/latch-cli#install).
+# `login` is once per host and texts a code back; `agents new` is per agent
+# and writes the KEY=VALUE file compose loads as `env_file`, so
 # PLOW_API_BASE and PLOW_AGENT_TOKEN reach the container environment, which is
 # where the base reads them. Nothing else is needed before the first boot.
-plow-agents login
-plow-agents mint <line-uid> --credential-file ~/.plow-credentials-str
+latch login
+latch agents new --own --name str --line <line> --credential-file ~/.plow-credentials-str
 # First boot. compose builds here because `build: .` is declared and the tagged
 # image is absent; `pull_policy: never` forbids a registry copy winning it. The
 # home volume initialises from what the image bakes.
@@ -339,7 +340,7 @@ chat activation.
 Last, the codex OAuth the compression fallback uses. Added INSIDE the running
 container under the host uid, and not through any `sign-in` wrapper that reads
 the provider off the live config: that would add `plow`, the main route, which
-needs no sign-in — it is the credential `mint` wrote. `cont-init` only runs at
+needs no sign-in — it is the credential `latch agents new` wrote. `cont-init` only runs at
 container creation, so this is `restart`, not a reload:
 
 ```sh
@@ -354,7 +355,7 @@ is bound and, when it is not, what to do about it.
 
 `/sethome` is not that remedy. Without `PLOW_HOME_CHANNEL` the plugin does not
 load, so there is nothing running to receive the command — an unbound agent is
-re-minted, not messaged.
+re-created, not messaged.
 
 <a name="applying-a-runtime-edit"></a>
 Applying a `runtime/` edit — `config.yaml` or `persona.md`:
@@ -597,7 +598,7 @@ protects you.** The deleted local script honoured a `HERMES_DOTENV` env var;
 upstream's does not, so exporting it does nothing and the `--data-dir` value is
 what decides which agent gets rewritten. Pointing a second agent's activation at
 a home that is not its own overwrites *this* agent's credentials in place — replacing rather
-than shadowing them — and leaves it off its chat until the credential is re-minted.
+than shadowing them — and leaves it off its chat until the agent is re-created.
 Activating a second number means naming that agent's data directory:
 
 ```sh

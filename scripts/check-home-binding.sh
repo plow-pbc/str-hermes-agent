@@ -27,8 +27,9 @@ BOOT_ENV=/run/s6/container_environment/PLOW_HOME_CHANNEL
 if compose exec -T hermes test -s "$BOOT_ENV" 2>/dev/null; then
   echo "home: bound — the gateway holds a home channel from its credential"
 elif compose exec -T hermes true 2>/dev/null; then
-  echo "home: UNSET — plow-init published no home channel. Re-mint the credential with"
-  echo "      plow-pbc/plow-agents (\`plow-agents mint <line-uid> --credential-file"
+  echo "home: UNSET — plow-init published no home channel. Re-create the agent with"
+  echo "      latch (\`latch agents remove --line <line>\`, move ~/.plow-credentials-str"
+  echo "      aside, \`latch agents new --own --name str --line <line> --credential-file"
   echo "      ~/.plow-credentials-str\`, then \`just restart\`). Not /sethome: without"
   echo "      PLOW_HOME_CHANNEL the plugin does not load, so it cannot receive it."
 else

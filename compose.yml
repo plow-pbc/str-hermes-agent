@@ -24,7 +24,7 @@ services:
     # local tag is absent, which would run a different image under this agent's
     # credentials than the one anyone inspected.
     pull_policy: never
-    # What `plow-agents mint` wrote: where Plow is and this agent's token. The
+    # What `latch agents new` wrote: where Plow is and this agent's token. The
     # base reads both from the environment (plow-hermes-agent#108); nothing
     # copies a file into place any more.
     env_file: ${HOME}/.plow-credentials-str
