@@ -1309,18 +1309,17 @@ Times are property-local on the check-in date (`ops.toml` `timezone`).
 | `send_code` | owners | after `lock_alert`, the guest's code is live on an online lock |
 | `cleaner_coming` | cleaners | 14:00, before check-in, no cleaner entry since the previous checkout, house not clean |
 | `cleaner_quiet_ask` | cleaners | same-day turnover, cleaner has entered, lock quiet for 45 minutes (`QUIET_AFTER`), before check-in, not clean |
-| `cleaner_done_ask` | cleaners | check-in time reached and the house is not confirmed clean |
-| `owners_unconfirmed` | owners | 30 minutes (`UNCONFIRMED_AFTER`) after `cleaner_done_ask` with no confirmation |
+| `cleaner_done_ask` | cleaners | check-in time reached, the house is not confirmed clean, and the cleaner has not locked up with their own code since their last entry |
+| `owners_unconfirmed` | owners | 30 minutes (`UNCONFIRMED_AFTER`) after `cleaner_done_ask` with no confirmation — or at check-in, when the cleaner locked up instead (that never makes the house clean) |
 | `ready` | owners | the house is clean and the guest's code is live on an online lock |
 | `escalate:<step>` | owners | 10 minutes (`ESCALATE_AFTER`) after a wake with nothing recorded |
 
 **Clean** is any of: the Hostex cleaning task is `completed`;
 it is more than 12 hours (`CLEAN_AFTER`) after the cleaner's last unlock since
 the previous checkout (Hostex has no checkout time, so that window opens at
-08:00 on the checkout date); the cleaner locked up from the keypad with their
-own code after their last entry; or a `CLEAN` comment (the cleaner's "done" or an
+08:00 on the checkout date); or a `CLEAN` comment (the cleaner's "done" or an
 owner's "she's done"; the last wins). Hostex task status alone is not enough
-because it is almost never updated, and other lock events are not either: a lock
+because it is almost never updated, and the lock alone is not either: a lock
 event mid-clean is not a departure, and the lock auto-relocks about 30 minutes
 after being left open. The 45-minute quiet window is the "not mid-clean" guard.
 

@@ -53,18 +53,23 @@ class Step:
 
 
 def is_clean(stay: Stay, sig: Signals, led: str_ledger.Ledger) -> str | None:
-    """Which rule made the house clean: hostex, lock+12h, left, reply:<who>; else None."""
+    """Which rule made the house clean: hostex, lock+12h, reply:<who>; else None."""
     if sig.hostex_task_completed:
         return "hostex"
     since = [u for u in sig.cleaner_unlocks if u > stay.prev_checkout_at]
     if since and sig.now - max(since) > CLEAN_AFTER:
         return "lock+12h"
-    # Locking up from the keypad with their own code is the cleaner leaving.
-    if since and any(lock > max(since) for lock in sig.cleaner_locks):
-        return "left"
     if led.clean_by:
         return f"reply:{led.clean_by}"
     return None
+
+
+def cleaner_left(stay: Stay, sig: Signals) -> bool:
+    """The cleaner locked up with their own code after their last entry. Enough
+    to stop asking them, never to tell a guest the house is ready: a cleaner
+    locks up to fetch supplies mid-clean too."""
+    since = [u for u in sig.cleaner_unlocks if u > stay.prev_checkout_at]
+    return bool(since) and any(lock > max(since) for lock in sig.cleaner_locks)
 
 
 def _local(stay: Stay, at: time) -> datetime:
@@ -77,7 +82,9 @@ def due_steps(stay: Stay, sig: Signals, led: str_ledger.Ledger) -> list[Step]:
     clean = is_clean(stay, sig, led) is not None
     lock_down = sig.code == "not_set" or not sig.lock_online
     morning = now >= _local(stay, time(6))
-    done_ask = led.woke.get("cleaner_done_ask")
+    left = cleaner_left(stay, sig)
+    # Nobody asks a cleaner who has left, so the owners' clock starts at check-in.
+    asked = stay.checkin_at - UNCONFIRMED_AFTER if left else led.woke.get("cleaner_done_ask")
     cands: list[tuple[bool, Step]] = [
         (morning and lock_down, Step("lock_alert", "owners",
             "06:00 passed and the door code is not set or the lock is offline")),
@@ -93,11 +100,11 @@ def due_steps(stay: Stay, sig: Signals, led: str_ledger.Ledger) -> list[Step]:
          and now - sig.last_lock_event_at >= QUIET_AFTER and now < stay.checkin_at,
          Step("cleaner_quiet_ask", "cleaners",
               "the lock has been quiet 45 minutes after the cleaner's visit")),
-        (now >= stay.checkin_at and not clean,
+        (now >= stay.checkin_at and not clean and not left,
          Step("cleaner_done_ask", "cleaners", "check-in time and the house is not confirmed clean")),
-        (done_ask is not None and now - done_ask >= UNCONFIRMED_AFTER and not clean,
+        (asked is not None and now - asked >= UNCONFIRMED_AFTER and not clean,
          Step("owners_unconfirmed", "owners",
-              "the cleaner has not confirmed 30 minutes after the check-in-time ask")),
+              "the cleaner has not said the clean is done")),
         (clean and sig.code == "live" and sig.lock_online,
          Step("ready", "owners", "the house is clean and the guest's code is live on an online lock")),
     ]
