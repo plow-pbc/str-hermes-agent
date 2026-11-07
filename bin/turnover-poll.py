@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api  # noqa: E402
+import plow_api  # noqa: E402
 import str_env  # noqa: E402
 import str_ledger  # noqa: E402
 import turnover  # noqa: E402
@@ -57,9 +58,13 @@ INSTRUCTION = "Read the task with kanban_show first. "
 # A thread's message goes through the tool, whose message_id is the proof it
 # landed: prose written beside the ledger write is withheld as working-out in a
 # room with anyone else in it, and the ledger would say SENT for nothing.
-THREAD_SEND = ("Send one short message for this step with plow_send_message to {chat}, then "
-               "comment `SENT {step} <the message_id it returned>` on the task (or "
-               "`SKIPPED {step}: <why>`). A send that returned no message_id did not happen.")
+# send_after, not plow_send_message: the job decided from the thread as it was
+# at `after`, so anything written since is read before a word goes out.
+THREAD_SEND = ("Send one short message for this step with send_after to {chat}, after {after}, "
+               "then comment `SENT {step} <the message_id it returned>` on the task (or "
+               "`SKIPPED {step}: <why>`). A send that returned no message_id did not happen. "
+               "If it is refused, read what it returns first: a reply that answers this step "
+               "is recorded as this wake says and sends nothing.")
 GUEST_SEND = ("Send one short message for this step, then comment `SENT {step}` on the task "
               "(or `SKIPPED {step}: <why>`).")
 TO_GUEST = (" Send it with send_message to the Hostex conversation the task body names, "
@@ -222,14 +227,19 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
                             by_cleaner["lock.locked"])
 
 
-def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, chat: str) -> str:
+def newest(chat: str) -> str:
+    return plow_api.newest_uid(setup_env(), chat)
+
+
+def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, chat: str,
+              after: str) -> str:
     # Vendor threads get the property and the time, never the guest's name.
     who = f"Guest {stay.guest}" if step.thread == "owners" else "The guest"
     text = (f"Turnover task {task_id}, step {step.name}: {step.reason}. "
             f"{who} checks in at {prop['title']} at "
             f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION
             + (GUEST_SEND if step.name in str_ledger.GUEST_SENDS else THREAD_SEND)
-            .format(step=step.name, chat=chat))
+            .format(step=step.name, chat=chat, after=after))
     if step.thread in VENDOR_KEYS:
         name_key, on_reply = VENDOR_KEYS[step.thread]
         text += VENDOR.format(name=prop[name_key]) + on_reply
@@ -264,8 +274,11 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         # an owner's own stop, so its closing is no gap.
         closed = turnover.Step("escalate:closed", "owners",
                                "the task was closed before the guest was told the house was ready")
+        # Read before WOKE: a failed read must leave the step to wake next tick.
+        after = newest(chats["owners"])
         board.note(task, f"WOKE {closed.name}")
-        wake(home, chats["owners"], "Turnover", wake_text(task, closed, stay, prop, chats["owners"]))
+        wake(home, chats["owners"], "Turnover",
+             wake_text(task, closed, stay, prop, chats["owners"], after))
     if status in ("done", "archived"):
         return stay.key
     if "ready" in led.done:
@@ -273,11 +286,12 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         return stay.key
     sig = signals(r, prop, stay, prev, hostex_tasks(), seam, now)
     for step in turnover.due_steps(stay, sig, led):
+        after = newest(chats[step.thread])
         board.note(task, f"WOKE {step.name}")
         if step.name == "owners_unconfirmed":
             board.block(task, "cleaner unconfirmed at check-in")
         wake(home, chats[step.thread], "Turnover",
-             wake_text(task, step, stay, prop, chats[step.thread]))
+             wake_text(task, step, stay, prop, chats[step.thread], after))
     return stay.key
 
 

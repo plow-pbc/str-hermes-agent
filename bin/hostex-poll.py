@@ -27,10 +27,10 @@ import os
 import pathlib
 import sys
 import time
-import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api
+import plow_api
 import str_env
 from str_wake import WAKE_STALE_SECONDS, require_drained, wake
 
@@ -135,11 +135,18 @@ Conversation: {conversation_id}
 
 Send the guest nothing on this turn. If the draft was sent, or an owner
 approved, edited or objected to it, reply with exactly NO_REPLY. Otherwise
-post one line in this chat that begins with exactly "Waiting on you:", then
+send one line to this chat that begins with exactly "Waiting on you:", then
 the guest, what they asked, and the draft id — and, when the request turns on
 today's arrival or departure, the deadline. For example: "Waiting on you: Leah
 asked about early check-in, draft a; she arrives at 16:00." This reminder
 comes once.
+"""
+
+# Appended to NUDGE with the owners' chat as the poller read it: the line goes
+# out through send_after, so an owner who answered meanwhile is read first.
+SEND_AFTER = """
+Send that line with send_after: chat {chat}, after {after}. If it is refused,
+read what it returns and decide again. Then reply with exactly NO_REPLY.
 """
 
 
@@ -300,16 +307,12 @@ def api_get(path: str, token: str, **params: object) -> dict:
 
 def plow_messages(chat: str) -> list[dict]:
     """The newest PAGE messages in a Plow chat, newest first, as the owners see them."""
-    env = {**os.environ, **str_env.read_setup_env(hermes_home())}
-    request = urllib.request.Request(
-        f"{env['PLOW_API_BASE']}/v1/chats/{chat}/messages?limit={PAGE}",
-        headers={"Authorization": f"Bearer {env['PLOW_AGENT_TOKEN']}",
-                 "User-Agent": "hostex-poll/1.0", "Accept": "application/json"})
-    return hostex_api.open_json(request)["data"]
+    return plow_api.messages({**os.environ, **str_env.read_setup_env(hermes_home())}, chat, PAGE)
 
 
-def announced(chat: str, cid: str, since: str) -> str | None:
-    """The reminder str owes for a draft it posted for `cid` in `chat` since
+def announced(history: list[dict], cid: str, since: str) -> str | None:
+    """The reminder str owes for a draft it posted for `cid` in `history`, the
+    owners' chat newest first, since
     `since`: FOLLOWUP for a veto-window draft, NUDGE for an approval-path one,
     None when it posted no draft.
 
@@ -319,7 +322,7 @@ def announced(chat: str, cid: str, since: str) -> str | None:
     Only str's own messages count, so an owner quoting the line is not an
     announcement, and a send Plow rejected never reached the owners."""
     after = datetime.datetime.fromisoformat(since)
-    drafts = [m["body"] for m in plow_messages(chat)
+    drafts = [m["body"] for m in history
               if m["direction"] == "outbound" and m["status"] != "failed"
               and {cid, "DRAFT:"} <= {line.strip() for line in m["body"].splitlines()}
               and datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")) >= after]
@@ -485,9 +488,15 @@ def run(token: str, cursor_file: pathlib.Path, chat: str,
             # Every announcement owes a wait. A veto-window draft comes back to
             # be sent; an approval-path one comes back once to remind the
             # owners, since nothing else re-raises it.
-            if (speaker is not None and speaker["sender_role"] != "host"
-                    and (reminder := announced(chat, cid, owed))):
+            if speaker is None or speaker["sender_role"] == "host":
+                continue
+            # One read: the nudge's `after` is the thread the decision saw.
+            history = plow_messages(chat)
+            if reminder := announced(history, cid, owed):
                 output = render(reminder, conversation, thread)
+                if reminder is NUDGE:
+                    output += SEND_AFTER.format(
+                        chat=chat, after=next((m["uid"] for m in history), ""))
                 break
 
     # Hand over before committing: if the process dies between the two, the
