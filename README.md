@@ -1265,9 +1265,12 @@ agent cron that messaged the cleaners thread from a fresh `cron_*` session);
    `hermes kanban show` or the dashboard.
 3. **The voice: `plow_chat` wakes.** For each due step the driver appends
    `WOKE <step>`, then writes a wake into the target thread's own session
-   carrying the task id, the step and the reason. That session reads the task
-   with `kanban_show`, sends the one short message with `plow_send_message`, and
-   comments `SENT <step> <message_id>`.
+   carrying the task id, the step, the reason and the newest message uid in
+   that thread. That session reads the task with `kanban_show`, sends the one
+   short message with `send_after` (`bin/send-after-mcp.py`), and comments
+   `SENT <step> <message_id>`. `send_after` refuses if anyone wrote after that
+   uid and returns what they wrote, so a reply the job never saw is read before
+   anything goes out. Every scheduled send to a Plow chat goes through it.
    Every message is therefore written from inside the thread it lands in, so
    when the cleaner replies "done" the session answering already holds the
    question and why it was asked. Guest messages go from the owners' session

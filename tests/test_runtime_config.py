@@ -78,10 +78,12 @@ def test_every_env_key_the_tracked_config_substitutes_is_declared():
 
     HERMES_HOME is excluded: it is the image's own env var, always set,
     never operator-supplied, so it has no business in .env.example beside the
-    REQUIRED_ENV secrets that actually need a blank placeholder there.
+    REQUIRED_ENV secrets that actually need a blank placeholder there. So is
+    the Plow credential, which plow-init publishes (.env.example says why).
     """
     config = (ROOT / "runtime/config.yaml").read_text()
-    referenced = set(re.findall(r"\$\{([A-Z0-9_]+)\}", config)) - {"HERMES_HOME"}
+    referenced = set(re.findall(r"\$\{([A-Z0-9_]+)\}", config)) - {
+        "HERMES_HOME", "PLOW_API_BASE", "PLOW_AGENT_TOKEN"}
     undeclared = sorted(referenced - set(env_assignments()))
     assert not undeclared, f".env.example does not declare: {undeclared}"
 

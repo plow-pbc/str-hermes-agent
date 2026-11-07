@@ -138,6 +138,7 @@ def tick(tmp_path, monkeypatch):
         log.append(("wake", chat))
         return real_wake(home, chat, sender, text)
     monkeypatch.setattr(poll, "wake", recording_wake)
+    monkeypatch.setattr(poll, "newest", lambda chat: f"msg_last_{chat}")
 
     def run(at="14:00", hostex=None, seam=None, ops=None):
         board.now = local(at)
@@ -332,13 +333,13 @@ VENDOR_RULES = ["kanban_show", "owners' voice",
     # Two same-day stays share this thread; a "done" on the wrong one sends a
     # false "ready" to a guest.
     ("cleaner_done_ask", "cleaners",
-     ["Address it to Jane", "plow_send_message to cht_vendor",
+     ["Address it to Jane", "send_after to cht_vendor, after msg_9",
       "`SENT cleaner_done_ask <the message_id it returned>`", "`CLEAN <who>`",
       "first ask which property, by its title"]),
     # A "done" here is the breaker, which the driver reads off the lock itself;
     # recorded as CLEAN it would tell the driver the house was cleaned.
     ("breaker_ask", "maintenance",
-     ["Address it to Max", "plow_send_message to cht_vendor",
+     ["Address it to Max", "send_after to cht_vendor, after msg_9",
       "`SENT breaker_ask <the message_id it returned>`", "plain comment", "never `CLEAN`"]),
 ])
 def test_a_vendor_wake_is_its_threads_whole_brief(step, thread, says):
@@ -346,7 +347,7 @@ def test_a_vendor_wake_is_its_threads_whole_brief(step, thread, says):
     carries who to address, the voice, the ledger write, what a later reply
     means, and the bar on reaching a guest. It never carries the guest send."""
     stay = turnover.Stay("turnover:S1", "Pat", local("16:00"), None, False)
-    text = poll.wake_text("t_1", turnover.Step(step, thread, "why"), stay, prop(), "cht_vendor")
+    text = poll.wake_text("t_1", turnover.Step(step, thread, "why"), stay, prop(), "cht_vendor", "msg_9")
     for phrase in VENDOR_RULES + says:
         assert phrase in text, f"{thread} wake lacks {phrase!r}"
     assert poll.TO_GUEST not in text and "Pat" not in text

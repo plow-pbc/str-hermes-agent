@@ -314,8 +314,8 @@ def test_traffic_we_advanced_past_never_comes_due(monkeypatch, cursor_file, thre
 
 
 def owners_chat(*messages, status="sent"):
-    return [{"direction": d, "status": status, "created_at": at, "body": body}
-            for d, at, body in messages]
+    return [{"uid": f"msg_{i}", "direction": d, "status": status, "created_at": at, "body": body}
+            for i, (d, at, body) in enumerate(messages)]
 
 
 ANNOUNCED_AT = "2026-07-30T08:00:20Z"
