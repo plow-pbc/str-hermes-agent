@@ -42,6 +42,7 @@ class Signals:
     last_lock_event_at: datetime | None
     lock_online: bool
     code: Literal["not_set", "set", "live"]
+    cleaner_locks: tuple[datetime, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -52,12 +53,15 @@ class Step:
 
 
 def is_clean(stay: Stay, sig: Signals, led: str_ledger.Ledger) -> str | None:
-    """Which rule made the house clean: hostex, lock+12h, reply:<who>; else None."""
+    """Which rule made the house clean: hostex, lock+12h, left, reply:<who>; else None."""
     if sig.hostex_task_completed:
         return "hostex"
     since = [u for u in sig.cleaner_unlocks if u > stay.prev_checkout_at]
     if since and sig.now - max(since) > CLEAN_AFTER:
         return "lock+12h"
+    # Locking up from the keypad with their own code is the cleaner leaving.
+    if since and any(lock > max(since) for lock in sig.cleaner_locks):
+        return "left"
     if led.clean_by:
         return f"reply:{led.clean_by}"
     return None

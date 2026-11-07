@@ -36,10 +36,12 @@ def stay(prev_checkout="2026-11-03T08:00", checkin="2026-11-03T16:00", same_day=
     return turnover.Stay("k", "Guest", aware(checkin), aware(prev_checkout), same_day)
 
 
-def sig(now="2026-11-03T15:00", unlocks=(), last=None, online=True, code="live", hostex=False):
+def sig(now="2026-11-03T15:00", unlocks=(), last=None, online=True, code="live", hostex=False,
+        locks=()):
     n = now if isinstance(now, datetime) else aware(now)
     return turnover.Signals(n, hostex, tuple(aware(u) for u in unlocks),
-                            aware(last) if last else None, online, code)
+                            aware(last) if last else None, online, code,
+                            tuple(aware(t) for t in locks))
 
 
 def ledger(woke=None, done=(), clean_by=None, hold=False):
@@ -120,6 +122,17 @@ def test_rule_b_ignores_unlocks_before_checkout():
     s = stay(prev_checkout="2026-11-01T08:00")
     assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T07:59"]), EMPTY) is None
     assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T09:30"]), EMPTY) == "lock+12h"
+
+
+def test_the_cleaner_locking_up_with_their_code_is_them_leaving():
+    """The 4 PM ping: she locked up at 15:07 and was still asked at check-in."""
+    entered = ["2026-11-03T12:37"]
+    assert turnover.is_clean(S, sig(unlocks=entered, locks=["2026-11-03T15:07"]), EMPTY) == "left"
+    assert "cleaner_done_ask" not in due(
+        S, sig(at("16:00"), unlocks=entered, locks=["2026-11-03T15:07"]), EMPTY)
+    # Stepping out and back in is not leaving.
+    assert turnover.is_clean(S, sig(unlocks=[*entered, "2026-11-03T13:30"],
+                                    locks=["2026-11-03T13:00"]), EMPTY) is None
 
 
 def test_is_clean_reports_rule():

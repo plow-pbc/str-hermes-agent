@@ -190,7 +190,9 @@ else worth keeping is a plain comment, which the job ignores — and a guest
 arriving, at the door, or talking to the crew is always worth keeping. The
 owners' session reads the open turnover task (`kanban_list`, then
 `kanban_show`) before any guest message about arrival or readiness, and
-before telling an owner what was or was not sent in another thread. `WOKE` is the
+before telling an owner what was or was not sent in another thread; once it
+has told the guest the house is ready, it comments `SENT ready` on that task,
+so the job stops chasing the crew. `WOKE` is the
 job's alone. The task is only a ledger: never create, assign, claim, block or
 complete one, and never write a door code or a guest's details into a comment.
 
