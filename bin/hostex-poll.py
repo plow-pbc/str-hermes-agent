@@ -135,9 +135,11 @@ Conversation: {conversation_id}
 
 Send the guest nothing on this turn. If the draft was sent, or an owner
 approved, edited or objected to it, reply with exactly NO_REPLY. Otherwise
-post one line in this chat: the draft id, the guest, and that it is still
-waiting on an owner — starting with TIME-SENSITIVE when the request turns on
-today's arrival or departure. This reminder comes once.
+post one line in this chat that begins with exactly "Waiting on you:", then
+the guest, what they asked, and the draft id — and, when the request turns on
+today's arrival or departure, the deadline. For example: "Waiting on you: Leah
+asked about early check-in, draft a; she arrives at 16:00." This reminder
+comes once.
 """
 
 
