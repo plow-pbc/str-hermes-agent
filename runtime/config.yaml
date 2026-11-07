@@ -191,3 +191,17 @@ mcp_servers:
                 convert_access_code_to_managed]
       resources: false
       prompts: false
+  # Every message a scheduled job sends to a Plow chat: refused if the thread
+  # moved since the job read it (bin/plow_api.py).
+  send_after:
+    command: uv
+    args: [run, --no-project, --with, fastmcp==3.4.5, python, /opt/plow/str/bin/send-after-mcp.py]
+    env:
+      PLOW_API_BASE: ${PLOW_API_BASE}
+      PLOW_AGENT_TOKEN: ${PLOW_AGENT_TOKEN}
+    enabled: true
+    timeout: 60
+    tools:
+      include: [send_after]
+      resources: false
+      prompts: false
