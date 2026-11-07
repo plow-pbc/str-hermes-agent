@@ -209,14 +209,17 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
     codes = [*seam("/access_codes/list", device)["access_codes"],
              *seam("/access_codes/unmanaged/list", device)["access_codes"]]
     cleaner = set(prop["cleaner_access_code_ids"])
-    unlocks = tuple(_when(e["occurred_at"]) for e in events
-                    if e["event_type"] == "lock.unlocked" and e.get("access_code_id") in cleaner)
+    by_cleaner = {kind: tuple(_when(e["occurred_at"]) for e in events
+                              if e["event_type"] == kind and e.get("access_code_id") in cleaner)
+                  for kind in ("lock.unlocked", "lock.locked")}
     lock_events = [_when(e["occurred_at"]) for e in events if e["event_type"].startswith("lock.")]
     completed = prev is not None and any(
         t["type"] == "cleaning" and t["stay_code"] == prev["stay_code"] and t["status"] == "completed"
         for t in hostex_tasks)
-    return turnover.Signals(now, completed, unlocks, max(lock_events, default=None), online,
-                            code_state((r.get("check_in_details") or {}).get("lock_code"), codes))
+    return turnover.Signals(now, completed, by_cleaner["lock.unlocked"],
+                            max(lock_events, default=None), online,
+                            code_state((r.get("check_in_details") or {}).get("lock_code"), codes),
+                            by_cleaner["lock.locked"])
 
 
 def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, chat: str) -> str:
