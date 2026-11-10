@@ -88,12 +88,6 @@ kanban:
   dispatch_in_gateway: false
   default_assignee: ""
   auto_subscribe_on_create: false
-# The base's skills for the old Latch relay route the owner's Mac through its
-# plow_* tools, which are gone; the latch skill is the route (bin/latch-boot).
-skills:
-  disabled:
-  - owners-mac
-  - google-workspace
 # The base seed sets this, but this file replaces the seed's config.yaml on
 # every boot, so without it Hermes' default "ask" appends a build-a-profile
 # directive to the owner's first message and it wins over str-setup's opener
@@ -195,5 +189,19 @@ mcp_servers:
                 list_access_codes, get_access_code,
                 create_access_code, update_access_code, delete_access_code,
                 convert_access_code_to_managed]
+      resources: false
+      prompts: false
+  # Every message a scheduled job sends to a Plow chat: refused if the thread
+  # moved since the job read it (bin/plow_api.py).
+  send_after:
+    command: uv
+    args: [run, --no-project, --with, fastmcp==3.4.5, python, /opt/plow/str/bin/send-after-mcp.py]
+    env:
+      PLOW_API_BASE: ${PLOW_API_BASE}
+      PLOW_AGENT_TOKEN: ${PLOW_AGENT_TOKEN}
+    enabled: true
+    timeout: 60
+    tools:
+      include: [send_after]
       resources: false
       prompts: false

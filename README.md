@@ -112,7 +112,7 @@ container environment. The wiki's recall is optional: setup works without it.
 | Compile guest history into an operations wiki | **Working, with a caveat** — the fetch/ingest/index/validate/snapshot-or-restore/digest chain runs on Hermes' scheduler (#64). The one-time bootstrap over the whole corpus does not fit the scheduler's fixed 3600s kill, and a run that dies leaves the wiki holding pages the manifest never recorded; #71 |
 | Draft a reply grounded in that wiki | **Working** — `SOUL.md` is the operator persona, injected into every turn (#56); it names `~/Plow/wiki/index.md`, and a turn reads that over the relay to find the page it needs |
 | Notice a new guest message unprompted | **Working** — the `hostex-inbound` cron job runs every two minutes on `wakeup`. See § Inbound guest messages. |
-| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (read from Hermes' run record), which it then sends unless an owner stopped it; an approval-path draft or a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [ending the owners' group's per-member sessions](#shared-group-session), which a redeploy does not do. |
+| Suggest → an owner approves → send | **Prompt-gated; live after a redeploy** — the agent proposes in the owners' group, any member approves in iMessage, the agent sends what they approved. Two tiers (see § Decisions already made): commitment-free, wiki-verbatim drafts are announced with a 30-minute owner veto window; everything else blocks on explicit approval. Every delivery now carries a draft id (#29); `bin/hostex-poll.py` keeps the deadline, and when the window closes wakes the agent only if that announcement was a veto-window draft (str's own veto line and the conversation id in a message it posted to the owners' chat since, read from Plow), which it then sends unless an owner stopped it; an approval-path draft (conversation id and `DRAFT:` lines) wakes it once to nudge the owners, sending the guest nothing; a "No reply needed" wakes nothing. The allowlist is read at gateway start, so it takes § Enabling it steps 1-2 — and, once, [ending the owners' group's per-member sessions](#shared-group-session), which a redeploy does not do. |
 | Cleaner / handyman group threads | **Mechanism works**, no group configured yet, and group context does not reach guest drafting |
 | Lock / unlock doors, and read and program access codes, over Seam | **Working** |
 | Drive the operator's Mac — its browser (Mercury, bank and vendor portals), files and messages — with latch | **Shipped in the image** — the latch CLI and its skill; boot logs the agent in with its own Plow credential (§ Plow Latch) |
@@ -729,7 +729,7 @@ a revision the owners had asked for, because it never saw it (#111).
 The script itself sends nothing — it composes no reply and has no messaging
 tool. The turn it hands over is *instructed* not to send before an owner
 approves, which is not the same as being unable to. Its prompt is
-`PROMPT`/`FOLLOWUP` in the script, so a deploy picks up any edit to it.
+`PROMPT`/`FOLLOWUP`/`NUDGE` in the script, so a deploy picks up any edit to it.
 
 - One conversation per tick, so each guest gets a turn to themselves. The rest
   wait for later ticks, oldest first.
@@ -753,7 +753,7 @@ State is one file, `/var/lib/hermes/hostex-poll-cursor.json` — conversation id
 it announced a wait on that conversation that it still owes the owners a
 follow-up on — null when it owes none. The veto window is measured from
 `owed`, so a draft announced late off a backlog still gets its full thirty
-minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text. Every announced wait comes back when its window closes, and the agent, which can see its own draft, decides whether it was a veto-window send. A first run adopts what exists and
+minutes. Deliberately separate from the nightly pipeline's watermark. The cursor holds no guest text. An announced wait comes back when its window closes only if str's own message in the owners' chat since the announcement carries the veto line and that conversation id, or once as an owner nudge when that message is an approval-path draft; anything else is discharged silently. A first run adopts what exists and
 stays silent; delete the file after connecting a new property, or its imported
 history all reads as new. **Adopting is silent about anyone waiting** — a
 guest whose message is outstanding when the next tick runs is marked seen and
@@ -1000,14 +1000,25 @@ is unobserved, not harmless.
 `wiki index`, provenance, `wiki validate --writer str`, `wiki snapshot --push`, digest — and it
 runs inside the gateway container on Hermes' own scheduler.
 
+**Two sources, one ingest.** The fetch stages the guests' Hostex threads
+(`bin/hostex-raw`, `_raw/hostex/`) and what the owners told str in its direct
+chat and the owners' group (`bin/owner-raw`, `_raw/owner/`, one file per chat
+per day). The ingest prompt ranks them: an owner's policy, fact or correction
+lands as a dated `Owner rule, <date>:` line, rewrites any line it contradicts,
+and is listed in the digest's "Owner rules learned or changed" section. The
+owners' history before 2026-10-02 lives in chats the API no longer serves; it
+was staged once by hand in the same format.
+
 **The wiki is the owner's common plow-wiki on their Mac.** str's pages live in
 `~/Plow/wiki` on mba under two roots it writes, `projects/str/properties` (the
 hubs) and `projects/str/operations`, with the standing cast in the shared
 `entities/people/key-people.md`.
 Other agents share the same wiki. The container reaches it only through latch,
-and always by `bin/plow_relay.py`: the ingest and digest turns read and write
-pages with it, and the `wiki` CLI steps run the CLI on the Mac with it, inside
-latch's sandbox (writes need declared paths; a push declares network).
+and always by `bin/plow_relay.py`: the ingest turn reads and writes pages with
+it, and the `wiki` CLI steps run the CLI on the Mac with it, inside latch's
+sandbox (writes need declared paths; a push declares network). The digest turn
+reads a local copy of str's pages instead, taken in one call: every latch call
+waits about 12s on the Mac's gatekeeper, too slow to read page by page.
 What the Mac needs, once:
 
 - the `wiki` CLI at the commit the Dockerfile pins as `PLOW_WIKI_SHA`:
@@ -1028,7 +1039,7 @@ the next run re-ingests into a page that already holds its facts. `wiki snapshot
 the Mac, refusing anything shaped like an API credential. Door codes, lockbox
 codes and wifi passwords are the corpus and pass; a `ghp_…` or `sk-…` does not,
 because the pages are LLM-authored from raw guest threads. A snapshot with no
-origin refuses loudly, and the refusal is in every digest: a compiled corpus on
+origin refuses loudly, and fails every night until it has one: a compiled corpus on
 one disk is how 22 days of guest knowledge once sat unpushed.
 
 `ingest-all` runs index, provenance and validation after every round and puts
@@ -1037,8 +1048,9 @@ damaged is repaired while its source is still in hand; damage that survives
 the round cap fails ingest. A night is all or nothing: if ingest or any check
 fails, `wiki restore --writer str` puts str's roots back to the last snapshot,
 the manifest goes back to its pre-run bytes (so tonight's conversations are
-re-ingested tomorrow), nothing is snapshotted, and the digest leads with
-`rolled back: …`. A latch that could not reach the Mac is noted apart from a
+re-ingested tomorrow), nothing is snapshotted, and the run exits non-zero:
+the scheduler records it failed and sends its alert, `Wiki nightly FAILED:
+rolled back: …`, instead of a digest. A latch that could not reach the Mac is noted apart from a
 check that failed. So the last snapshot is always a night that passed. To check
 by hand — the CLI is on the Mac, so both go through the container, under the
 environment boot publishes, which only root reads, as the agent whose latch
@@ -1070,8 +1082,13 @@ returning.
 docker compose exec hermes date                      # must print PDT/PST, not UTC
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 docker compose exec hermes hermes cron list          # confirm it is registered
-docker compose exec hermes hermes cron run wiki-nightly   # one-shot, to prove it
+docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
+  /command/s6-setuidgid hermes hermes cron run wiki-nightly   # one-shot, to prove it
 ```
+
+The one-shot carries the boot environment the same way the drain below does, and
+for the same reason: a bare `exec` runs the chain without the home chat or the
+model credential, and `nightly.sh` refuses it rather than fail every step.
 
 The `date` line comes first because everything below it is written in wall-clock
 time. `TZ` comes from `compose.yml`, but a timezone only resolves if the image
@@ -1094,10 +1111,11 @@ The script does not deliver — the scheduler does, from that stdout, which is w
 the job also needs `--deliver` (#49). The target is a bare `plow_chat`, the home
 channel: the owner's direct chat, not the owners' group, because the digest
 covers the whole shared wiki and its check failures are the operator's to fix.
-So only the digest and an abort are printed; every step in between writes to
-`$HERMES_HOME/logs/wiki-nightly.log` instead, which the digest names when a
-check failed. The scheduler keeps a job's stderr only on a non-zero exit, so
-that file is the only record of what a check found. A **direct** manual run
+So only the digest and a failure are printed; every step in between writes to
+`$HERMES_HOME/logs/wiki-nightly.log` instead, which the failure line names.
+Any noted check fails the night: it exits non-zero, and the scheduler delivers a
+one-line alert carrying that line in place of the digest, so that file is the
+only record of what a check found. A **direct** manual run
 prints to your terminal and delivers nowhere, which is the point of running it
 directly, but it means a manual recovery does not tell the owners anything.
 
@@ -1174,19 +1192,18 @@ operator-driven — do not deploy at 03:00. The alternative is a gate inside the
 deploy hook, which cannot ask the container without the hook calling back into
 agent-mgr, and that is the ownership inversion this migration removed.
 
-**Do not run that one on the scheduler.** A whole-corpus pass needs roughly
-three times the 3600s Hermes allows a job, and the kill lands mid-chain, leaving
-the wiki holding pages the manifest never recorded. Nothing blocks the next
-night — the dirty-tree fence that used to is gone, along with the commit step it
-guarded — so the damage is quieter than an abort: re-running feeds those
-conversations again and appends their facts a second time. Run it directly
-instead, where nothing is watching the clock:
+**On the scheduler it drains over several nights.** A whole-corpus pass needs
+roughly three times the 3600s Hermes allows a job, so the nightly gives ingest a
+1500s budget: past it no new round starts, the rounds already finished are
+checked and snapshotted, and the digest says the rest continues tomorrow. To
+drain it in one go, run it directly with the budget lifted, where nothing is
+watching the clock:
 
 ```sh
 docker compose exec -u hermes hermes hermes cron remove wiki-nightly
 AGENT_CONTAINER=hermes ./scripts/no-nightly-running \
   && docker compose exec -T hermes /command/s6-envdir /run/s6/container_environment \
-       /command/s6-setuidgid hermes sh -c 'exec "$HERMES_HOME/scripts/nightly.sh"'
+       /command/s6-setuidgid hermes sh -c 'INGEST_BUDGET= exec "$HERMES_HOME/scripts/nightly.sh"'
 docker compose exec -u hermes hermes /opt/plow/str/bin/register-jobs
 ```
 
@@ -1215,14 +1232,13 @@ command line — without it the check reports a run every time. #71 tracks makin
 this a mechanism rather than three lines an operator has to remember.
 
 The same script the scheduler runs — the 3600s ceiling is a `hermes cron`
-property, not the script's, so running it directly is the identical chain with
-nothing watching the clock. It snapshots and pushes the wiki at its end like
+property, and `INGEST_BUDGET=` lifts the nightly's own, so running it directly
+is the identical chain with nothing watching the clock. It snapshots and pushes the wiki at its end like
 any scheduled night, and the next `scripts/promote-vault` promotes staging.
 
 Its preconditions are not restated here. `nightly.sh` and `ingest-all` both
 abort with a message naming the path and what to do about it, and a
 paragraph re-describing those drifts out of sync the moment either changes.
-#71 tracks making the chain bound itself rather than relying on this note.
 
 ## Turnover readiness
 
@@ -1249,8 +1265,12 @@ agent cron that messaged the cleaners thread from a fresh `cron_*` session);
    `hermes kanban show` or the dashboard.
 3. **The voice: `plow_chat` wakes.** For each due step the driver appends
    `WOKE <step>`, then writes a wake into the target thread's own session
-   carrying the task id, the step and the reason. That session reads the task
-   with `kanban_show`, sends the one short message, and comments `SENT <step>`.
+   carrying the task id, the step, the reason and the newest message uid in
+   that thread. That session reads the task with `kanban_show`, sends the one
+   short message with `send_after` (`bin/send-after-mcp.py`), and comments
+   `SENT <step> <message_id>`. `send_after` refuses if anyone wrote after that
+   uid and returns what they wrote, so a reply the job never saw is read before
+   anything goes out. Every scheduled send to a Plow chat goes through it.
    Every message is therefore written from inside the thread it lands in, so
    when the cleaner replies "done" the session answering already holds the
    question and why it was asked. Guest messages go from the owners' session
@@ -1292,8 +1312,8 @@ Times are property-local on the check-in date (`ops.toml` `timezone`).
 | `send_code` | owners | after `lock_alert`, the guest's code is live on an online lock |
 | `cleaner_coming` | cleaners | 14:00, before check-in, no cleaner entry since the previous checkout, house not clean |
 | `cleaner_quiet_ask` | cleaners | same-day turnover, cleaner has entered, lock quiet for 45 minutes (`QUIET_AFTER`), before check-in, not clean |
-| `cleaner_done_ask` | cleaners | check-in time reached and the house is not confirmed clean |
-| `owners_unconfirmed` | owners | 30 minutes (`UNCONFIRMED_AFTER`) after `cleaner_done_ask` with no confirmation |
+| `cleaner_done_ask` | cleaners | check-in time reached, the house is not confirmed clean, and the cleaner has not locked up with their own code since their last entry |
+| `owners_unconfirmed` | owners | 30 minutes (`UNCONFIRMED_AFTER`) after `cleaner_done_ask` with no confirmation — or at check-in, when the cleaner locked up instead (that never makes the house clean) |
 | `ready` | owners | the house is clean and the guest's code is live on an online lock |
 | `escalate:<step>` | owners | 10 minutes (`ESCALATE_AFTER`) after a wake with nothing recorded |
 
@@ -1314,7 +1334,7 @@ ignored, so a human's remark on the task cannot move the job.
 | Comment | Written by | Meaning |
 |---|---|---|
 | `WOKE <step>` | the driver | it woke a session for the step; the first one wins, since the wake time starts the step's clock |
-| `SENT <step>` | the woken session | the step is done |
+| `SENT <step> <message_id>` | the woken session | the step is done; without the id it is not, except a guest step (`ready`, `send_code`), which goes through Hostex |
 | `SKIPPED <step>: <why>` | the woken session | the step was deliberately not done |
 | `CLEAN <who>` | a thread session | the house is clean, per the cleaner or an owner |
 | `HOLD <who>` | the owners' session | stop every step for this stay except escalations of steps already woken, and never raise `escalate:closed` for it |
@@ -1590,28 +1610,27 @@ itself, the agent reaches with the latch CLI (https://docs.plucas.dev/latch/):
 the Mac runs `latch serve`, and every call is judged against the owner's rules
 there and lands in its audit.
 
-The image ships the client, root-owned at `/usr/local/bin/latch`, and the
-`latch` skill written from that binary by `latch skill`. Its login is the
-agent's own: `bin/latch-boot`, an s6 oneshot after plow-init, runs `latch login`
-with the agent's `PLOW_AGENT_TOKEN` when the state folder
-(`LATCH_STATE_DIR=/var/lib/hermes/latch`, on the home volume) has none, so
-there is no code to text and the login outlives the container. Never copy
+The base image ships the client, root-owned at `/usr/local/bin/latch`, installs
+the newest release at every boot, and writes the `latch` skill from that binary.
+latch logs in on the agent's first command with its own Plow credential, into
+the state folder on the home volume (`LATCH_STATE_DIR=/var/lib/hermes/latch`),
+so there is no code to text and the login outlives the container. Never copy
 another machine's `~/.latch` in: the host would take the agent's calls for the
 owner's.
 
-Two settings name what a call reaches, both latch's own environment:
-`LATCH_HOST` is the Mac (compose's `environment:`, since the account also has
-a `cloud` host), and `LATCH_PLOW_CHAT` is the chat the gatekeeper reads the
-owner's request in — the home chat by default, which latch-boot publishes; the
-model names the chat it is answering with `--plow-chat`.
+The model picks a host per task, as the chat plugin's latch section says:
+Google from any host with `google` on, `cloud` included, so a guest question
+about the calendar still gets an answer with the Mac asleep; the owner's texts
+and contacts only from the Mac. Every call names the chat it answers with
+`--plow-chat`.
 
-The old Latch relay is retired: plow-init still writes its `plow` MCP server
-into `config.yaml` and its `PLOW_MCP_URL` into the dotenv and the container
-environment at every boot from `/me`'s `mcp_url`, and latch-boot removes all
-three before the gateway starts. Without the URL, the chat plugin stops
-injecting its `plow_*` routing and relay recall; `config.yaml` disables the
-base's `owners-mac` and `google-workspace` skills, which route through those
-tools too.
+str's own files are the exception, because they live in one place:
+`PLOW_WIKI_HOST` (compose's `environment:`, `mba` here) is the host holding
+the wiki at `~/Plow/wiki` and the key file `~/Plow/str-keys.env`.
+`bin/plow_relay.py` — the nightly's wiki steps and `str-config` — passes it as
+`--host` on every call and acts for the home chat, and the chat plugin's wiki
+recall reaches the same host. With that host asleep, wiki reads and writes fail
+`host_offline` rather than trying elsewhere.
 
 Verify from wakeup, as the agent:
 

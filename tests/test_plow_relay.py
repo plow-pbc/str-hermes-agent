@@ -25,6 +25,9 @@ d = os.environ["FAKE_LATCH"]
 with open(os.path.join(d, "calls"), "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\\n")
 answer = json.load(open(os.path.join(d, "answer")))
+if isinstance(answer, list):  # one answer per call, the last repeating
+    json.dump(answer[1:] or answer, open(os.path.join(d, "answer"), "w"))
+    answer = answer[0]
 if sys.argv[1:3] == ["file", "get"] and not answer["code"]:
     shutil.copy(os.path.join(d, "remote"), sys.argv[4])
 if sys.argv[1:3] == ["file", "put"]:
@@ -35,12 +38,20 @@ sys.exit(answer.get("code", 0))
 """
 
 
+# Every call reaches the host holding the wiki and the key file, for the home chat.
+WIKI_HOST = ["--host", "mba", "--plow-chat", "cht_home"]
+
+
 @pytest.fixture
 def latch(tmp_path, monkeypatch):
     (tmp_path / "latch").write_text(FAKE)
     (tmp_path / "latch").chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_LATCH", str(tmp_path))
+    monkeypatch.setenv("PLOW_WIKI_HOST", "mba")
+    monkeypatch.setenv("PLOW_HOME_CHANNEL", "cht_home")
+
+    monkeypatch.setattr(plow_relay, "BACKOFF_S", 0)
 
     def answer(stdout: dict | str = "{}", stderr: str = "", code: int = 0):
         stdout = stdout if isinstance(stdout, str) else json.dumps(stdout)
@@ -60,6 +71,7 @@ def test_read_prints_the_file(latch, capsys):
     assert plow_relay.main(["read", "~/Plow/wiki/index.md"]) == 0
     assert capsys.readouterr().out == "# Wiki Index\n"
     assert calls()[0][:3] == ["file", "get", "~/Plow/wiki/index.md"]
+    assert calls()[0][-4:] == WIKI_HOST
 
 
 def test_write_sends_stdin_to_the_path(latch, monkeypatch):
@@ -67,7 +79,7 @@ def test_write_sends_stdin_to_the_path(latch, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("hello\n"))
     assert plow_relay.main(["write", "~/Plow/wiki/x.md"]) == 0
     assert (tmp / "sent").read_text() == "hello\n"
-    assert calls()[0][:2] == ["file", "put"] and calls()[0][-1] == "~/Plow/wiki/x.md"
+    assert calls()[0][:2] == ["file", "put"] and calls()[0][3:] == ["~/Plow/wiki/x.md", *WIKI_HOST]
 
 
 def test_run_grants_what_it_names_and_exits_with_the_commands_code(latch, capsys):
@@ -78,7 +90,7 @@ def test_run_grants_what_it_names_and_exits_with_the_commands_code(latch, capsys
                             "--", "wiki", "snapshot", "--push"]) == 1
     out = capsys.readouterr()
     assert (out.out, out.err) == ("people/x.md: missing required field: tags\n", "1 invalid\n")
-    assert calls() == [["exec", "--write", "~/Plow/wiki", "--write", "~/Plow/wiki.git", "--network",
+    assert calls() == [["exec", *WIKI_HOST, "--write", "~/Plow/wiki", "--write", "~/Plow/wiki.git", "--network",
                         "--timeout", "600", "--", "wiki", "snapshot", "--push"]]
 
 
@@ -95,6 +107,8 @@ FAILURES = [
      {"stdout": json.dumps({"exit_code": None, "signal": 9, "stdout": "", "stderr": ""})},
      ["run", "--", "wiki", "index"], "ended by signal 9"),
 ]
+REFUSED = ('{"error":{"code":"gatekeeper_denied","message":"Neither the owner\'s rules nor their messages'
+           ' allow this.","exit":4}}\n')
 
 
 @pytest.mark.parametrize(("case", "reply", "argv", "message"), FAILURES, ids=[f[0] for f in FAILURES])
@@ -103,3 +117,28 @@ def test_latch_that_cannot_answer_exits_2_and_says_why(latch, capsys, case, repl
     answer(**reply)
     assert plow_relay.main(argv) == 2
     assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["read", "~/Plow/wiki/index.md"], ["run", "--", "wiki", "validate"]])
+def test_a_refusal_exits_4_not_as_a_mac_that_did_not_answer(latch, capsys, argv):
+    """The Mac answered no: the fix is the owner's rules, not waking the Mac."""
+    _, answer, _ = latch
+    answer(stderr=REFUSED, code=4)
+    assert plow_relay.main(argv) == 4
+    assert "gatekeeper_denied" in capsys.readouterr().err
+
+
+UNREACHABLE = {"stderr": '{"error":{"code":"plow_unreachable","message":"could not reach Plow","exit":2}}\n',
+               "code": 2}
+
+
+@pytest.mark.parametrize(("replies", "rc", "sent"), [
+    ([UNREACHABLE, {"stdout": "{}"}], 0, 2),
+    ([UNREACHABLE], 2, 3),
+], ids=["a dropped connection is sent again", "Plow unreachable throughout still exits 2"])
+def test_a_request_that_never_reached_plow_is_retried(latch, capsys, replies, rc, sent):
+    tmp, _, calls = latch
+    (tmp / "remote").write_text("# Wiki Index\n")
+    (tmp / "answer").write_text(json.dumps([{"stdout": "{}", "stderr": "", "code": 0, **r} for r in replies]))
+    assert plow_relay.main(["read", "~/Plow/wiki/index.md"]) == rc
+    assert len(calls()) == sent

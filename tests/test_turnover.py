@@ -36,10 +36,12 @@ def stay(prev_checkout="2026-11-03T08:00", checkin="2026-11-03T16:00", same_day=
     return turnover.Stay("k", "Guest", aware(checkin), aware(prev_checkout), same_day)
 
 
-def sig(now="2026-11-03T15:00", unlocks=(), last=None, online=True, code="live", hostex=False):
+def sig(now="2026-11-03T15:00", unlocks=(), last=None, online=True, code="live", hostex=False,
+        locks=()):
     n = now if isinstance(now, datetime) else aware(now)
     return turnover.Signals(n, hostex, tuple(aware(u) for u in unlocks),
-                            aware(last) if last else None, online, code)
+                            aware(last) if last else None, online, code,
+                            tuple(aware(t) for t in locks))
 
 
 def ledger(woke=None, done=(), clean_by=None, hold=False):
@@ -120,6 +122,20 @@ def test_rule_b_ignores_unlocks_before_checkout():
     s = stay(prev_checkout="2026-11-01T08:00")
     assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T07:59"]), EMPTY) is None
     assert turnover.is_clean(s, sig(now="2026-11-03T12:00", unlocks=["2026-11-01T09:30"]), EMPTY) == "lock+12h"
+
+
+def test_a_cleaner_who_locked_up_is_not_asked_and_the_guest_is_not_told():
+    """The 4 PM ping: she locked up at 15:07 and was still asked at check-in.
+    Leaving stops the ask and tells the owners; it never makes the house
+    ready, since a cleaner locks up to fetch supplies too."""
+    entered = ["2026-11-03T12:37"]
+    steps = due(S, sig(at("16:00"), unlocks=entered, locks=["2026-11-03T15:07"]), EMPTY)
+    assert "owners_unconfirmed" in steps
+    assert "cleaner_done_ask" not in steps and "ready" not in steps
+    # Back in after locking up: she has not left.
+    steps = due(S, sig(at("16:00"), unlocks=[*entered, "2026-11-03T15:20"],
+                       locks=["2026-11-03T15:07"]), EMPTY)
+    assert "cleaner_done_ask" in steps
 
 
 def test_is_clean_reports_rule():

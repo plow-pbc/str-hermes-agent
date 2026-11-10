@@ -63,7 +63,7 @@ def run_ingest(tmp_path):
     stub.mkdir()
     fed = tmp_path / "fed.txt"
 
-    def run(vault_path: Path, turn_exit: int = 0):
+    def run(vault_path: Path, turn_exit: int = 0, env: dict | None = None):
         # docker: the host branch of ingest-all reaches the container through
         # `docker compose run` now, so that is the boundary a stub stands at.
         # The one non-turn call is `compose exec -T hermes`, the wiki's checks
@@ -81,7 +81,7 @@ def run_ingest(tmp_path):
             capture_output=True,
             text=True,
             timeout=60,
-            env={**os.environ, "PATH": f"{stub}:{os.environ['PATH']}"},
+            env={**os.environ, "PATH": f"{stub}:{os.environ['PATH']}", **(env or {})},
         )
         return result, (fed.read_text() if fed.exists() else "")
 
@@ -108,6 +108,34 @@ def test_a_conversation_whose_content_changed_is_queued_again(vault, run_ingest)
     result, fed = run_ingest(vault)
     assert "1 conversation(s) not yet in the manifest" in result.stdout
     assert "_raw/hostex/0-111.md" in fed
+
+
+def test_a_spent_budget_stops_between_rounds_not_inside_one(vault, run_ingest):
+    """The nightly's scheduler kills it at 3600s; a kill mid-round leaves no
+    rollback and no digest. Past INGEST_BUDGET no round starts, and exit 3 tells
+    the caller the stop was sound, not a failure."""
+    raw = vault / "_raw" / "hostex" / "0-111.md"
+    raw.write_text(raw.read_text().replace("sha256:AAA", "sha256:BBB"))
+
+    result, fed = run_ingest(vault, env={"INGEST_BUDGET": "0"})
+    assert result.returncode == 3, result.stderr
+    assert "with 1 remaining; the next run continues" in result.stderr
+    assert fed == "", "no round may start once the budget is spent"
+
+
+def test_an_owner_file_is_fed_to_the_same_turn_with_the_rules_that_rank_it(vault, run_ingest):
+    """What the owners told str is a second source in the same ingest, not a
+    second loop: owner-raw stages it beside the Hostex cache, and the turn is
+    told it outranks what a guest thread taught."""
+    owner = vault / "_raw" / "owner"
+    owner.mkdir()
+    (owner / "owners-2026-10-29.md").write_text("---\ncapture_source: owner\n---\n\nNo late checkouts.\n")
+
+    result, fed = run_ingest(vault)
+
+    assert "1 conversation(s) not yet in the manifest" in result.stdout
+    assert "_raw/owner/owners-2026-10-29.md" in fed
+    assert "An owner rule outranks every line on str's pages it contradicts" in fed
 
 
 @pytest.mark.parametrize("extra", [0, 1, 3], ids=["one-remaining", "two", "four"])

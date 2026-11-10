@@ -7,7 +7,9 @@ assigned (no --assignee), so no dispatcher picks the task up.
 
 Grammar, first token is the verb; anything else is free text and ignored:
   WOKE <step>              driver, when it woke a session for the step
-  SENT <step>              woken session, step done
+  SENT <step> <msg id>     woken session, step done; the id is plow_send_message's
+                           proof the message landed, so a SENT without one is not
+                           done (a guest send, through Hostex, carries none)
   SKIPPED <step>: <why>    woken session, step deliberately not done
   CLEAN <who>              cleaner's "done" or an owner's "she's done" (last wins)
   HOLD <who>               owners ask the driver to stop
@@ -22,6 +24,8 @@ from datetime import datetime, timezone
 from typing import Callable
 
 HERMES = "/opt/hermes/bin/hermes"
+# Steps whose message reaches a guest through Hostex rather than a Plow thread.
+GUEST_SENDS = frozenset({"ready", "send_code"})
 
 
 @dataclass(frozen=True)
@@ -47,7 +51,9 @@ def parse(comments: list[dict]) -> Ledger:
         if verb == "WOKE" and rest:
             woke.setdefault(rest, datetime.fromtimestamp(c["created_at"], timezone.utc))
         elif verb == "SENT" and rest:
-            done.add(rest)
+            step, _, msg_id = rest.partition(" ")
+            if msg_id.strip() or step in GUEST_SENDS:
+                done.add(step)
         elif verb == "SKIPPED" and rest:
             done.add(rest.split(":", 1)[0].strip())
         elif verb == "CLEAN" and rest:

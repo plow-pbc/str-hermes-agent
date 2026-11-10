@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hostex_api  # noqa: E402
+import plow_api  # noqa: E402
 import str_env  # noqa: E402
 import str_ledger  # noqa: E402
 import turnover  # noqa: E402
@@ -53,8 +54,19 @@ REQUIRED = ("hostex_property_id", "title", "timezone", "default_checkin_time",
 # board wakes by a stray kanban_create. runtime/config.yaml pins the same three.
 KANBAN_PINS = {"dispatch_in_gateway": False, "default_assignee": "", "auto_subscribe_on_create": False}
 
-INSTRUCTION = ("Read the task with kanban_show first. Send one short message in this thread "
-               "for this step, then comment `SENT {step}` on the task (or `SKIPPED {step}: <why>`).")
+INSTRUCTION = "Read the task with kanban_show first. "
+# A thread's message goes through the tool, whose message_id is the proof it
+# landed: prose written beside the ledger write is withheld as working-out in a
+# room with anyone else in it, and the ledger would say SENT for nothing.
+# send_after, not plow_send_message: the job decided from the thread as it was
+# at `after`, so anything written since is read before a word goes out.
+THREAD_SEND = ("Send one short message for this step with send_after to {chat}, after {after}, "
+               "then comment `SENT {step} <the message_id it returned>` on the task (or "
+               "`SKIPPED {step}: <why>`). A send that returned no message_id did not happen. "
+               "If it is refused, read what it returns first: a reply that answers this step "
+               "is recorded as this wake says and sends nothing.")
+GUEST_SEND = ("Send one short message for this step, then comment `SENT {step}` on the task "
+              "(or `SKIPPED {step}: <why>`).")
 TO_GUEST = (" Send it with send_message to the Hostex conversation the task body names, "
             "never one named here; read the door code yourself from the reservation at send "
             "time; never write the code in this thread or the task.")
@@ -150,15 +162,14 @@ def hostex_client(token: str):
 
 
 def seam_client(key: str):
-    # hostex_api.OPENER refuses redirects, which this bearer token needs too.
+    # hostex_api's transport refuses redirects, which this bearer token needs
+    # too, and retries a dropped read. Every call here is a read, POST or not.
     # Seam's edge 403s a request without a User-Agent.
     def post(path: str, payload: dict) -> dict:
-        request = urllib.request.Request(
+        return hostex_api.open_json(urllib.request.Request(
             f"{SEAM}{path}", data=json.dumps(payload).encode(),
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                     "User-Agent": USER_AGENT})
-        with hostex_api.OPENER.open(request, timeout=30) as response:
-            return json.loads(response.read().decode())
+                     "User-Agent": USER_AGENT}))
     return post
 
 
@@ -203,26 +214,36 @@ def signals(r: dict, prop: dict, stay: turnover.Stay, prev: dict | None,
     codes = [*seam("/access_codes/list", device)["access_codes"],
              *seam("/access_codes/unmanaged/list", device)["access_codes"]]
     cleaner = set(prop["cleaner_access_code_ids"])
-    unlocks = tuple(_when(e["occurred_at"]) for e in events
-                    if e["event_type"] == "lock.unlocked" and e.get("access_code_id") in cleaner)
+    by_cleaner = {kind: tuple(_when(e["occurred_at"]) for e in events
+                              if e["event_type"] == kind and e.get("access_code_id") in cleaner)
+                  for kind in ("lock.unlocked", "lock.locked")}
     lock_events = [_when(e["occurred_at"]) for e in events if e["event_type"].startswith("lock.")]
     completed = prev is not None and any(
         t["type"] == "cleaning" and t["stay_code"] == prev["stay_code"] and t["status"] == "completed"
         for t in hostex_tasks)
-    return turnover.Signals(now, completed, unlocks, max(lock_events, default=None), online,
-                            code_state((r.get("check_in_details") or {}).get("lock_code"), codes))
+    return turnover.Signals(now, completed, by_cleaner["lock.unlocked"],
+                            max(lock_events, default=None), online,
+                            code_state((r.get("check_in_details") or {}).get("lock_code"), codes),
+                            by_cleaner["lock.locked"])
 
 
-def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict) -> str:
+def newest(chat: str) -> str:
+    return plow_api.newest_uid(setup_env(), chat)
+
+
+def wake_text(task_id: str, step: turnover.Step, stay: turnover.Stay, prop: dict, chat: str,
+              after: str) -> str:
     # Vendor threads get the property and the time, never the guest's name.
     who = f"Guest {stay.guest}" if step.thread == "owners" else "The guest"
     text = (f"Turnover task {task_id}, step {step.name}: {step.reason}. "
             f"{who} checks in at {prop['title']} at "
-            f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION.format(step=step.name))
+            f"{stay.checkin_at:%H:%M} local today. " + INSTRUCTION
+            + (GUEST_SEND if step.name in str_ledger.GUEST_SENDS else THREAD_SEND)
+            .format(step=step.name, chat=chat, after=after))
     if step.thread in VENDOR_KEYS:
         name_key, on_reply = VENDOR_KEYS[step.thread]
         text += VENDOR.format(name=prop[name_key]) + on_reply
-    if step.name in ("ready", "send_code"):
+    if step.name in str_ledger.GUEST_SENDS:
         text += TO_GUEST
     elif step.name.startswith("escalate:") or step.name in ("lock_alert", "owners_unconfirmed"):
         text += OWNERS_ONLY
@@ -253,8 +274,11 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         # an owner's own stop, so its closing is no gap.
         closed = turnover.Step("escalate:closed", "owners",
                                "the task was closed before the guest was told the house was ready")
+        # Read before WOKE: a failed read must leave the step to wake next tick.
+        after = newest(chats["owners"])
         board.note(task, f"WOKE {closed.name}")
-        wake(home, chats["owners"], "Turnover", wake_text(task, closed, stay, prop))
+        wake(home, chats["owners"], "Turnover",
+             wake_text(task, closed, stay, prop, chats["owners"], after))
     if status in ("done", "archived"):
         return stay.key
     if "ready" in led.done:
@@ -262,10 +286,12 @@ def drive(r: dict, prop: dict, history: list[dict], today: str, hostex_tasks, se
         return stay.key
     sig = signals(r, prop, stay, prev, hostex_tasks(), seam, now)
     for step in turnover.due_steps(stay, sig, led):
+        after = newest(chats[step.thread])
         board.note(task, f"WOKE {step.name}")
         if step.name == "owners_unconfirmed":
             board.block(task, "cleaner unconfirmed at check-in")
-        wake(home, chats[step.thread], "Turnover", wake_text(task, step, stay, prop))
+        wake(home, chats[step.thread], "Turnover",
+             wake_text(task, step, stay, prop, chats[step.thread], after))
     return stay.key
 
 
