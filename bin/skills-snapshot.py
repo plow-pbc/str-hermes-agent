@@ -133,8 +133,13 @@ def find_skills(store: pathlib.Path) -> list[pathlib.Path]:
     be the authored one as readily as not, and the run would print a plausible
     count either way — a green run that discards the thing it exists to
     capture.
+
+    Dot-directories are skipped: Hermes's curator moves retired skills into
+    `.archive/` and keeps copies in `.curator_backups/`, and neither is installed.
+    Walked, an archived copy of a bundled skill collides with the live one.
     """
-    return sorted(md.parent.relative_to(store) for md in store.rglob("SKILL.md"))
+    skills = (md.parent.relative_to(store) for md in store.rglob("SKILL.md"))
+    return sorted(path for path in skills if not any(part.startswith(".") for part in path.parts))
 
 
 def authored(installed: list[pathlib.Path], bundled: set[str],

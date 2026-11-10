@@ -41,6 +41,8 @@ def test_only_what_the_image_and_deploy_cannot_account_for_is_hermes_own(tmp_pat
         "productivity/airtable",            # bundled
         "wiki-ingest",                      # bundled: the image installs it
         "productivity/property-guest-messaging",  # written by Hermes
+        ".archive/wiki-ingest",             # retired by the curator: not installed
+        ".curator_backups/2026-10-08T22-44-50Z/productivity/notes",
     ], manifest=("airtable", "wiki-ingest"))
     found = snap.authored(snap.find_skills(store), snap.read_bundled(store), set())
     # The category it was filed under travels with it, so the snapshot mirrors
