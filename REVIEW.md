@@ -1,5 +1,9 @@
 # Review instructions — sams-str-hermes-agent
 
+## Cause-first bug fixes
+
+Fix a bug at its cause so the class can't recur. Never fix it with a layer, guard, link, workaround or hand-edit of data around it. A fix that adds net complexity must state why in the PR. When the bug comes from a duplicated source or identity, remove the duplicate rather than bridging the two.
+
 Reviewer-facing policy for this repo. Read it before any other input: § Product
 context says what this repo is, § Review priority says how to review it, and the
 review-loop rules each reviewer appends bind every finding.
